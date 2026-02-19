@@ -1,0 +1,29 @@
+{
+  "generated_at_utc": "2026-02-19T06:55:30+00:00",
+  "total_cases": 5,
+  "rouge_l": 0.758845,
+  "rouge_l_threshold": 0.4,
+  "gate_pass": true,
+  "cases": [
+    {
+      "id": "gist-001",
+      "rouge_l": 0.823529
+    },
+    {
+      "id": "gist-002",
+      "rouge_l": 0.923077
+    },
+    {
+      "id": "gist-003",
+      "rouge_l": 0.666667
+    },
+    {
+      "id": "gist-004",
+      "rouge_l": 0.666667
+    },
+    {
+      "id": "gist-005",
+      "rouge_l": 0.714286
+    }
+  ]
+}

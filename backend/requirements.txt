@@ -1,0 +1,16 @@
+fastapi>=0.109.0
+uvicorn>=0.27.0
+python-dotenv>=1.0.0
+pydantic>=2.5.3
+pydantic-settings>=2.1.0
+mcp>=0.1.0
+httpx>=0.26.0
+requests>=2.31.0
+diff_match_patch
+# SQLite dependencies
+sqlalchemy>=2.0.0
+aiosqlite>=0.19.0
+greenlet>=3.0.0
+filelock>=3.16.1
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

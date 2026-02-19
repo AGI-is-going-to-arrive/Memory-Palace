@@ -1,0 +1,62 @@
+{
+  "generated_at_utc": "2026-02-19T06:55:30+00:00",
+  "total_cases": 6,
+  "metrics": {
+    "tp": 4,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "precision_threshold": 0.9,
+    "recall_threshold": 0.85
+  },
+  "gates": {
+    "precision_pass": true,
+    "recall_pass": true,
+    "overall_pass": true
+  },
+  "cases": [
+    {
+      "id": "wg-001",
+      "expected_action": "NOOP",
+      "predicted_action": "NOOP",
+      "expected_block": true,
+      "predicted_block": true
+    },
+    {
+      "id": "wg-002",
+      "expected_action": "UPDATE",
+      "predicted_action": "UPDATE",
+      "expected_block": true,
+      "predicted_block": true
+    },
+    {
+      "id": "wg-003",
+      "expected_action": "NOOP",
+      "predicted_action": "NOOP",
+      "expected_block": true,
+      "predicted_block": true
+    },
+    {
+      "id": "wg-004",
+      "expected_action": "UPDATE",
+      "predicted_action": "UPDATE",
+      "expected_block": true,
+      "predicted_block": true
+    },
+    {
+      "id": "wg-005",
+      "expected_action": "ADD",
+      "predicted_action": "ADD",
+      "expected_block": false,
+      "predicted_block": false
+    },
+    {
+      "id": "wg-006",
+      "expected_action": "ADD",
+      "predicted_action": "ADD",
+      "expected_block": false,
+      "predicted_block": false
+    }
+  ]
+}

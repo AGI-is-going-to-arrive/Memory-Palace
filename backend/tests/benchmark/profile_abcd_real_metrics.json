@@ -1,0 +1,347 @@
+{
+  "generated_at_utc": "2026-02-18T21:22:48+00:00",
+  "source": "backend/tests/benchmark/helpers/profile_abcd_real_runner.py",
+  "sample_size_requested": 8,
+  "dataset_scope": [
+    "squad_v2_dev",
+    "beir_nfcorpus"
+  ],
+  "dataset_labels": {
+    "squad_v2_dev": "SQuAD v2 Dev",
+    "beir_nfcorpus": "BEIR NFCorpus"
+  },
+  "real_run_strategy": {
+    "first_relevant_only": true,
+    "extra_distractors": 10,
+    "seed": 20260219
+  },
+  "profiles": {
+    "profile_a": {
+      "profile": "profile_a",
+      "mode": "keyword",
+      "rows": [
+        {
+          "dataset": "squad_v2_dev",
+          "dataset_label": "SQuAD v2 Dev",
+          "mode": "keyword",
+          "sample_size": 8,
+          "query_count": 8,
+          "query_count_raw": 8,
+          "sample_bucket_size": 100,
+          "corpus_doc_count": 18,
+          "quality": {
+            "hr_at_5": 0.0,
+            "hr_at_10": 0.0,
+            "mrr": 0.0,
+            "ndcg_at_10": 0.0,
+            "recall_at_10": 0.0
+          },
+          "latency_ms": {
+            "p50": 1.056062,
+            "p95": 1.782111,
+            "p99": 2.070522
+          },
+          "degradation": {
+            "queries": 8,
+            "degraded": 0,
+            "degrade_rate": 0.0,
+            "degrade_reasons": [],
+            "invalid_reasons": [],
+            "valid": true
+          }
+        },
+        {
+          "dataset": "beir_nfcorpus",
+          "dataset_label": "BEIR NFCorpus",
+          "mode": "keyword",
+          "sample_size": 8,
+          "query_count": 8,
+          "query_count_raw": 8,
+          "sample_bucket_size": 100,
+          "corpus_doc_count": 18,
+          "quality": {
+            "hr_at_5": 0.25,
+            "hr_at_10": 0.25,
+            "mrr": 0.25,
+            "ndcg_at_10": 0.25,
+            "recall_at_10": 0.25
+          },
+          "latency_ms": {
+            "p50": 1.035603,
+            "p95": 1.743252,
+            "p99": 1.915884
+          },
+          "degradation": {
+            "queries": 8,
+            "degraded": 0,
+            "degrade_rate": 0.0,
+            "degrade_reasons": [],
+            "invalid_reasons": [],
+            "valid": true
+          }
+        }
+      ]
+    },
+    "profile_b": {
+      "profile": "profile_b",
+      "mode": "hybrid",
+      "rows": [
+        {
+          "dataset": "squad_v2_dev",
+          "dataset_label": "SQuAD v2 Dev",
+          "mode": "hybrid",
+          "sample_size": 8,
+          "query_count": 8,
+          "query_count_raw": 8,
+          "sample_bucket_size": 100,
+          "corpus_doc_count": 18,
+          "quality": {
+            "hr_at_5": 0.625,
+            "hr_at_10": 0.625,
+            "mrr": 0.302083,
+            "ndcg_at_10": 0.382701,
+            "recall_at_10": 0.625
+          },
+          "latency_ms": {
+            "p50": 3.998812,
+            "p95": 4.915414,
+            "p99": 5.290649
+          },
+          "degradation": {
+            "queries": 8,
+            "degraded": 0,
+            "degrade_rate": 0.0,
+            "degrade_reasons": [],
+            "invalid_reasons": [],
+            "valid": true
+          }
+        },
+        {
+          "dataset": "beir_nfcorpus",
+          "dataset_label": "BEIR NFCorpus",
+          "mode": "hybrid",
+          "sample_size": 8,
+          "query_count": 8,
+          "query_count_raw": 8,
+          "sample_bucket_size": 100,
+          "corpus_doc_count": 18,
+          "quality": {
+            "hr_at_5": 0.625,
+            "hr_at_10": 0.75,
+            "mrr": 0.478125,
+            "ndcg_at_10": 0.541656,
+            "recall_at_10": 0.75
+          },
+          "latency_ms": {
+            "p50": 4.709188,
+            "p95": 5.024681,
+            "p99": 5.042869
+          },
+          "degradation": {
+            "queries": 8,
+            "degraded": 0,
+            "degrade_rate": 0.0,
+            "degrade_reasons": [],
+            "invalid_reasons": [],
+            "valid": true
+          }
+        }
+      ]
+    },
+    "profile_c": {
+      "profile": "profile_c",
+      "mode": "hybrid",
+      "rows": [
+        {
+          "dataset": "squad_v2_dev",
+          "dataset_label": "SQuAD v2 Dev",
+          "mode": "hybrid",
+          "sample_size": 8,
+          "query_count": 8,
+          "query_count_raw": 8,
+          "sample_bucket_size": 100,
+          "corpus_doc_count": 18,
+          "quality": {
+            "hr_at_5": 1.0,
+            "hr_at_10": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_10": 1.0,
+            "recall_at_10": 1.0
+          },
+          "latency_ms": {
+            "p50": 385.840166,
+            "p95": 665.142675,
+            "p99": 759.209935
+          },
+          "degradation": {
+            "queries": 8,
+            "degraded": 0,
+            "degrade_rate": 0.0,
+            "degrade_reasons": [],
+            "invalid_reasons": [],
+            "valid": true
+          }
+        },
+        {
+          "dataset": "beir_nfcorpus",
+          "dataset_label": "BEIR NFCorpus",
+          "mode": "hybrid",
+          "sample_size": 8,
+          "query_count": 8,
+          "query_count_raw": 8,
+          "sample_bucket_size": 100,
+          "corpus_doc_count": 18,
+          "quality": {
+            "hr_at_5": 0.75,
+            "hr_at_10": 0.75,
+            "mrr": 0.566667,
+            "ndcg_at_10": 0.610857,
+            "recall_at_10": 0.75
+          },
+          "latency_ms": {
+            "p50": 381.546688,
+            "p95": 454.422464,
+            "p99": 461.573559
+          },
+          "degradation": {
+            "queries": 8,
+            "degraded": 0,
+            "degrade_rate": 0.0,
+            "degrade_reasons": [],
+            "invalid_reasons": [],
+            "valid": true
+          }
+        }
+      ]
+    },
+    "profile_d": {
+      "profile": "profile_d",
+      "mode": "hybrid",
+      "rows": [
+        {
+          "dataset": "squad_v2_dev",
+          "dataset_label": "SQuAD v2 Dev",
+          "mode": "hybrid",
+          "sample_size": 8,
+          "query_count": 8,
+          "query_count_raw": 8,
+          "sample_bucket_size": 100,
+          "corpus_doc_count": 18,
+          "quality": {
+            "hr_at_5": 1.0,
+            "hr_at_10": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_10": 1.0,
+            "recall_at_10": 1.0
+          },
+          "latency_ms": {
+            "p50": 1599.139209,
+            "p95": 2078.378327,
+            "p99": 2136.669299
+          },
+          "degradation": {
+            "queries": 8,
+            "degraded": 0,
+            "degrade_rate": 0.0,
+            "degrade_reasons": [],
+            "invalid_reasons": [],
+            "valid": true
+          }
+        },
+        {
+          "dataset": "beir_nfcorpus",
+          "dataset_label": "BEIR NFCorpus",
+          "mode": "hybrid",
+          "sample_size": 8,
+          "query_count": 8,
+          "query_count_raw": 8,
+          "sample_bucket_size": 100,
+          "corpus_doc_count": 18,
+          "quality": {
+            "hr_at_5": 0.75,
+            "hr_at_10": 0.75,
+            "mrr": 0.65,
+            "ndcg_at_10": 0.673357,
+            "recall_at_10": 0.75
+          },
+          "latency_ms": {
+            "p50": 1826.661521,
+            "p95": 2364.968683,
+            "p99": 2372.823803
+          },
+          "degradation": {
+            "queries": 8,
+            "degraded": 0,
+            "degrade_rate": 0.0,
+            "degrade_reasons": [],
+            "invalid_reasons": [],
+            "valid": true
+          }
+        }
+      ]
+    }
+  },
+  "phase6": {
+    "gate": {
+      "valid": true,
+      "invalid_reasons": [],
+      "rows": [
+        {
+          "dataset": "squad_v2_dev",
+          "dataset_label": "SQuAD v2 Dev",
+          "valid": true,
+          "invalid_reasons": []
+        },
+        {
+          "dataset": "beir_nfcorpus",
+          "dataset_label": "BEIR NFCorpus",
+          "valid": true,
+          "invalid_reasons": []
+        }
+      ]
+    },
+    "comparison_rows": [
+      {
+        "dataset": "squad_v2_dev",
+        "dataset_label": "SQuAD v2 Dev",
+        "a_hr10": 0.0,
+        "b_hr10": 0.625,
+        "c_hr10": 1.0,
+        "d_hr10": 1.0,
+        "a_ndcg10": 0.0,
+        "b_ndcg10": 0.382701,
+        "c_ndcg10": 1.0,
+        "d_ndcg10": 1.0,
+        "a_p95": 1.782111,
+        "b_p95": 4.915414,
+        "c_p95": 665.142675,
+        "d_p95": 2078.378327,
+        "valid": true,
+        "invalid_reasons": []
+      },
+      {
+        "dataset": "beir_nfcorpus",
+        "dataset_label": "BEIR NFCorpus",
+        "a_hr10": 0.25,
+        "b_hr10": 0.75,
+        "c_hr10": 0.75,
+        "d_hr10": 0.75,
+        "a_ndcg10": 0.25,
+        "b_ndcg10": 0.541656,
+        "c_ndcg10": 0.610857,
+        "d_ndcg10": 0.673357,
+        "a_p95": 1.743252,
+        "b_p95": 5.024681,
+        "c_p95": 454.422464,
+        "d_p95": 2364.968683,
+        "valid": true,
+        "invalid_reasons": []
+      }
+    ],
+    "invalid_gate_reasons": [
+      "embedding_fallback_hash",
+      "embedding_request_failed",
+      "reranker_request_failed"
+    ]
+  }
+}

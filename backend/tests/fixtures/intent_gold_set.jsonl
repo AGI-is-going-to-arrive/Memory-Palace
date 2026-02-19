@@ -1,0 +1,6 @@
+{"id":"intent-001","query":"when did we finish the profile b rollout","expected_intent":"temporal"}
+{"id":"intent-002","query":"why did the index rebuild fail","expected_intent":"causal"}
+{"id":"intent-003","query":"compare options for retrieval reranker tuning","expected_intent":"exploratory"}
+{"id":"intent-004","query":"project alpha risk summary","expected_intent":"factual"}
+{"id":"intent-005","query":"latest release timeline details","expected_intent":"temporal"}
+{"id":"intent-006","query":"root cause for index task failure","expected_intent":"causal"}

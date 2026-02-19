@@ -1,0 +1,44 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Local tooling metadata
+.claude/
+
+# OS artifacts
+.DS_Store
+**/.DS_Store
+
+# Runtime data and logs
+demo.db
+*.db
+*.sqlite
+*.sqlite3
+*.log
+snapshots/
+backups/
+assets/
+
+# Python
+.venv/
+**/.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+backend/.pytest_cache/
+
+# Frontend artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/.venv/
+
+# Known local-only files
+nocturne_memory.db
+migration_log.json
+scripts/backup_memory.ps1
+backend/backend.log
+frontend/frontend.log
+backend/tests/benchmark/.real_profile_cache/

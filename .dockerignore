@@ -1,0 +1,29 @@
+# VCS and local metadata
+.git
+.DS_Store
+**/.DS_Store
+.claude/
+
+# Local env/config secrets
+.env
+.env.*
+
+# Python runtime cache / virtualenv
+.venv
+backend/.venv
+backend/__pycache__/
+backend/.pytest_cache/
+backend/backend.log
+backend/tests/benchmark/.real_profile_cache/
+
+# Test and dev-only assets (not needed in production image)
+backend/tests/
+docs/
+snapshots/
+demo.db
+
+# Frontend local artifacts
+frontend/node_modules/
+frontend/.venv/
+frontend/frontend.log
+frontend/.DS_Store

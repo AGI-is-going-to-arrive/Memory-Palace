@@ -1,0 +1,5 @@
+{"id":"gist-001","reference_gist":"rebuild index retry failed jobs confirm queue drained","candidate_gist":"rebuild index and retry failed jobs until queue drained"}
+{"id":"gist-002","reference_gist":"captured outage timeline assigned incident owner","candidate_gist":"captured outage timeline and assigned incident owner"}
+{"id":"gist-003","reference_gist":"migrated embedding config validated search latency","candidate_gist":"migrated embedding configuration and validated latency"}
+{"id":"gist-004","reference_gist":"recorded rollback trigger and mitigation checklist","candidate_gist":"documented rollback trigger plus mitigation checklist"}
+{"id":"gist-005","reference_gist":"summarized cleanup result and follow-up actions","candidate_gist":"summarized cleanup results with follow up actions"}

@@ -1,0 +1,3 @@
+{"id":"memory-gold-001","query":"what is the project alpha risk summary","expected_memory_uri":"notes://project_alpha/risk_summary","profile_scope":["profile_a","profile_b"]}
+{"id":"memory-gold-002","query":"who approved the infra migration plan","expected_memory_uri":"notes://infra/migration_approvals","profile_scope":["profile_a","profile_b"]}
+{"id":"memory-gold-003","query":"what unresolved blockers are in sprint retro","expected_memory_uri":"notes://sprint_retro/unresolved_blockers","profile_scope":["profile_a","profile_b"]}

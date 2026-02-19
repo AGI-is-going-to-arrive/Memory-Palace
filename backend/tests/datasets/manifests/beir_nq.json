@@ -1,0 +1,33 @@
+{
+  "schema_version": "v1",
+  "dataset": "beir_nq",
+  "source_url": "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/nq.zip",
+  "downloaded_at_utc": "2026-02-18T17:57:16+00:00",
+  "record_count_full": 3452,
+  "sample_counts": {
+    "100": 100,
+    "200": 200,
+    "500": 500
+  },
+  "raw_files": [
+    {
+      "path": "backend/tests/datasets/raw/beir_nq/queries.jsonl",
+      "sha256": "72f08f0cd333a47e393dac61cf1e56d4fb41eabf1d6ad5ca99f40250b0b491c8",
+      "size_bytes": 330995
+    },
+    {
+      "path": "backend/tests/datasets/raw/beir_nq/test.tsv",
+      "sha256": "6df0cd2cbbe88504b64c68f21e946a759b62c4d864225720cec256f0196e2210",
+      "size_bytes": 87138
+    }
+  ],
+  "processed_files": {
+    "full": "backend/tests/datasets/processed/beir_nq.jsonl"
+  },
+  "sample_files": {
+    "100": "backend/tests/datasets/processed/beir_nq_sample_100.jsonl",
+    "200": "backend/tests/datasets/processed/beir_nq_sample_200.jsonl",
+    "500": "backend/tests/datasets/processed/beir_nq_sample_500.jsonl"
+  },
+  "status": "ready"
+}

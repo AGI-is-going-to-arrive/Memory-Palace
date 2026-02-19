@@ -1,0 +1,6 @@
+{"id":"wg-001","content":"incident update: queue overflow persisted after retry","semantic_vector_score":0.95,"keyword_text_score":0.20,"expected_action":"NOOP"}
+{"id":"wg-002","content":"incident update: retry worker recovered after config patch","semantic_vector_score":0.81,"keyword_text_score":0.18,"expected_action":"UPDATE"}
+{"id":"wg-003","content":"release checklist owner handoff and risk summary","semantic_vector_score":0.20,"keyword_text_score":0.86,"expected_action":"NOOP"}
+{"id":"wg-004","content":"postmortem action items and dependency follow-up","semantic_vector_score":0.14,"keyword_text_score":0.60,"expected_action":"UPDATE"}
+{"id":"wg-005","content":"new note about onboarding checklist and timeline","semantic_vector_score":0.24,"keyword_text_score":0.22,"expected_action":"ADD"}
+{"id":"wg-006","content":"fresh memory candidate for unrelated topic","semantic_vector_score":0.00,"keyword_text_score":0.00,"expected_action":"ADD"}

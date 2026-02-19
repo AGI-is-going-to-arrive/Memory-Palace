@@ -1,0 +1,33 @@
+{
+  "schema_version": "v1",
+  "dataset": "msmarco_passages",
+  "source_url": "https://msmarco.z22.web.core.windows.net/msmarcoranking/collectionandqueries.tar.gz",
+  "downloaded_at_utc": "2026-02-18T18:02:45+00:00",
+  "record_count_full": 6000,
+  "sample_counts": {
+    "100": 100,
+    "200": 200,
+    "500": 500
+  },
+  "raw_files": [
+    {
+      "path": "backend/tests/datasets/raw/msmarco_passages/msmarco_queries.tar.gz",
+      "sha256": "05e4c62c9c8520cd695725340d4c990627fd1a92eb8a71b88e3c746031ba6de8",
+      "size_bytes": 18882551
+    },
+    {
+      "path": "backend/tests/datasets/raw/msmarco_passages/msmarco_qrels_dev.tsv",
+      "sha256": "a1befe0a99974b166b9e09408ccccae471fda5df4953fd6dd86ce4caac691752",
+      "size_bytes": 1201626
+    }
+  ],
+  "processed_files": {
+    "full": "backend/tests/datasets/processed/msmarco_passages.jsonl"
+  },
+  "sample_files": {
+    "100": "backend/tests/datasets/processed/msmarco_passages_sample_100.jsonl",
+    "200": "backend/tests/datasets/processed/msmarco_passages_sample_200.jsonl",
+    "500": "backend/tests/datasets/processed/msmarco_passages_sample_500.jsonl"
+  },
+  "status": "ready"
+}

@@ -1,0 +1,28 @@
+{
+  "schema_version": "v1",
+  "dataset": "squad_v2_dev",
+  "source_url": "https://rajpurkar.github.io/SQuAD-explorer/dataset/dev-v2.0.json",
+  "downloaded_at_utc": "2026-02-18T17:57:01+00:00",
+  "record_count_full": 6000,
+  "sample_counts": {
+    "100": 100,
+    "200": 200,
+    "500": 500
+  },
+  "raw_files": [
+    {
+      "path": "backend/tests/datasets/raw/squad_v2_dev/squad_dev_v2.json",
+      "sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+      "size_bytes": 4370528
+    }
+  ],
+  "processed_files": {
+    "full": "backend/tests/datasets/processed/squad_v2_dev.jsonl"
+  },
+  "sample_files": {
+    "100": "backend/tests/datasets/processed/squad_v2_dev_sample_100.jsonl",
+    "200": "backend/tests/datasets/processed/squad_v2_dev_sample_200.jsonl",
+    "500": "backend/tests/datasets/processed/squad_v2_dev_sample_500.jsonl"
+  },
+  "status": "ready"
+}

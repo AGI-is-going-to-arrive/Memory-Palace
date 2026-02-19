@@ -1,0 +1,186 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+    /* Ethereal Palace Theme Variables */
+    --palace-bg: #fdfbf7; /* Warm white base */
+    --palace-soft: #fffdf9;
+    --palace-sand: #e6dccf;
+    --palace-sand-2: #dcd0bf;
+    --palace-sand-3: #d1c4b1;
+    --palace-ink: #2f2a24; /* Deep brown/ink */
+    --palace-muted: #7f6f5d;
+    --palace-line: rgba(213, 196, 161, 0.3); /* Softer line */
+    --palace-accent: #d4af37; /* Metallic Gold */
+    --palace-accent-2: #b8962e; /* Darker Gold */
+    --palace-accent-soft: rgba(212, 175, 55, 0.1);
+
+    /* Glassmorphism Variables */
+    --palace-glass-bg: rgba(255, 255, 255, 0.65);
+    --palace-glass-border: rgba(255, 255, 255, 0.4);
+    --palace-glass-shadow: 0 8px 32px 0 rgba(179, 133, 79, 0.1);
+    --palace-glass-blur: 16px;
+
+    --palace-glow: rgba(212, 175, 55, 0.25);
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background-color: var(--palace-bg);
+    /* Remove static gradients, will use FluidBackground */
+    color: var(--palace-ink);
+    font-family: Inter, 'Segoe UI', system-ui, sans-serif;
+    letter-spacing: 0.005em;
+    overflow-x: hidden; /* Prevent scroll from background blobs if any */
+  }
+
+  /* Soft noise overlay */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.4; /* Slightly increased for texture */
+    z-index: 9999; /* Ensure noise is on top but pointer-events none */
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
+    mix-blend-mode: overlay;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  .font-display {
+    font-family: 'Playfair Display', Georgia, serif;
+  }
+}
+
+@layer components {
+  /* Glass Card Component Class */
+  .glass-card {
+    @apply rounded-2xl border transition-all duration-300;
+    background: var(--palace-glass-bg);
+    backdrop-filter: blur(var(--palace-glass-blur));
+    -webkit-backdrop-filter: blur(var(--palace-glass-blur));
+    border-color: var(--palace-glass-border);
+    box-shadow: var(--palace-glass-shadow);
+  }
+
+  .glass-card:hover {
+    background: rgba(255, 255, 255, 0.75);
+    border-color: rgba(255, 255, 255, 0.6);
+    box-shadow: 0 12px 40px rgba(179, 133, 79, 0.15);
+    transform: translateY(-2px);
+  }
+
+  /* Legacy Panel (Backwards Compatibility) */
+  .palace-panel {
+    @apply glass-card;
+  }
+
+  .palace-card {
+    @apply glass-card;
+  }
+
+  .palace-kicker {
+    @apply text-[11px] uppercase tracking-[0.16em];
+    color: var(--palace-muted);
+  }
+
+  .palace-title {
+    color: var(--palace-ink);
+  }
+
+  .palace-input {
+    @apply w-full rounded-xl border bg-white/50 px-3 py-2 text-sm outline-none transition backdrop-blur-sm;
+    border-color: var(--palace-line);
+  }
+
+  .palace-input:focus {
+    border-color: var(--palace-accent);
+    background: rgba(255, 255, 255, 0.8);
+    box-shadow: 0 0 0 3px var(--palace-glow);
+  }
+
+  .palace-btn-primary {
+    @apply inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold text-white transition;
+    border-color: rgba(255, 255, 255, 0.2);
+    background: linear-gradient(135deg, var(--palace-accent) 0%, var(--palace-accent-2) 100%);
+    box-shadow: 0 4px 12px rgba(212, 175, 55, 0.3);
+  }
+
+  .palace-btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(212, 175, 55, 0.4);
+    filter: brightness(1.05);
+  }
+
+  .palace-btn-ghost {
+    @apply inline-flex items-center gap-2 rounded-xl border bg-transparent px-3 py-2 text-sm font-medium transition;
+    border-color: transparent;
+    color: var(--palace-muted);
+  }
+
+  .palace-btn-ghost:hover {
+    background: rgba(255, 255, 255, 0.4);
+    border-color: var(--palace-line);
+    color: var(--palace-ink);
+  }
+
+  /* Harmonize legacy dark pages (Review / Maintenance / Observability) */
+  /* This ensures the existing pages look consistent with the new theme */
+  .palace-harmonized {
+    background: transparent !important; /* Let fluid background show through */
+    color: var(--palace-ink);
+  }
+
+  .palace-harmonized [class*="bg-stone-950"],
+  .palace-harmonized [class*="bg-stone-900"],
+  .palace-harmonized [class*="bg-stone-800"] {
+     /* Replace dark stone backgrounds with glass */
+     @apply glass-card;
+     background: rgba(255, 255, 255, 0.6) !important;
+  }
+
+  .palace-harmonized [class*="text-stone-100"],
+  .palace-harmonized [class*="text-stone-200"],
+  .palace-harmonized [class*="text-stone-300"] {
+    color: var(--palace-ink) !important;
+  }
+
+  /* Fix for Amber text contrast */
+  .palace-harmonized [class*="text-amber-50"],
+  .palace-harmonized [class*="text-amber-100"],
+  .palace-harmonized [class*="text-amber-200"] {
+    color: var(--palace-ink) !important;
+  }
+
+  .palace-harmonized [class*="text-amber-300"],
+  .palace-harmonized [class*="text-amber-400"] {
+     color: var(--palace-accent-2) !important; /* Darker gold/bronze */
+  }
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(212, 175, 55, 0.3);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 175, 55, 0.6);
+}

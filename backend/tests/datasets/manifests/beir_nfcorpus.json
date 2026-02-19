@@ -1,0 +1,43 @@
+{
+  "schema_version": "v1",
+  "dataset": "beir_nfcorpus",
+  "source_url": "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/nfcorpus.zip",
+  "downloaded_at_utc": "2026-02-18T17:56:52+00:00",
+  "record_count_full": 3237,
+  "sample_counts": {
+    "100": 100,
+    "200": 200,
+    "500": 500
+  },
+  "raw_files": [
+    {
+      "path": "backend/tests/datasets/raw/beir_nfcorpus/train.tsv",
+      "sha256": "6336b80f9bffc4f063f3aa450047ad35c0b7c534efe4a6ba35e16dbace047f6a",
+      "size_bytes": 2504643
+    },
+    {
+      "path": "backend/tests/datasets/raw/beir_nfcorpus/test.tsv",
+      "sha256": "f8fba6ef3d4dd9c3a242a8ba4ae38276fc3622fce7dcbae764766d564542fd2a",
+      "size_bytes": 279572
+    },
+    {
+      "path": "backend/tests/datasets/raw/beir_nfcorpus/dev.tsv",
+      "sha256": "b1d38b5e8f78c4a5820bce2b7ec2db54911d7690dc601e76811846b211180bd8",
+      "size_bytes": 258218
+    },
+    {
+      "path": "backend/tests/datasets/raw/beir_nfcorpus/queries.jsonl",
+      "sha256": "d024e6621b84925d485ae473d316a0c3af31c62c8068a59fb29d22f7613aef2a",
+      "size_bytes": 441466
+    }
+  ],
+  "processed_files": {
+    "full": "backend/tests/datasets/processed/beir_nfcorpus.jsonl"
+  },
+  "sample_files": {
+    "100": "backend/tests/datasets/processed/beir_nfcorpus_sample_100.jsonl",
+    "200": "backend/tests/datasets/processed/beir_nfcorpus_sample_200.jsonl",
+    "500": "backend/tests/datasets/processed/beir_nfcorpus_sample_500.jsonl"
+  },
+  "status": "ready"
+}

@@ -1,0 +1,58 @@
+{
+  "generated_at_utc": "2026-02-19T06:55:30+00:00",
+  "total_cases": 6,
+  "correct_cases": 6,
+  "accuracy": 1.0,
+  "accuracy_threshold": 0.8,
+  "gate_pass": true,
+  "cases": [
+    {
+      "id": "intent-001",
+      "expected_intent": "temporal",
+      "predicted_intent": "temporal",
+      "method": "keyword_scoring_v2",
+      "strategy_template": "temporal_time_filtered",
+      "correct": true
+    },
+    {
+      "id": "intent-002",
+      "expected_intent": "causal",
+      "predicted_intent": "causal",
+      "method": "keyword_scoring_v2",
+      "strategy_template": "causal_wide_pool",
+      "correct": true
+    },
+    {
+      "id": "intent-003",
+      "expected_intent": "exploratory",
+      "predicted_intent": "exploratory",
+      "method": "keyword_scoring_v2",
+      "strategy_template": "exploratory_high_recall",
+      "correct": true
+    },
+    {
+      "id": "intent-004",
+      "expected_intent": "factual",
+      "predicted_intent": "factual",
+      "method": "keyword_scoring_v2",
+      "strategy_template": "factual_high_precision",
+      "correct": true
+    },
+    {
+      "id": "intent-005",
+      "expected_intent": "temporal",
+      "predicted_intent": "temporal",
+      "method": "keyword_scoring_v2",
+      "strategy_template": "temporal_time_filtered",
+      "correct": true
+    },
+    {
+      "id": "intent-006",
+      "expected_intent": "causal",
+      "predicted_intent": "causal",
+      "method": "keyword_scoring_v2",
+      "strategy_template": "causal_wide_pool",
+      "correct": true
+    }
+  ]
+}

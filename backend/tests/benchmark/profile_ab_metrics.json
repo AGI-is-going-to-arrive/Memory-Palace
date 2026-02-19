@@ -1,0 +1,342 @@
+{
+  "generated_at_utc": "2026-02-19T06:55:30+00:00",
+  "source": "backend/tests/benchmark_results.md",
+  "memory_gold_set": "backend/tests/fixtures/memory_gold_set.jsonl",
+  "sample_size": 100,
+  "profiles": {
+    "profile_a": {
+      "profile": "profile_a",
+      "mode": "keyword",
+      "rows": [
+        {
+          "dataset": "msmarco_passages",
+          "dataset_label": "MS MARCO",
+          "mode": "keyword",
+          "sample_size": 100,
+          "query_count": 100,
+          "quality": {
+            "hr_at_5": 0.333,
+            "hr_at_10": 0.333,
+            "mrr": 0.333,
+            "ndcg_at_10": 0.333,
+            "recall_at_10": 0.333
+          },
+          "latency_ms": {
+            "p50": 1.2,
+            "p95": 2.1,
+            "p99": 2.8
+          },
+          "degradation": {
+            "queries": 100,
+            "degraded": 0,
+            "degrade_rate": 0.0,
+            "degrade_reasons": [],
+            "invalid_reasons": [],
+            "valid": true
+          }
+        },
+        {
+          "dataset": "beir_nfcorpus",
+          "dataset_label": "BEIR NFCorpus",
+          "mode": "keyword",
+          "sample_size": 100,
+          "query_count": 100,
+          "quality": {
+            "hr_at_5": 0.3,
+            "hr_at_10": 0.3,
+            "mrr": 0.3,
+            "ndcg_at_10": 0.3,
+            "recall_at_10": 0.3
+          },
+          "latency_ms": {
+            "p50": 1.6,
+            "p95": 2.6,
+            "p99": 2.6
+          },
+          "degradation": {
+            "queries": 100,
+            "degraded": 0,
+            "degrade_rate": 0.0,
+            "degrade_reasons": [],
+            "invalid_reasons": [],
+            "valid": true
+          }
+        },
+        {
+          "dataset": "squad_v2_dev",
+          "dataset_label": "SQuAD v2 Dev",
+          "mode": "keyword",
+          "sample_size": 100,
+          "query_count": 100,
+          "quality": {
+            "hr_at_5": 0.15,
+            "hr_at_10": 0.15,
+            "mrr": 0.15,
+            "ndcg_at_10": 0.15,
+            "recall_at_10": 0.15
+          },
+          "latency_ms": {
+            "p50": 1.2,
+            "p95": 3.0,
+            "p99": 3.0
+          },
+          "degradation": {
+            "queries": 100,
+            "degraded": 0,
+            "degrade_rate": 0.0,
+            "degrade_reasons": [],
+            "invalid_reasons": [],
+            "valid": true
+          }
+        }
+      ]
+    },
+    "profile_b": {
+      "profile": "profile_b",
+      "mode": "hybrid",
+      "rows": [
+        {
+          "dataset": "msmarco_passages",
+          "dataset_label": "MS MARCO",
+          "mode": "hybrid",
+          "sample_size": 100,
+          "query_count": 100,
+          "quality": {
+            "hr_at_5": 0.833,
+            "hr_at_10": 0.867,
+            "mrr": 0.658,
+            "ndcg_at_10": 0.696,
+            "recall_at_10": 0.85
+          },
+          "latency_ms": {
+            "p50": 3.4,
+            "p95": 3.7,
+            "p99": 3.7
+          },
+          "degradation": {
+            "queries": 100,
+            "degraded": 0,
+            "degrade_rate": 0.0,
+            "degrade_reasons": [],
+            "invalid_reasons": [],
+            "valid": true
+          }
+        },
+        {
+          "dataset": "beir_nfcorpus",
+          "dataset_label": "BEIR NFCorpus",
+          "mode": "hybrid",
+          "sample_size": 100,
+          "query_count": 100,
+          "quality": {
+            "hr_at_5": 0.95,
+            "hr_at_10": 1.0,
+            "mrr": 0.828,
+            "ndcg_at_10": 0.85,
+            "recall_at_10": 0.975
+          },
+          "latency_ms": {
+            "p50": 4.1,
+            "p95": 4.7,
+            "p99": 4.7
+          },
+          "degradation": {
+            "queries": 100,
+            "degraded": 0,
+            "degrade_rate": 0.0,
+            "degrade_reasons": [],
+            "invalid_reasons": [],
+            "valid": true
+          }
+        },
+        {
+          "dataset": "squad_v2_dev",
+          "dataset_label": "SQuAD v2 Dev",
+          "mode": "hybrid",
+          "sample_size": 100,
+          "query_count": 100,
+          "quality": {
+            "hr_at_5": 0.85,
+            "hr_at_10": 1.0,
+            "mrr": 0.765,
+            "ndcg_at_10": 0.822,
+            "recall_at_10": 1.0
+          },
+          "latency_ms": {
+            "p50": 3.2,
+            "p95": 3.9,
+            "p99": 3.9
+          },
+          "degradation": {
+            "queries": 100,
+            "degraded": 0,
+            "degrade_rate": 0.0,
+            "degrade_reasons": [],
+            "invalid_reasons": [],
+            "valid": true
+          }
+        }
+      ]
+    },
+    "profile_cd": {
+      "profile": "profile_cd",
+      "mode": "hybrid",
+      "rows": [
+        {
+          "dataset": "msmarco_passages",
+          "dataset_label": "MS MARCO",
+          "mode": "hybrid",
+          "sample_size": 100,
+          "query_count": 100,
+          "quality": {
+            "hr_at_5": 0.833,
+            "hr_at_10": 0.867,
+            "mrr": 0.658,
+            "ndcg_at_10": 0.696,
+            "recall_at_10": 0.85
+          },
+          "latency_ms": {
+            "p50": 3.4,
+            "p95": 3.7,
+            "p99": 3.7
+          },
+          "degradation": {
+            "queries": 100,
+            "degraded": 0,
+            "degrade_rate": 0.0,
+            "degrade_reasons": [],
+            "invalid_reasons": [],
+            "valid": true
+          }
+        },
+        {
+          "dataset": "beir_nfcorpus",
+          "dataset_label": "BEIR NFCorpus",
+          "mode": "hybrid",
+          "sample_size": 100,
+          "query_count": 100,
+          "quality": {
+            "hr_at_5": 0.95,
+            "hr_at_10": 1.0,
+            "mrr": 0.828,
+            "ndcg_at_10": 0.85,
+            "recall_at_10": 0.975
+          },
+          "latency_ms": {
+            "p50": 4.1,
+            "p95": 4.7,
+            "p99": 4.7
+          },
+          "degradation": {
+            "queries": 100,
+            "degraded": 0,
+            "degrade_rate": 0.0,
+            "degrade_reasons": [],
+            "invalid_reasons": [],
+            "valid": true
+          }
+        },
+        {
+          "dataset": "squad_v2_dev",
+          "dataset_label": "SQuAD v2 Dev",
+          "mode": "hybrid",
+          "sample_size": 100,
+          "query_count": 100,
+          "quality": {
+            "hr_at_5": 0.85,
+            "hr_at_10": 1.0,
+            "mrr": 0.765,
+            "ndcg_at_10": 0.822,
+            "recall_at_10": 1.0
+          },
+          "latency_ms": {
+            "p50": 3.2,
+            "p95": 3.9,
+            "p99": 3.9
+          },
+          "degradation": {
+            "queries": 100,
+            "degraded": 0,
+            "degrade_rate": 0.0,
+            "degrade_reasons": [],
+            "invalid_reasons": [],
+            "valid": true
+          }
+        }
+      ]
+    }
+  },
+  "phase6": {
+    "gate": {
+      "valid": true,
+      "invalid_reasons": [],
+      "rows": [
+        {
+          "dataset": "msmarco_passages",
+          "dataset_label": "MS MARCO",
+          "valid": true,
+          "invalid_reasons": []
+        },
+        {
+          "dataset": "beir_nfcorpus",
+          "dataset_label": "BEIR NFCorpus",
+          "valid": true,
+          "invalid_reasons": []
+        },
+        {
+          "dataset": "squad_v2_dev",
+          "dataset_label": "SQuAD v2 Dev",
+          "valid": true,
+          "invalid_reasons": []
+        }
+      ]
+    },
+    "comparison_rows": [
+      {
+        "dataset": "msmarco_passages",
+        "dataset_label": "MS MARCO",
+        "a_hr10": 0.333,
+        "b_hr10": 0.867,
+        "cd_hr10": 0.867,
+        "a_mrr": 0.333,
+        "b_mrr": 0.658,
+        "cd_mrr": 0.658,
+        "a_p95": 2.1,
+        "b_p95": 3.7,
+        "cd_p95": 3.7,
+        "valid": true,
+        "invalid_reasons": []
+      },
+      {
+        "dataset": "beir_nfcorpus",
+        "dataset_label": "BEIR NFCorpus",
+        "a_hr10": 0.3,
+        "b_hr10": 1.0,
+        "cd_hr10": 1.0,
+        "a_mrr": 0.3,
+        "b_mrr": 0.828,
+        "cd_mrr": 0.828,
+        "a_p95": 2.6,
+        "b_p95": 4.7,
+        "cd_p95": 4.7,
+        "valid": true,
+        "invalid_reasons": []
+      },
+      {
+        "dataset": "squad_v2_dev",
+        "dataset_label": "SQuAD v2 Dev",
+        "a_hr10": 0.15,
+        "b_hr10": 1.0,
+        "cd_hr10": 1.0,
+        "a_mrr": 0.15,
+        "b_mrr": 0.765,
+        "cd_mrr": 0.765,
+        "a_p95": 3.0,
+        "b_p95": 3.9,
+        "cd_p95": 3.9,
+        "valid": true,
+        "invalid_reasons": []
+      }
+    ]
+  }
+}

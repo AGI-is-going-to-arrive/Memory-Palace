@@ -1,0 +1,28 @@
+{
+  "schema_version": "v1",
+  "dataset": "dailydialog",
+  "source_url": "https://huggingface.co/datasets/ConvLab/dailydialog/resolve/main/data.zip",
+  "downloaded_at_utc": "2026-02-18T17:57:04+00:00",
+  "record_count_full": 6000,
+  "sample_counts": {
+    "100": 100,
+    "200": 200,
+    "500": 500
+  },
+  "raw_files": [
+    {
+      "path": "backend/tests/datasets/raw/dailydialog/dailydialog_data.zip",
+      "sha256": "b1f38f3bf5431f9384107011a943f1a3446027721292e3a248a894b7766fa9d3",
+      "size_bytes": 3738236
+    }
+  ],
+  "processed_files": {
+    "full": "backend/tests/datasets/processed/dailydialog.jsonl"
+  },
+  "sample_files": {
+    "100": "backend/tests/datasets/processed/dailydialog_sample_100.jsonl",
+    "200": "backend/tests/datasets/processed/dailydialog_sample_200.jsonl",
+    "500": "backend/tests/datasets/processed/dailydialog_sample_500.jsonl"
+  },
+  "status": "ready"
+}

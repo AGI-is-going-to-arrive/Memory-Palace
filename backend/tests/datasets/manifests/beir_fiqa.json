@@ -1,0 +1,43 @@
+{
+  "schema_version": "v1",
+  "dataset": "beir_fiqa",
+  "source_url": "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/fiqa.zip",
+  "downloaded_at_utc": "2026-02-18T17:57:01+00:00",
+  "record_count_full": 6000,
+  "sample_counts": {
+    "100": 100,
+    "200": 200,
+    "500": 500
+  },
+  "raw_files": [
+    {
+      "path": "backend/tests/datasets/raw/beir_fiqa/train.tsv",
+      "sha256": "e46a99529aa61b12e086a5c057e4e0ecaeda9502e53d5fe855efce778f1ec59a",
+      "size_bytes": 209842
+    },
+    {
+      "path": "backend/tests/datasets/raw/beir_fiqa/test.tsv",
+      "sha256": "6adc2a640dcdd22bb8b3858f89107adef2a7c3db20a63550dfa7a0f71e379e44",
+      "size_bytes": 25256
+    },
+    {
+      "path": "backend/tests/datasets/raw/beir_fiqa/dev.tsv",
+      "sha256": "03b27e547cd29dc721c3b93ce8ddd70df6b2d0ce954d8ef3659d386e8cd72c11",
+      "size_bytes": 18327
+    },
+    {
+      "path": "backend/tests/datasets/raw/beir_fiqa/queries.jsonl",
+      "sha256": "eede1e61d4a0188940239b53ebc2da91f577a6a34679c812d1eb9090c29877bc",
+      "size_bytes": 706247
+    }
+  ],
+  "processed_files": {
+    "full": "backend/tests/datasets/processed/beir_fiqa.jsonl"
+  },
+  "sample_files": {
+    "100": "backend/tests/datasets/processed/beir_fiqa_sample_100.jsonl",
+    "200": "backend/tests/datasets/processed/beir_fiqa_sample_200.jsonl",
+    "500": "backend/tests/datasets/processed/beir_fiqa_sample_500.jsonl"
+  },
+  "status": "ready"
+}
