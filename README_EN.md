@@ -250,7 +250,7 @@ memory-palace/
 
 ```bash
 git clone https://github.com/AGI-is-going-to-arrive/Memory-Palace.git
-cd nocturne_memory
+cd Memory-Palace
 ```
 
 #### Step 2: Create Configuration File
@@ -267,10 +267,10 @@ Then open `.env` and set `DATABASE_URL` to an absolute path on your system:
 
 ```bash
 # Example for macOS / Linux:
-DATABASE_URL=sqlite+aiosqlite:////Users/yourname/nocturne_memory/demo.db
+DATABASE_URL=sqlite+aiosqlite:////Users/yourname/Memory-Palace/demo.db
 
 # Example for Windows:
-DATABASE_URL=sqlite+aiosqlite:///C:/Users/yourname/nocturne_memory/demo.db
+DATABASE_URL=sqlite+aiosqlite:///C:/Users/yourname/Memory-Palace/demo.db
 ```
 
 **Method B — Use the profile script (recommended):**

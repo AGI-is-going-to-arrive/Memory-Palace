@@ -1,6 +1,6 @@
 # Benchmark Baseline Manifest (Phase 0)
 
-> Scope: `nocturne_memory/backend/tests`
+> Scope: `Memory-Palace/backend/tests`
 > Frozen by: benchmark phase-0 bootstrap
 > Source metrics: `backend/tests/benchmark_results.md`
 > Source contracts: `backend/mcp_server.py`, `backend/db/sqlite_client.py`

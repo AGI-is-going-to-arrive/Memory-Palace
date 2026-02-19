@@ -4,7 +4,7 @@
 
 - Run timestamp (UTC): `2026-02-18T21:22:48+00:00`
 - Command:
-  - `cd nocturne_memory/backend && .venv/bin/python tests/benchmark/run_profile_abcd_real.py --sample-size 8 --datasets squad_v2_dev,beir_nfcorpus --extra-distractors 10`
+  - `cd Memory-Palace/backend && .venv/bin/python tests/benchmark/run_profile_abcd_real.py --sample-size 8 --datasets squad_v2_dev,beir_nfcorpus --extra-distractors 10`
 - Data scope: `squad_v2_dev`, `beir_nfcorpus`
 - Retrieval mode:
   - A: keyword
@@ -14,9 +14,9 @@
 - Phase6 gate: `valid=true`, `invalid_reasons=[]`
 
 Source artifacts:
-- `nocturne_memory/backend/tests/benchmark/profile_abcd_real_metrics.json`
-- `nocturne_memory/backend/tests/benchmark/benchmark_results_profile_abcd_real.md`
-- `nocturne_memory/backend/tests/benchmark/benchmark_results_profile_cd_real.md`
+- `Memory-Palace/backend/tests/benchmark/profile_abcd_real_metrics.json`
+- `Memory-Palace/backend/tests/benchmark/benchmark_results_profile_abcd_real.md`
+- `Memory-Palace/backend/tests/benchmark/benchmark_results_profile_cd_real.md`
 
 ## 2) Real measured results (dataset-average)
 

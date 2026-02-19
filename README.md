@@ -250,7 +250,7 @@ memory-palace/
 
 ```bash
 git clone https://github.com/AGI-is-going-to-arrive/Memory-Palace.git
-cd nocturne_memory
+cd Memory-Palace
 ```
 
 #### 第 2 步：创建配置文件
@@ -267,10 +267,10 @@ cp .env.example .env
 
 ```bash
 # macOS / Linux 示例：
-DATABASE_URL=sqlite+aiosqlite:////Users/yourname/nocturne_memory/demo.db
+DATABASE_URL=sqlite+aiosqlite:////Users/yourname/Memory-Palace/demo.db
 
 # Windows 示例：
-DATABASE_URL=sqlite+aiosqlite:///C:/Users/yourname/nocturne_memory/demo.db
+DATABASE_URL=sqlite+aiosqlite:///C:/Users/yourname/Memory-Palace/demo.db
 ```
 
 **方法 B — 使用档位脚本（推荐）：**
