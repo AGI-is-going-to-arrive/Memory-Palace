@@ -699,6 +699,12 @@ For backward compatibility with legacy `nocturne_memory` deployments:
 
 ---
 
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=AGI-is-going-to-arrive/Memory-Palace&type=timeline&legend=top-left)](https://www.star-history.com/#AGI-is-going-to-arrive/Memory-Palace&type=timeline&legend=top-left)
+
+---
+
 ## 📄 License
 
 [MIT](LICENSE) — Copyright (c) 2026 agi

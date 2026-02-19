@@ -699,6 +699,12 @@ pytest tests/benchmark/test_search_memory_contract_regression.py -q
 
 ---
 
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=AGI-is-going-to-arrive/Memory-Palace&type=timeline&legend=top-left)](https://www.star-history.com/#AGI-is-going-to-arrive/Memory-Palace&type=timeline&legend=top-left)
+
+---
+
 ## 📄 开源协议
 
 [MIT](LICENSE) — Copyright (c) 2026 agi
