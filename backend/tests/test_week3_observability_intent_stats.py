@@ -9,6 +9,7 @@ from api import maintenance as maintenance_api
 class _FakeIntentClient:
     def __init__(self) -> None:
         self.meta_store: Dict[str, str] = {}
+        self.received_filters: Dict[str, Any] = {}
 
     def preprocess_query(self, query: str) -> Dict[str, Any]:
         rewritten = " ".join(query.lower().replace("?", "").split())
@@ -59,7 +60,7 @@ class _FakeIntentClient:
         _ = mode
         _ = max_results
         _ = candidate_multiplier
-        _ = filters
+        self.received_filters = dict(filters)
         profile = intent_profile or {}
         return {
             "mode": "hybrid",
@@ -74,6 +75,12 @@ class _FakeIntentClient:
 
     async def get_index_status(self) -> Dict[str, Any]:
         return {"degraded": False, "index_available": True}
+
+    async def get_gist_stats(self) -> Dict[str, Any]:
+        return {"degraded": False, "total_rows": 0, "active_coverage": 0.0}
+
+    async def get_vitality_stats(self) -> Dict[str, Any]:
+        return {"degraded": False, "total_memories": 0, "low_vitality_count": 0}
 
     async def get_runtime_meta(self, key: str) -> str | None:
         return self.meta_store.get(key)
@@ -216,6 +223,116 @@ async def test_observability_marks_strategy_applied_from_backend_metadata_on_leg
     assert result["intent_applied"] == "unknown"
     assert result["strategy_template_applied"] == "default"
     assert "intent_profile_not_supported" in result["degrade_reasons"]
+
+
+@pytest.mark.asyncio
+async def test_observability_search_scope_hint_applies_and_echoes_strategy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeIntentClient()
+
+    async def _ensure_started(_factory) -> None:
+        return None
+
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(maintenance_api.runtime_state, "ensure_started", _ensure_started)
+
+    async with maintenance_api._search_events_guard:
+        maintenance_api._search_events.clear()
+    maintenance_api._search_events_loaded = False
+
+    payload = maintenance_api.SearchConsoleRequest(
+        query="When did we rebuild index?",
+        mode="hybrid",
+        include_session=False,
+        scope_hint="core://agent",
+    )
+    result = await maintenance_api.run_observability_search(payload)
+
+    assert result["scope_hint"] == "core://agent"
+    assert result["scope_hint_applied"] is True
+    assert result["scope_strategy_applied"] == "uri_prefix"
+    assert result["scope_effective"] == {"domain": "core", "path_prefix": "agent"}
+    assert fake_client.received_filters == {"domain": "core", "path_prefix": "agent"}
+
+
+@pytest.mark.asyncio
+async def test_observability_summary_includes_sm_lite_runtime_stats(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeIntentClient()
+
+    async def _ensure_started(_factory) -> None:
+        return None
+
+    async def _index_worker_status() -> Dict[str, Any]:
+        return {"enabled": True, "running": False, "recent_jobs": [], "stats": {}}
+
+    async def _write_lane_status() -> Dict[str, Any]:
+        return {
+            "global_concurrency": 1,
+            "global_active": 0,
+            "global_waiting": 0,
+            "session_waiting_count": 0,
+            "session_waiting_sessions": 0,
+            "max_session_waiting": 0,
+            "wait_warn_ms": 2000,
+        }
+
+    async def _session_cache_summary() -> Dict[str, Any]:
+        return {
+            "session_count": 2,
+            "total_hits": 6,
+            "max_hits_in_session": 4,
+            "max_hits_per_session": 200,
+            "half_life_seconds": 21600.0,
+            "top_sessions": [],
+        }
+
+    async def _flush_tracker_summary() -> Dict[str, Any]:
+        return {
+            "session_count": 1,
+            "pending_events": 3,
+            "pending_chars": 20,
+            "trigger_chars": 6000,
+            "min_events": 6,
+            "max_events_per_session": 80,
+            "top_sessions": [],
+        }
+
+    async def _promotion_summary() -> Dict[str, Any]:
+        return {
+            "total_promotions": 2,
+            "degraded_promotions": 1,
+            "avg_quality": 0.74,
+        }
+
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(maintenance_api.runtime_state, "ensure_started", _ensure_started)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.index_worker, "status", _index_worker_status
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.write_lanes, "status", _write_lane_status
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.session_cache, "summary", _session_cache_summary
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.flush_tracker, "summary", _flush_tracker_summary
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.promotion_tracker, "summary", _promotion_summary
+    )
+
+    summary = await maintenance_api.get_observability_summary()
+
+    assert summary["status"] == "ok"
+    runtime = summary["health"]["runtime"]
+    assert "sm_lite" in runtime
+    assert runtime["sm_lite"]["session_cache"]["session_count"] == 2
+    assert runtime["sm_lite"]["flush_tracker"]["pending_events"] == 3
+    assert runtime["sm_lite"]["promotion"]["total_promotions"] == 2
 
 
 @pytest.mark.asyncio

@@ -25,7 +25,9 @@ function Test-PortInUse {
         return ($listeners.Count -gt 0)
     }
     catch {
-        return $false
+        Write-Warning "Port probe fallback engaged for ${Port}: $($_.Exception.Message)"
+        # Fail-closed to avoid selecting potentially occupied ports when probe is unavailable.
+        return $true
     }
 }
 
@@ -104,18 +106,182 @@ function Resolve-DataVolume {
     return $newVolume
 }
 
+function Get-EnvValueFromFile {
+    param(
+        [string]$FilePath,
+        [string]$Key
+    )
+
+    if (-not (Test-Path $FilePath)) {
+        return ''
+    }
+
+    $escaped = [regex]::Escape($Key)
+    $line = Get-Content -Path $FilePath | Where-Object { $_ -match "^${escaped}=" } | Select-Object -Last 1
+    if (-not $line) {
+        return ''
+    }
+    return ($line -replace "^${escaped}=", '')
+}
+
+function Set-EnvValueInFile {
+    param(
+        [string]$FilePath,
+        [string]$Key,
+        [string]$Value
+    )
+
+    $lines = @()
+    if (Test-Path $FilePath) {
+        $lines = Get-Content -Path $FilePath
+    }
+
+    $escaped = [regex]::Escape($Key)
+    $updated = $false
+    $newLines = foreach ($line in $lines) {
+        if ($line -match "^${escaped}=") {
+            if (-not $updated) {
+                $updated = $true
+                "$Key=$Value"
+            }
+        }
+        else {
+            $line
+        }
+    }
+
+    if (-not $updated) {
+        $newLines += "$Key=$Value"
+    }
+
+    Set-Content -Path $FilePath -Value $newLines
+}
+
+function Apply-ProfileRuntimeOverrides {
+    param([string]$EnvFile)
+
+    $overrideKeys = @(
+        'ROUTER_API_BASE',
+        'ROUTER_API_KEY',
+        'ROUTER_EMBEDDING_MODEL',
+        'RETRIEVAL_EMBEDDING_BACKEND',
+        'RETRIEVAL_EMBEDDING_API_BASE',
+        'RETRIEVAL_EMBEDDING_API_KEY',
+        'RETRIEVAL_EMBEDDING_MODEL',
+        'RETRIEVAL_RERANKER_ENABLED',
+        'RETRIEVAL_RERANKER_API_BASE',
+        'RETRIEVAL_RERANKER_API_KEY',
+        'RETRIEVAL_RERANKER_MODEL',
+        'MCP_API_KEY',
+        'MCP_API_KEY_ALLOW_INSECURE_LOCAL'
+    )
+
+    foreach ($key in $overrideKeys) {
+        $overrideValue = [System.Environment]::GetEnvironmentVariable($key)
+        if (-not [string]::IsNullOrWhiteSpace($overrideValue)) {
+            Set-EnvValueInFile -FilePath $EnvFile -Key $key -Value $overrideValue
+            Write-Host "[override] $key applied to $EnvFile"
+        }
+    }
+}
+
+function Test-TruthyValue {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $false
+    }
+    $normalized = $Value.Trim().ToLower()
+    return @('1', 'true', 'yes', 'on', 'enabled') -contains $normalized
+}
+
+function Test-UnresolvedPlaceholder {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $true
+    }
+
+    return (
+        $Value.Contains('replace-with-your-key') -or
+        $Value.Contains('<your-router-host>') -or
+        $Value.Contains('host.docker.internal:PORT') -or
+        ($Value -match ':PORT($|/)')
+    )
+}
+
+function Assert-ProfileExternalSettingsReady {
+    param(
+        [string]$EnvFile,
+        [string]$SelectedProfile
+    )
+
+    if ($SelectedProfile -notin @('c', 'd')) {
+        return
+    }
+
+    $embeddingBackend = (Get-EnvValueFromFile -FilePath $EnvFile -Key 'RETRIEVAL_EMBEDDING_BACKEND').ToLower()
+    $rerankerEnabled = Get-EnvValueFromFile -FilePath $EnvFile -Key 'RETRIEVAL_RERANKER_ENABLED'
+    $requiredKeys = New-Object System.Collections.Generic.List[string]
+
+    switch ($embeddingBackend) {
+        'router' {
+            $requiredKeys.Add('ROUTER_API_BASE')
+            $requiredKeys.Add('ROUTER_API_KEY')
+        }
+        'api' {
+            $requiredKeys.Add('RETRIEVAL_EMBEDDING_API_BASE')
+            $requiredKeys.Add('RETRIEVAL_EMBEDDING_API_KEY')
+        }
+        'openai' {
+            $requiredKeys.Add('RETRIEVAL_EMBEDDING_API_BASE')
+            $requiredKeys.Add('RETRIEVAL_EMBEDDING_API_KEY')
+        }
+        'hash' { }
+        'none' { }
+        default {
+            if (-not [string]::IsNullOrWhiteSpace($embeddingBackend)) {
+                $requiredKeys.Add('RETRIEVAL_EMBEDDING_API_BASE')
+                $requiredKeys.Add('RETRIEVAL_EMBEDDING_API_KEY')
+            }
+        }
+    }
+
+    if (Test-TruthyValue -Value $rerankerEnabled) {
+        $requiredKeys.Add('RETRIEVAL_RERANKER_API_BASE')
+        $requiredKeys.Add('RETRIEVAL_RERANKER_API_KEY')
+    }
+
+    $hasIssue = $false
+    foreach ($key in $requiredKeys) {
+        $value = Get-EnvValueFromFile -FilePath $EnvFile -Key $key
+        if ([string]::IsNullOrWhiteSpace($value)) {
+            Write-Error "[profile-check] Missing required value for $key ($SelectedProfile)"
+            $hasIssue = $true
+            continue
+        }
+        if (Test-UnresolvedPlaceholder -Value $value) {
+            Write-Error "[profile-check] Unresolved placeholder for $key ($SelectedProfile): $value"
+            $hasIssue = $true
+        }
+    }
+
+    if ($hasIssue) {
+        throw "Profile $SelectedProfile has unresolved external settings in $EnvFile"
+    }
+}
+
 function Invoke-Compose {
-    param([string[]]$Args)
+    param([string[]]$ComposeArgs)
 
     if ($script:UseComposePlugin) {
-        & docker compose @Args
+        & docker compose @ComposeArgs
     }
     else {
-        & docker-compose @Args
+        & docker-compose @ComposeArgs
     }
 
     if ($LASTEXITCODE -ne 0) {
-        throw "docker compose command failed: $($Args -join ' ')"
+        throw "docker compose command failed: $($ComposeArgs -join ' ')"
     }
 }
 
@@ -171,10 +337,13 @@ if (-not $script:UseComposePlugin -and -not (Get-Command docker-compose -ErrorAc
     exit 1
 }
 
-& (Join-Path $scriptDir 'apply_profile.ps1') -Platform docker -Profile $profileLower -Target (Join-Path $projectRoot '.env.docker')
+$envFile = Join-Path $projectRoot '.env.docker'
+& (Join-Path $scriptDir 'apply_profile.ps1') -Platform docker -Profile $profileLower -Target $envFile
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
+Apply-ProfileRuntimeOverrides -EnvFile $envFile
+Assert-ProfileExternalSettingsReady -EnvFile $envFile -SelectedProfile $profileLower
 
 Push-Location $projectRoot
 try {

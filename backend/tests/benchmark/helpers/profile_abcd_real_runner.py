@@ -109,6 +109,9 @@ PROFILE_CONFIGS: Sequence[ProfileConfig] = (
         key="profile_c",
         mode="hybrid",
         env_overrides={
+            # Dev benchmark default: force API path for C/D real-run validation.
+            # Release/deploy templates still keep router defaults and should be
+            # re-validated before final delivery.
             "RETRIEVAL_EMBEDDING_BACKEND": "api",
             "RETRIEVAL_RERANKER_ENABLED": "false",
         },

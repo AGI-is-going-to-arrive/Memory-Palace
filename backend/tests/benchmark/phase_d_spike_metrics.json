@@ -1,0 +1,280 @@
+{
+  "generated_at_utc": "2026-03-02T05:27:49+00:00",
+  "scope": {
+    "phase": "D",
+    "description": "Phase D spike for provider/sqlite-vec/write-lane feasibility",
+    "wal_probe": {
+      "load_profile": "business_write_peak",
+      "repeat": 2,
+      "workers": 12,
+      "tx_per_worker": 220,
+      "timeout_sec": 0.12,
+      "regression_thresholds": {
+        "min_throughput_ratio": 1.02,
+        "max_failure_rate": 0.005,
+        "max_persistence_gap": 0
+      }
+    },
+    "sqlite_vec_extension_path": "/Users/yangjunjie/Desktop/clawanti/Memory-Palace/backend/.venv/lib/python3.14/site-packages/sqlite_vec/vec0"
+  },
+  "probes": {
+    "embedding_provider": {
+      "status": "ok",
+      "configured_backend": "hash",
+      "cases": [
+        {
+          "backend": "hash",
+          "api_base_source": "unset",
+          "backend/api_base_source": "hash/unset",
+          "api_base": "",
+          "api_base_present": false,
+          "api_key_source": "unset",
+          "api_key_present": false,
+          "status": "not_required"
+        },
+        {
+          "backend": "api",
+          "api_base_source": "unset",
+          "backend/api_base_source": "api/unset",
+          "api_base": "",
+          "api_base_present": false,
+          "api_key_source": "unset",
+          "api_key_present": false,
+          "status": "missing_api_base"
+        },
+        {
+          "backend": "router",
+          "api_base_source": "unset",
+          "backend/api_base_source": "router/unset",
+          "api_base": "",
+          "api_base_present": false,
+          "api_key_source": "unset",
+          "api_key_present": false,
+          "status": "missing_api_base"
+        },
+        {
+          "backend": "openai",
+          "api_base_source": "unset",
+          "backend/api_base_source": "openai/unset",
+          "api_base": "",
+          "api_base_present": false,
+          "api_key_source": "unset",
+          "api_key_present": false,
+          "status": "missing_api_base"
+        },
+        {
+          "backend": "none",
+          "api_base_source": "unset",
+          "backend/api_base_source": "none/unset",
+          "api_base": "",
+          "api_base_present": false,
+          "api_key_source": "unset",
+          "api_key_present": false,
+          "status": "not_required"
+        }
+      ]
+    },
+    "sqlite_vec": {
+      "status": "ok",
+      "sqlite_version": "3.51.2",
+      "sqlite_source_id": [
+        3,
+        51,
+        2
+      ],
+      "extension_path_input": "/Users/yangjunjie/Desktop/clawanti/Memory-Palace/backend/.venv/lib/python3.14/site-packages/sqlite_vec/vec0",
+      "extension_path": "/Users/yangjunjie/Desktop/clawanti/Memory-Palace/backend/.venv/lib/python3.14/site-packages/sqlite_vec/vec0.dylib",
+      "extension_path_exists": true,
+      "extension_load_attempted": true,
+      "extension_loaded": true,
+      "sqlite_vec_readiness": "ready",
+      "verification_level": "extension_loaded",
+      "diag_code": "",
+      "checks": [
+        {
+          "name": "basic_query",
+          "ok": true
+        },
+        {
+          "name": "compile_options",
+          "ok": true
+        },
+        {
+          "name": "extension_load",
+          "ok": true
+        }
+      ],
+      "compile_options": [
+        "ATOMIC_INTRINSICS=1",
+        "COMPILER=clang-17.0.0",
+        "DEFAULT_AUTOVACUUM",
+        "DEFAULT_CACHE_SIZE=-2000",
+        "DEFAULT_FILE_FORMAT=4",
+        "DEFAULT_JOURNAL_SIZE_LIMIT=-1",
+        "DEFAULT_MMAP_SIZE=0",
+        "DEFAULT_PAGE_SIZE=4096",
+        "DEFAULT_PCACHE_INITSZ=20",
+        "DEFAULT_RECURSIVE_TRIGGERS",
+        "DEFAULT_SECTOR_SIZE=4096",
+        "DEFAULT_SYNCHRONOUS=2",
+        "DEFAULT_WAL_AUTOCHECKPOINT=1000",
+        "DEFAULT_WAL_SYNCHRONOUS=2",
+        "DEFAULT_WORKER_THREADS=0",
+        "DIRECT_OVERFLOW_READ",
+        "ENABLE_API_ARMOR",
+        "ENABLE_COLUMN_METADATA",
+        "ENABLE_DBSTAT_VTAB",
+        "ENABLE_FTS3",
+        "ENABLE_FTS3_PARENTHESIS",
+        "ENABLE_FTS5",
+        "ENABLE_GEOPOLY",
+        "ENABLE_MATH_FUNCTIONS",
+        "ENABLE_MEMORY_MANAGEMENT",
+        "ENABLE_PERCENTILE",
+        "ENABLE_PREUPDATE_HOOK",
+        "ENABLE_RTREE",
+        "ENABLE_SESSION",
+        "ENABLE_STAT4",
+        "ENABLE_UNLOCK_NOTIFY",
+        "MALLOC_SOFT_LIMIT=1024",
+        "MAX_ATTACHED=10",
+        "MAX_COLUMN=2000",
+        "MAX_COMPOUND_SELECT=500",
+        "MAX_DEFAULT_PAGE_SIZE=8192",
+        "MAX_EXPR_DEPTH=1000",
+        "MAX_FUNCTION_ARG=1000",
+        "MAX_LENGTH=1000000000",
+        "MAX_LIKE_PATTERN_LENGTH=50000",
+        "MAX_MMAP_SIZE=0x7fff0000",
+        "MAX_PAGE_COUNT=0xfffffffe",
+        "MAX_PAGE_SIZE=65536",
+        "MAX_SQL_LENGTH=1000000000",
+        "MAX_TRIGGER_DEPTH=1000",
+        "MAX_VARIABLE_NUMBER=250000",
+        "MAX_VDBE_OP=250000000",
+        "MAX_WORKER_THREADS=8",
+        "MUTEX_PTHREADS",
+        "SYSTEM_MALLOC",
+        "TEMP_STORE=1",
+        "THREADSAFE=1",
+        "USE_URI"
+      ],
+      "errors": []
+    },
+    "write_lane_wal": {
+      "status": "degraded",
+      "load_profile": "business_write_peak",
+      "repeat": 2,
+      "workers": 12,
+      "tx_per_worker": 220,
+      "timeout_sec": 0.12,
+      "regression_thresholds": {
+        "min_throughput_ratio": 1.02,
+        "max_failure_rate": 0.005,
+        "max_persistence_gap": 0
+      },
+      "results": {
+        "delete": {
+          "status": "ok_with_failures",
+          "requested_journal_mode": "delete",
+          "effective_journal_mode": "delete",
+          "workers": 12,
+          "tx_per_worker": 220,
+          "planned_tx": 5280,
+          "successful_tx": 5252,
+          "failed_tx": 28,
+          "lock_retries": 71,
+          "rows_persisted": 5252,
+          "elapsed_sec": 3.705798,
+          "throughput_tps": 1417.239,
+          "failure_rate": 0.005303,
+          "retry_rate": 0.013447,
+          "persistence_gap": 0,
+          "sample_count": 2,
+          "throughput_samples_tps": [
+            3835.239,
+            866.659
+          ]
+        },
+        "wal": {
+          "status": "ok_with_failures",
+          "requested_journal_mode": "wal",
+          "effective_journal_mode": "wal",
+          "workers": 12,
+          "tx_per_worker": 220,
+          "planned_tx": 5280,
+          "successful_tx": 5260,
+          "failed_tx": 20,
+          "lock_retries": 44,
+          "rows_persisted": 5260,
+          "elapsed_sec": 2.473889,
+          "throughput_tps": 2126.207,
+          "failure_rate": 0.003788,
+          "retry_rate": 0.008333,
+          "persistence_gap": 0,
+          "sample_count": 2,
+          "throughput_samples_tps": [
+            4154.452,
+            1426.56
+          ]
+        }
+      },
+      "summary": {
+        "delete": {
+          "throughput_tps_p50": 2350.949,
+          "throughput_tps_p95": 3686.81,
+          "failure_rate_max": 0.009091,
+          "retry_rate_p95": 0.019413
+        },
+        "wal": {
+          "throughput_tps_p50": 2790.506,
+          "throughput_tps_p95": 4018.057,
+          "failure_rate_max": 0.006061,
+          "retry_rate_p95": 0.012424
+        }
+      },
+      "regression_gate": {
+        "pass": true,
+        "reasons": []
+      },
+      "threshold_suggestion": {
+        "profile": "business_write_peak",
+        "profile_baseline": {
+          "min_throughput_ratio": 1.02,
+          "max_failure_rate": 0.005,
+          "max_persistence_gap": 0
+        },
+        "suggested_stable_thresholds": {
+          "min_throughput_ratio": 1.02,
+          "max_failure_rate": 0.005,
+          "max_persistence_gap": 0
+        },
+        "observed": {
+          "wal_vs_delete_throughput_ratio": 1.5,
+          "wal_failure_rate": 0.003788,
+          "wal_persistence_gap": 0,
+          "delete_persistence_gap": 0
+        },
+        "note": "Thresholds are recommendations for future gate tuning; production default remains HOLD."
+      },
+      "wal_vs_delete_throughput_ratio": 1.5
+    }
+  },
+  "go_no_go": {
+    "decision": "NO_GO",
+    "blockers": [
+      "wal_failed_transactions"
+    ],
+    "summary": "Spike produced blockers; keep HOLD and do not promote to default path."
+  },
+  "risks": [
+    "Write lane probe in DELETE mode observed failed transactions.",
+    "Write lane probe in WAL mode observed failed transactions."
+  ],
+  "rollback_points": [
+    "Keep RETRIEVAL_EMBEDDING_BACKEND at hash/none when provider probe is not ready.",
+    "Do not configure sqlite-vec extension path in production startup until compatibility is validated.",
+    "If WAL write lane degrades consistency, switch journal mode back to DELETE.",
+    "If browse read behavior must rollback, restore browse.get_node -> get_memory_by_path(... reinforce_access=True)."
+  ]
+}

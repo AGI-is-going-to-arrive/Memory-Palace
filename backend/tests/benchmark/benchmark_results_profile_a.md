@@ -1,6 +1,6 @@
 # Benchmark Results - profile_a
 
-> generated_at_utc: 2026-02-19T06:55:30+00:00
+> generated_at_utc: 2026-03-02T15:49:19+00:00
 > mode: keyword
 
 ## Retrieval Quality

@@ -1,6 +1,8 @@
 # Memory Palace Skills 方案（设计与运维参考文档）
 
-> **Claude Code Skill 文件**：[`.claude/skills/memory-palace/SKILL.md`](../../.claude/skills/memory-palace/SKILL.md)
+> **Claude Code Skill 文件（需本地创建）**：`.claude/skills/memory-palace/SKILL.md`
+>
+> 当前仓库仅提供策略文档，不内置上述 `SKILL.md` 文件；请按本文规则在本地创建后再接入客户端。
 >
 > 本文档是面向人类的完整策略设计文档，涵盖分层架构、参数调优、本地模型接入等运维细节。
 > LLM 可执行的命令式规则已提取至上述 Skill 文件。

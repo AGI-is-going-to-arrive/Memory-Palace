@@ -104,6 +104,137 @@ resolve_data_volume() {
   echo "memory_palace_data"
 }
 
+get_env_value_from_file() {
+  local env_file="$1"
+  local key="$2"
+  awk -F= -v target="${key}" '$1==target {print substr($0, index($0, "=") + 1)}' "${env_file}" | tail -n 1
+}
+
+upsert_env_value_in_file() {
+  local env_file="$1"
+  local key="$2"
+  local value="$3"
+  local tmp_file
+  tmp_file="$(mktemp "/tmp/mp-env-upsert-XXXXXX")"
+  awk -v target="${key}" -v replacement="${value}" '
+    BEGIN { updated=0 }
+    $0 ~ ("^" target "=") {
+      if (updated == 0) {
+        print target "=" replacement
+        updated=1
+      }
+      next
+    }
+    { print }
+    END {
+      if (updated == 0) {
+        print target "=" replacement
+      }
+    }
+  ' "${env_file}" > "${tmp_file}"
+  mv "${tmp_file}" "${env_file}"
+}
+
+apply_profile_runtime_overrides() {
+  local env_file="$1"
+  local override_keys=(
+    "ROUTER_API_BASE"
+    "ROUTER_API_KEY"
+    "ROUTER_EMBEDDING_MODEL"
+    "RETRIEVAL_EMBEDDING_BACKEND"
+    "RETRIEVAL_EMBEDDING_API_BASE"
+    "RETRIEVAL_EMBEDDING_API_KEY"
+    "RETRIEVAL_EMBEDDING_MODEL"
+    "RETRIEVAL_RERANKER_ENABLED"
+    "RETRIEVAL_RERANKER_API_BASE"
+    "RETRIEVAL_RERANKER_API_KEY"
+    "RETRIEVAL_RERANKER_MODEL"
+    "MCP_API_KEY"
+    "MCP_API_KEY_ALLOW_INSECURE_LOCAL"
+  )
+  local key
+  for key in "${override_keys[@]}"; do
+    local override_value="${!key:-}"
+    if [[ -n "${override_value}" ]]; then
+      upsert_env_value_in_file "${env_file}" "${key}" "${override_value}"
+      echo "[override] ${key} applied to ${env_file}"
+    fi
+  done
+}
+
+is_truthy() {
+  case "${1:-}" in
+    1|true|yes|on|enabled|TRUE|YES|ON|ENABLED)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+value_has_unresolved_placeholder() {
+  local value="$1"
+  [[ "${value}" == *"replace-with-your-key"* ]] \
+    || [[ "${value}" == *"<your-router-host>"* ]] \
+    || [[ "${value}" == *"host.docker.internal:PORT"* ]] \
+    || [[ "${value}" =~ :PORT(/|$) ]]
+}
+
+assert_profile_external_settings_ready() {
+  local env_file="$1"
+  local selected_profile="$2"
+  local found=0
+
+  if [[ "${selected_profile}" != "c" && "${selected_profile}" != "d" ]]; then
+    return 0
+  fi
+
+  local embedding_backend
+  embedding_backend="$(get_env_value_from_file "${env_file}" "RETRIEVAL_EMBEDDING_BACKEND" | tr '[:upper:]' '[:lower:]')"
+  local reranker_enabled_raw
+  reranker_enabled_raw="$(get_env_value_from_file "${env_file}" "RETRIEVAL_RERANKER_ENABLED" | tr '[:upper:]' '[:lower:]')"
+
+  local required_keys=()
+  case "${embedding_backend}" in
+    router)
+      required_keys+=("ROUTER_API_BASE" "ROUTER_API_KEY")
+      ;;
+    api|openai)
+      required_keys+=("RETRIEVAL_EMBEDDING_API_BASE" "RETRIEVAL_EMBEDDING_API_KEY")
+      ;;
+    hash|none|"")
+      ;;
+    *)
+      required_keys+=("RETRIEVAL_EMBEDDING_API_BASE" "RETRIEVAL_EMBEDDING_API_KEY")
+      ;;
+  esac
+  if is_truthy "${reranker_enabled_raw}"; then
+    required_keys+=("RETRIEVAL_RERANKER_API_BASE" "RETRIEVAL_RERANKER_API_KEY")
+  fi
+
+  local key
+  for key in "${required_keys[@]}"; do
+    local value
+    value="$(get_env_value_from_file "${env_file}" "${key}")"
+    if [[ -z "${value}" ]]; then
+      echo "[profile-check] Missing required value for ${key} (${selected_profile})" >&2
+      found=1
+      continue
+    fi
+    if value_has_unresolved_placeholder "${value}"; then
+      echo "[profile-check] Unresolved placeholder for ${key}: ${value}" >&2
+      found=1
+    fi
+  done
+
+  if [[ "${found}" -eq 1 ]]; then
+    echo "[profile-check] Profile ${selected_profile} has unresolved external settings in ${env_file}." >&2
+    return 1
+  fi
+  return 0
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile)
@@ -181,7 +312,10 @@ else
   exit 1
 fi
 
-bash "${SCRIPT_DIR}/apply_profile.sh" docker "${profile}" "${PROJECT_ROOT}/.env.docker"
+env_file="${PROJECT_ROOT}/.env.docker"
+bash "${SCRIPT_DIR}/apply_profile.sh" docker "${profile}" "${env_file}"
+apply_profile_runtime_overrides "${env_file}"
+assert_profile_external_settings_ready "${env_file}" "${profile}"
 
 cd "${PROJECT_ROOT}"
 

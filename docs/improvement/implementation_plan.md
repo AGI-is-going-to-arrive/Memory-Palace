@@ -1,300 +1,334 @@
-# Memory Palace 最终融合改进计划
+# Memory Palace 改进实施计划（重构版）
 
-> 融合 **Claude Code Memory** 🔵 + **OpenClaw Memory** 🟠 + **局限性修复** 🔴 + **mem0 对比评估** 📊
-
----
-
-## 第一部分：mem0 对比评估
-
-### mem0 是什么
-
-mem0 是 AI 应用的通用记忆层（Apache 2.0），定位为"给任何 AI 应用添加记忆能力"的中间件。核心特点：
-
-- **LLM 驱动管线**：`add()` 时 LLM 自动从对话中提取事实 → 冲突解决（ADD/UPDATE/DELETE）→ 并行写入
-- **Graph Memory**：Neo4j/Kuzu/Memgraph 实体关系图谱
-- **24+ 向量库**：Qdrant（默认）、Pinecone、ChromaDB、PGVector、Redis、Weaviate…
-- **多级会话作用域**：`user_id` / `agent_id` / `app_id` / `run_id` 四维过滤
-- **双模式部署**：托管平台 `api.mem0.ai` + 完全自托管
-
-### MP vs mem0 对比
-
-| 维度 | Memory Palace | mem0 | 评价 |
-|---|---|---|---|
-| **定位** | MCP 原生记忆操作系统 | 通用 AI 记忆中间件 | 赛道不同 |
-| **接入方式** | MCP 协议（标准化） | Python/TS SDK + REST API | MP 对 MCP 生态更原生 |
-| **写入安全** | ✅ Write Guard + 快照 + 回滚 | ❌ 无（LLM 直接写入） | **MP 远更强** |
-| **可观测性** | ✅ 四视图仪表盘 | ❌ 基本无 | **MP 远更强** |
-| **治理循环** | ✅ Review + 活力衰减 + 清理 | ❌ 仅 history 日志 | **MP 远更强** |
-| **检索引擎** | keyword + semantic + reranker + 意图分类 | 向量相似度 + 可选 reranker | **MP 更强** |
-| **事实提取** | ❌ 需 Agent 显式写入 | ✅ LLM 自动提取+冲突解决 | **mem0 更强** |
-| **Graph Memory** | ❌ 无 | ✅ 实体关系图谱 | **mem0 更强** |
-| **Provider 生态** | 1-2 个 embedding 提供者 | 24+ 向量库 / 18+ LLM / 11+ embedder | **mem0 远更强** |
-| **存储引擎** | SQLite（事务+版本链） | Qdrant + SQLite history | 各有侧重 |
-| **记忆组织** | URI 树形层级 + Gist | 扁平 key-value + 标签过滤 | **MP 更强** |
-| **多租户** | domain URI 隔离 | user/agent/app/run 四维 | mem0 更灵活 |
-
-### 📌 能否替代 mem0？
-
-> [!IMPORTANT]
-> **不建议将 MP 定位为"mem0 的升级版"——这会偏离项目设计初衷。**
+> 目标：把改进计划从“愿景列表”收敛为“可执行 backlog”，并确保不偏离项目初衷：**AI Agent 长期记忆操作系统**。
 >
-> - MP 的设计初衷是 **"AI Agent 长期记忆操作系统"**——通过 MCP 协议为 AI Agent 提供持久化、可检索、可审计的记忆
-> - mem0 的定位是 **"通用 AI 记忆中间件"**——为任何 AI 应用提供开箱即用的记忆层
-> - 两者在**写入安全、可观测性、治理循环**方面 MP 已胜出；在**事实自动提取、Graph Memory、Provider 覆盖**方面 mem0 更成熟
->
-> **建议定位**：MP 是 **"MCP 体系的专业记忆引擎"**，面向 Codex/Claude Code/Gemini CLI 等 MCP 原生工具链。与 mem0 是互补关系，不是替代关系。
-
-### 可从 mem0 借鉴的设计
-
-已有改进中部分与 mem0 思路重合（标记如下），**不增加新改进项**以避免偏离初衷：
-
-| mem0 特性 | 对应改进 | 说明 |
-|---|---|---|
-| LLM 事实提取 | 改进 6（自动学习触发器）| MP 以 MCP 工具形式实现，不植入 LLM 管线 |
-| Reranker 集成 | 现有能力 | MP 已有 |
-| 多 Provider | 改进 11（Embedding 可插拔）| 见下方局限性修复 |
-| Graph Memory | ⚠️ 不纳入 | 超出 MP 记忆 OS 定位，且需引入图数据库依赖 |
+> 适用范围：`Memory-Palace/docs/improvement/` 下的改进文档与当前仓库实现。
 
 ---
 
-## 第二部分：局限性修复（含降级 Fallback 机制）
+## 0. 执行边界（必须遵守）
 
-以下 4 项改进专门针对截图中列出的局限，每项都设计了多档位降级路径。
+1. **定位不变**：Memory Palace 是 MCP 生态下的长期记忆引擎，不做 mem0 替代品，不引入图数据库路线。
+2. **默认行为稳定**：新能力默认关闭或兼容现有默认值；`A/B/C/D` 档位契约不变。
+3. **安全优先**：任何“自动读文件/自动写记忆”能力必须先通过鉴权与最小权限审查。
+4. **增量演进**：优先在现有 `Write Guard + Gist + Observability + Runtime` 链路上扩展，不重写主干。
+5. **先证据后开关**：涉及 LLM 路由、向量加速、并发优化的改造，必须先做 A/B 或 spike，再决定是否默认开启。
 
-### 🔴 改进 11（P1）：Embedding 可插拔 + 降级链
+---
 
-**局限**：档位 B 的 Hash Embedding 是 token 级 hash 签名，无法理解语义
+## 1. 当前基线（与代码一致）
 
-**修复方案**：引入可配置的 embedding provider 链，失败时自动降级
+### 1.1 已具备能力（不再重复规划）
 
-#### [MODIFY] [sqlite_client.py](file:///Users/yangjunjie/Desktop/clawanti/Memory-Palace/backend/db/sqlite_client.py)
+- 检索权重可配（hybrid 权重与策略模板权重）。
+- 自动 flush（含阈值触发与 compact_context 链路）。
+- 嵌入缓存（`EmbeddingCache`）。
+- Write Lane 双层并发协调（session lane + global lane）。
+- 运行时短期记忆雏形（`SessionSearchCache` + `SessionFlushTracker`）。
 
-- 重构 `_fetch_remote_embedding()` 为 `EmbeddingProvider` 抽象
-- 降级链：`配置的远程 API` → `备用远程 API` → `本地轻量模型` → `hash embedding（现有档位 B）`
-- 环境变量：`EMBEDDING_PROVIDER`（默认 `auto`）、`EMBEDDING_FALLBACK_CHAIN`（默认 `remote,hash`）
+### 1.2 原 14 项改进状态矩阵（重排）
 
-**降级 Fallback 矩阵**：
+状态定义：
+- `DONE`：已实现并可用
+- `PARTIAL`：已有基础，但与目标形态不完全一致
+- `BACKLOG`：建议进入实施队列
+- `HOLD`：高风险/高不确定，先冻结
+- `DROP`：不建议继续推进
 
-| 档位 | 改进前 | 改进后 | 降级路径 |
+| # | 改进项 | 当前状态 | 处理结论 |
 |---|---|---|---|
-| A | 纯 keyword | 纯 keyword（不变） | — |
-| B | keyword + hash | keyword + 远程 embedding（可配） | 远程失败 → hash embedding |
-| C/D | keyword + API embedding | keyword + API embedding（不变） | 主 API 失败 → 备用 API → hash |
+| 1 | 索引自动生成 | `PARTIAL` | 进入 `BACKLOG`（做 index-lite，复用 gist） |
+| 2 | 审计 URI | `PARTIAL` | 进入 `BACKLOG`（聚合现有分散能力） |
+| 3 | 作用域规则 | `PARTIAL` | 进入 `BACKLOG`（先 query hint，后 schema） |
+| 4 | 层级继承 | `BACKLOG` | 保留（仅可选参数，不改默认行为） |
+| 5 | 外部导入 | `HOLD` | 冻结（安全风险高，当前读面不适合直接放开） |
+| 6 | 自动学习触发器 | `PARTIAL` | `HOLD`（先做显式触发，不做隐式自动写入） |
+| 7 | MMR 去重 | `BACKLOG` | 保留（hybrid 下 feature flag） |
+| 8 | 搜索权重可配 | `DONE` | 关闭该项（转入维护） |
+| 9 | 自动 flush | `DONE` | 关闭该项（转入维护） |
+| 10 | 嵌入缓存 | `DONE` | 关闭该项（转入维护） |
+| 11 | Embedding 可插拔 | `PARTIAL` | `HOLD`（先避免变量体系冲突） |
+| 12 | sqlite-vec 加速 | `HOLD` | 仅做 spike，不进短周期承诺 |
+| 13 | Write Lane 优化 | `PARTIAL` | `HOLD`（先做压测与 WAL 可行性） |
+| 14 | 意图分类 LLM | `BACKLOG` | 保留为实验项（默认关闭） |
 
----
+### 1.3 Phase A 补齐：逐项验收定义与默认开关策略
 
-### 🔴 改进 12（P2）：sqlite-vec 向量加速
-
-**局限**：SQLite 不支持 ANN 索引，大规模数据检索效率远不及 Milvus/Faiss
-
-**修复方案**：引入 sqlite-vec 扩展（与 OpenClaw 相同方案），在 SQLite 内实现向量距离查询
-
-#### [MODIFY] [sqlite_client.py](file:///Users/yangjunjie/Desktop/clawanti/Memory-Palace/backend/db/sqlite_client.py)
-
-- 启动时尝试加载 `sqlite-vec` 扩展
-- 成功：使用 `vec0` 虚拟表存储/检索向量
-- 失败：降级回内存中遍历余弦相似度（现有行为）
-- 环境变量：`SQLITE_VEC_ENABLED`（默认 `true`）、`SQLITE_VEC_EXTENSION_PATH`（可选）
-
-**降级 Fallback**：
-
-```
-sqlite-vec 可用 → 原生向量索引查询（O(log n)）
-       ↓ 扩展加载失败
-内存余弦遍历（O(n)，现有行为，记录 degrade_reason）
-```
-
-> [!NOTE]
-> 这不改变 MP 的"纯 SQLite"定位——sqlite-vec 是 SQLite 扩展而非外部数据库。不引入 Milvus/Faiss 等外部依赖，符合项目"单文件数据库"设计初衷。
-
----
-
-### 🔴 改进 13（P2）：Write Lane 并发度提升
-
-**局限**：单进程 SQLite 通过 Write Lane 串行化，高并发场景是瓶颈
-
-**修复方案**：WAL 模式 + 读写分离 + 批量写入优化（不引入多进程/多数据库）
-
-#### [MODIFY] [sqlite_client.py](file:///Users/yangjunjie/Desktop/clawanti/Memory-Palace/backend/db/sqlite_client.py)
-
-- 启动时开启 `PRAGMA journal_mode=WAL`（允许并发读）
-- 批量索引重建合并为单事务
-- 环境变量：`SQLITE_WAL_MODE`（默认 `true`）
-
-#### [MODIFY] [runtime_state.py](file:///Users/yangjunjie/Desktop/clawanti/Memory-Palace/backend/runtime_state.py)
-
-- `WriteLanes` 增加批量合并写入（多个小写入合并为单事务提交）
-- 保留 `RUNTIME_WRITE_GLOBAL_CONCURRENCY` 配置
-
-**降级 Fallback**：
-
-```
-WAL 模式启用 → 并发读 + 串行写（数倍吞吐提升）
-       ↓ WAL 不可用（只读文件系统等）
-原有串行模式（记录 degrade_reason）
-```
-
-> [!NOTE]
-> 不引入多进程/分布式数据库。WAL 模式是 SQLite 原生能力，完全符合"单文件数据库"设计。
-
----
-
-### 🔴 改进 14（P1）：意图分类 LLM 增强
-
-**局限**：`classify_intent` 用的是关键词评分规则，非模型推理
-
-**修复方案**：保留现有关键词规则为默认，可选 LLM 增强，失败自动降级
-
-#### [MODIFY] [sqlite_client.py](file:///Users/yangjunjie/Desktop/clawanti/Memory-Palace/backend/db/sqlite_client.py)
-
-- `classify_intent()` 增加 LLM 模式：调用配置的 LLM 进行意图分类
-- 降级链：`LLM 分类` → `keyword_scoring_v2（现有规则）`
-- 环境变量：`INTENT_LLM_ENABLED`（默认 `false`）、`INTENT_LLM_API_BASE`、`INTENT_LLM_MODEL`
-- 复用现有 Write Guard 的 LLM 配置机制
-
-**降级 Fallback**：
-
-```
-INTENT_LLM_ENABLED=true → LLM 意图分类（更准确）
-       ↓ API 超时/失败
-keyword_scoring_v2（现有规则，记录 degrade_reason）
-       ↓（始终可用，无进一步降级）
-```
-
----
-
-## 第三部分：完整 14 项改进一览
-
-| P | # | 改进 | 来源 | 工作量 | 降级保障 |
-|---|---|---|---|---|---|
-| **P0** | 1 | 索引自动生成 | 🔵 CC | ~2天 | 生成失败不阻塞 compact |
-| **P0** | 2 | 审计 URI | 🔵 CC | ~1天 | 部分数据缺失时仍返回可用子集 |
-| **P0** | 7 | MMR 去重 | 🟠 OC | ~1天 | 默认关闭，可配置开启 |
-| **P1** | 3 | 作用域规则 | 🔵 CC | ~2天 | 无 scope 的记忆行为不变 |
-| **P1** | 4 | 层级继承 | 🔵 CC | ~2天 | 默认关闭，显式开启 |
-| **P1** | 8 | 搜索权重可配 | 🟠 OC | ~1天 | 默认值与现有行为一致 |
-| **P1** | 9 | 自动 flush | 🟣 融合 | ~2天 | 仅返回提醒，不强制操作 |
-| **P1** | 11 | Embedding 可插拔 | 🔴 局限 | ~2天 | 远程→hash 三级降级 |
-| **P1** | 14 | 意图分类 LLM | 🔴 局限 | ~2天 | LLM→关键词规则降级 |
-| **P2** | 5 | 外部导入 | 🔵 CC | ~2天 | 引用不可达时显示占位 |
-| **P2** | 6 | 自动学习 | 🔵 CC | ~3天 | 提供 MCP 工具，不植入 LLM 管线 |
-| **P2** | 10 | 嵌入缓存 | 🟠 OC | ~1天 | 缓存未命中退回实时计算 |
-| **P2** | 12 | sqlite-vec 加速 | 🔴 局限 | ~2天 | 扩展不可用退回遍历 |
-| **P2** | 13 | Write Lane 优化 | 🔴 局限 | ~1天 | WAL 不可用退回串行 |
-
-> 总计约 **24 人天**，建议按 P0（~4天）→ P1（~11天）→ P2（~9天）分三批。
-
-### 完整检索管线 Fallback 矩阵
-
-改进后完整的检索流程：
-
-```
-查询 → 意图分类(#14) → 策略模板(#8权重可配) → 检索执行 → MMR去重(#7) → 返回
-                                                    ↓
-                              ┌──────────────┬──────────────┬──────────────┐
-                              │   keyword    │   semantic   │    hybrid    │
-                              │  (BM25/FTS)  │  (向量检索)   │ (keyword+vec)│
-                              └──────────────┴──────────────┴──────────────┘
-```
-
-**按检索模式的降级路径**：
-
-#### `keyword` 模式（始终可用，最终兜底）
-
-```
-SQLite FTS5 → 结果
-   ↓ FTS 不可用（极端情况）
-LIKE 模糊匹配（记录 degrade_reason）
-```
-
-不受 embedding 改进影响。改进 #7 MMR / #8 权重对此模式不适用。
-
-#### `semantic` 模式
-
-```
-意图分类(#14 LLM → 关键词规则)
-   ↓
-Embedding 获取(#11 可插拔降级链):
-   远程 API → 备用 API → 本地模型 → hash embedding
-   ↓
-向量检索(#12 sqlite-vec → 内存余弦遍历)
-   ↓
-缓存层(#10 命中 → 跳过 embedding 计算)
-   ↓
-MMR 去重(#7 开启 → 多样性过滤; 关闭 → 跳过)
-   ↓ embedding 全链路失败
-⚠️ 自动降级到 keyword 模式（记录 degrade_reason）
-```
-
-#### `hybrid` 模式（默认推荐）
-
-```
-意图分类(#14 LLM → 关键词规则)
-   ↓
-策略模板 → 权重(#8): vectorWeight / textWeight 可配
-   ↓
-并行执行:
-   ├─ keyword 分支: FTS5 BM25（始终成功）
-   └─ semantic 分支: embedding(#11) → 向量检索(#12) → 缓存(#10)
-   ↓
-加权合并: finalScore = textWeight × textScore + vectorWeight × vectorScore
-   ↓ semantic 分支失败
-⚠️ 退化为纯 keyword（vectorWeight 归零，记录 degrade_reason）
-   ↓
-MMR 去重(#7) → Reranker(现有) → 返回
-```
-
-**按档位的改进后完整 Fallback 矩阵**：
-
-| 档位 | keyword 模式 | semantic 模式 | hybrid 模式 |
+| # | 改进项 | Phase A 验收定义 | 默认开关策略 |
 |---|---|---|---|
-| **A** | FTS5（不变） | ❌ 不支持→降级 keyword | ❌ 不支持→降级 keyword |
-| **B** | FTS5（不变） | 远程 embedding(#11)→hash→降级 keyword | FTS5 + 远程 embedding(#11)→hash→纯keyword |
-| **B+** | FTS5 + sqlite-vec(#12) | 远程 embedding(#11)+vec加速→hash→降级 keyword | FTS5 + embedding(#11)+vec(#12)→hash→纯keyword |
-| **C/D** | FTS5（不变） | API embedding+vec(#12)+reranker→hash→降级 keyword | FTS5 + API embedding+vec(#12)+reranker→hash→纯keyword |
-
-> **B+ 是改进后新增的中间档位**：比 B 多了 sqlite-vec 加速和远程 embedding 可配，但不需要 reranker API。
-
-**各改进项对检索模式的影响**：
-
-| 改进 | keyword | semantic | hybrid |
-|---|---|---|---|
-| #7 MMR 去重 | — | ✅ 减少冗余 | ✅ 减少冗余 |
-| #8 权重可配 | — | — | ✅ 调节 text/vec 比重 |
-| #10 嵌入缓存 | — | ✅ 加速 | ✅ 加速 |
-| #11 Embedding 可插拔 | — | ✅ 增强语义质量+降级 | ✅ 增强语义质量+降级 |
-| #12 sqlite-vec | — | ✅ 向量检索加速 | ✅ 向量检索加速 |
-| #14 意图 LLM | ✅ 更准确路由 | ✅ 更准确路由 | ✅ 更准确路由 |
-
-### 降级 Fallback 总体设计原则
-
-> [!IMPORTANT]
-> **所有改进遵循 MP 现有的"多档位可用"原则**：
->
-> 1. **默认不改变现有行为**——新特性默认关闭或使用与现有一致的默认值
-> 2. **每项增强都有降级路径**——环境变量控制，失败时自动降级到前一档位
-> 3. **降级可见**——所有降级通过 `degrade_reasons` 字段报告，可在仪表盘观测
-> 4. **不引入新外部必需依赖**——sqlite-vec 是可选扩展，LLM 意图分类可关闭
-> 5. **档位 A（纯 keyword）始终可用**——作为最终兜底
-> 6. **semantic/hybrid 失败始终降级到 keyword**——不会出现检索完全不可用的情况
+| 1 | 索引自动生成 | `read_memory(system://index-lite)` 在“有/无数据”两种场景都返回可解释结果，不出现 500；输出包含生成时间与条目计数。 | 默认关闭自动生成；仅在显式调用或 `INDEX_LITE_ENABLED=true` 时生成/暴露引导入口。 |
+| 2 | 审计 URI | `read_memory(system://audit)` 至少聚合 `index/guard/gist/vitality` 四类摘要；任一子模块缺失需给出 `degrade_reason`。 | 默认只读开启；高成本扩展字段仅在 `AUDIT_VERBOSE=true` 时返回。 |
+| 3 | 作用域规则 | `search_memory` 支持 scope hint 且回显最终生效策略；未传 hint 时行为与当前版本一致。 | 默认关闭强制作用域；仅显式传 `scope_hint` 时生效，不改 schema。 |
+| 4 | 层级继承 | `read_memory` 新增 `include_ancestors` 可选参数，默认不变；开启后按父链补全且无重复节点。 | 默认 `include_ancestors=false`；仅调用方显式开启。 |
+| 5 | 外部导入 | 仅输出安全设计验收包（鉴权、白名单、审计、回滚）；未满足四项前不得进入开发。 | 默认关闭（`HOLD`）；无运行时入口。 |
+| 6 | 自动学习触发器 | 仅允许显式触发写入；隐式自动写入路径全部禁用，并在观测中可追踪触发来源。 | 默认关闭隐式学习；显式触发由 `AUTO_LEARN_EXPLICIT_ENABLED=true` 控制。 |
+| 7 | MMR 去重 | 开关开启后重复结果占比下降且召回不低于基线阈值；结果元数据包含 `mmr_applied`。 | 默认关闭；仅 `RETRIEVAL_MMR_ENABLED=true` 且 hybrid 检索时生效。 |
+| 8 | 搜索权重可配 | 权重配置缺失/非法时可回退默认值，且回归不退化。 | 保持现状（已可用）；不新增开关。 |
+| 9 | 自动 flush | 达阈值自动 flush，异常时可降级并保持主流程可用；观测可看到触发原因。 | 保持现状（已开启）；仅保留现有阈值参数。 |
+| 10 | 嵌入缓存 | 缓存命中/降级路径在观测可追踪；缓存不可用时可回退在线请求。 | 保持现状（已开启）；仅保留 TTL/容量参数调优。 |
+| 11 | Embedding 可插拔 | 先完成 provider 兼容矩阵与回滚方案评审；不得破坏现有 `RETRIEVAL_EMBEDDING_*` 契约。 | 默认 `HOLD`；不启用自动 provider 切换。 |
+| 12 | sqlite-vec 加速 | 仅接受 spike 报告通过（收益、兼容、回滚三项齐备）后再进入开发。 | 默认关闭；只允许实验环境手动开启。 |
+| 13 | Write Lane 优化 | 压测证明吞吐提升且一致性回归为零，并完成 rollback 演练。 | 默认关闭优化路径；保持现有 lane 行为。 |
+| 14 | 意图分类 LLM | 开关开启后需满足 A/B 指标目标；失败必须自动回退规则策略并记录 `degrade_reason`。 | 默认关闭；仅 `INTENT_LLM_ENABLED=true` 开启。 |
 
 ---
 
-## 验证计划
+## 2. 过度设计与下线清单
 
-### 降级测试（关键新增）
+以下内容从“短周期实施计划”中移除：
 
-| 场景 | 验证方法 |
-|---|---|
-| Embedding API 不可达 | 断开网络，确认降级到 hash |
-| sqlite-vec 扩展缺失 | 不安装扩展，确认降级到遍历 |
-| 意图 LLM 超时 | mock 超时，确认降级到 keyword_scoring |
-| WAL 模式不可用 | 只读文件系统，确认串行模式 |
+1. **新增 `B+` 档位**：与当前 `A/B/C/D` 部署契约冲突，先下线。
+2. **一次性推进 1-14 全项**：当前实现已覆盖多项，继续全量推进会造成重复建设。
+3. **外部文件导入默认开启**：在当前公开读面下风险高，先冻结。
+4. **自动学习隐式写入**：易引入噪声与记忆污染，先只保留显式触发方向。
 
-### 回归 + 新增测试
+---
+
+## 3. 争议方向裁决（你关心的“是否值得做”）
+
+下表给出“是否值得改”和“怎么改才不改过头”的明确结论：
+
+| 改进项 | 是否值得做 | 结论 | 推进方式 |
+|---|---|---|---|
+| #3 作用域规则 | `值得` | 直接带来检索精度收益，且可增量实现 | 已纳入 `Phase B`，先做 query hint，不动 schema |
+| #5 外部导入 | `值得，但当前不宜落地` | 能扩展知识来源，但在现有安全边界下风险偏高 | 保持 `HOLD`，先完成鉴权/路径白名单/可审计导入再开发 |
+| #12 sqlite-vec | `值得评估` | 潜在性能收益大，但兼容性和收益不确定 | 纳入 `Phase D Spike`，先做 Go/No-Go |
+| #13 WAL + 批写 | `值得评估` | 高并发场景可能收益明显，但一致性风险需实测 | 纳入 `Phase D Spike`，先压测与回滚演练 |
+| #14 intent LLM | `值得` | 对复杂查询路由有价值，但必须实验开关化 | 已纳入 `Phase C`，默认关闭，A/B 达标才考虑推广 |
+
+裁决原则：这些方向**不是否决**，而是“分层推进、证据驱动、默认保守”。
+
+---
+
+## 4. 关键缺口：短期记忆（Short Memory）
+
+### 4.1 现状判断
+
+项目并非“完全没有 short memory”，已存在运行时短期层：
+
+- 会话检索缓存：`SessionSearchCache`
+- 会话压缩缓冲：`SessionFlushTracker`
+- search 的 session-first 合并
+
+### 4.2 当前短板
+
+1. 短期记忆仍偏“内部机制”，缺少明确的对外契约和观测指标。
+2. 会话隔离语义不够强（当前以进程内 session id 为主）。
+3. 缺少“短期 -> 长期”的显式晋升策略说明（目前主要靠 auto flush）。
+
+### 4.3 方向（不偏离长期记忆定位）
+
+将 short memory 定位为**运行时工作集**，而不是第二套持久化系统：
+
+- 只增强“会话态缓存 + 晋升策略 + 观测”，不引入新数据库层。
+- 长期记忆仍是唯一权威存储（SQLite）。
+
+### 4.4 轻量短期层实施包（明确纳入计划）
+
+定义：short memory 是 runtime 工作集，不是第二套持久化系统。
+
+实施包 `SM-Lite`：
+
+1. `SM-1 会话工作集契约`
+   - 暴露 short memory 核心状态（命中、待 flush 事件、最近活动）。
+   - 明确会话生命周期（活跃、过期、清空）。
+2. `SM-2 晋升机制标准化`
+   - 固化“短期 -> 长期”唯一通道：`compact_context + auto flush`。
+   - 输出晋升元数据（来源、触发原因、摘要质量、降级原因）。
+3. `SM-3 检索融合可观测`
+   - 对 session-first 合并过程给出可审计指标，避免黑盒。
+4. `SM-4 非目标（防止跑偏）`
+   - 不新增短期记忆独立数据库。
+   - 不引入第二套持久化索引链路。
+
+---
+
+## 5. 分期执行计划（重构后）
+
+## Phase A：计划与契约收敛（P0，1-2 天）
+
+目标：先把“文档计划”和“实际代码”对齐，避免继续错配。
+
+任务：
+1. 冻结原 14 项状态矩阵：`DONE/PARTIAL/BACKLOG/HOLD/DROP`（本文件维护唯一版本）。
+2. 清理冲突项：移除 `B+`、移除重复已完成功能的“新增”表述。
+3. 补齐每项的验收定义与默认开关策略（见 `1.3`）。
+4. 明确本阶段执行范围与验证顺序，避免跨阶段并行。
+
+本轮范围（明确到模块/文件）：
+1. `Memory-Palace/docs/improvement/implementation_plan.md`（主改动文件）。
+2. `new/verification_log.md`、`new/release_gate_log.md`（仅门禁脚本自动追加运行记录）。
+
+本阶段执行顺序（先最小验证，再门禁）：
+1. 最小验证（文档契约检查）：
+   ```bash
+   file=Memory-Palace/docs/improvement/implementation_plan.md
+   for p in \
+     "### 1\\.3 Phase A 补齐：逐项验收定义与默认开关策略" \
+     "本轮范围（明确到模块/文件）" \
+     "本阶段执行顺序（先最小验证，再门禁）"
+   do
+     rg -q "$p" "$file" || { echo "phase_a_contract_check_failed:$p"; exit 1; }
+   done
+   echo "phase_a_contract_check_pass"
+   ```
+2. 门禁验证：
+   ```bash
+   bash new/run_post_change_checks.sh --with-docker --docker-profile b --skip-sse
+   ```
+
+验收：
+1. 计划中不再出现与现有实现冲突的默认行为。
+2. 不再出现超出当前部署契约的新增档位。
+3. `1.3` 的 14 项均具备“验收定义 + 默认开关策略”。
+
+---
+
+## Phase B：高价值低风险增强（P0/P1，3-5 天）
+
+目标：在不改主架构的前提下，提高可用性与可观测性。
+
+任务：
+1. **#2 审计 URI**：新增 `system://audit`，聚合 index status、guard 统计、gist/vitality 摘要。
+2. **#1 索引自动生成（轻量版）**：基于 `memory_gists` 生成 `system://index-lite`，并在 `system://boot` 提供可选入口。
+3. **`SM-1` 短期记忆契约 v1**：暴露 session cache/flush 的关键统计到 `index_status` 或 `system://audit`。
+4. **#3 作用域规则 v1**：先支持查询侧 scope hint（不改 schema）。
+
+验收：
+1. 不新增破坏性参数；旧调用兼容。
+2. 后端回归通过，`search_memory` 与 `read_memory(system://*)` 行为可解释。
+3. 明确 short memory 仅为 runtime 工作集，不引入持久化新层。
+
+---
+
+## Phase C：检索质量增强（P1，4-6 天）
+
+目标：提高检索结果质量，但全部以开关控制。
+
+任务：
+1. **#7 MMR 去重**：仅在 hybrid 下提供 feature flag，默认关闭。
+2. **#4 层级继承**：`read_memory` 增 `include_ancestors` 可选参数，默认 `false`。
+3. **#14 意图 LLM（实验）**：加入 `INTENT_LLM_ENABLED` 实验开关，失败回退关键词规则。
+4. **`SM-2/SM-3`**：补齐短期记忆晋升元数据与 session-first 可观测指标。
+5. **C/D 联调口径（临时）**：开发测试阶段，`profile_c/profile_d` 的 benchmark 默认走 `RETRIEVAL_EMBEDDING_BACKEND=api`（不走 `router`），并显式配置 `RETRIEVAL_EMBEDDING_*` 与 `RETRIEVAL_RERANKER_*`；该约定仅用于本地联调，最终交付前需按部署模板口径回切并复验。
+6. **本地联调覆盖来源（记录）**：`new/run_post_change_checks.sh` 在 `--docker-profile c|d` 时允许加载本地 runtime `.env` 覆盖（优先 `Memory-Palace/.env`，其次 `~/Desktop/clawmemo/nocturne_memory/.env`）以便本地 API 链路联调继续进行；该行为仅用于开发验证，不改变 `deploy/profiles/*` 的默认模板。
+
+验收：
+1. 默认配置下行为与当前版本一致。
+2. 开启实验开关后，有明确 A/B 指标和 degrade reason。
+3. 不改变“长期层是唯一权威存储”的架构边界。
+4. 若本轮使用过 C/D `api` 联调口径，发布前必须执行一次“回切检查”：确认 `deploy/profiles/*/profile-c.env` 与 `profile-d.env` 仍保持 `router` 默认，并重新执行 `--docker-profile c|d` 烟测。
+5. 上线前复验必须在“未加载本地 runtime 覆盖”的环境执行，避免把开发机私有 API 配置带入交付判定。
+
+---
+
+## Phase D：技术 Spike（P2，按需）
+
+以下项不纳入短周期承诺，只做可行性验证：
+
+1. **#11 Embedding 可插拔深化**：评估主备 provider 链，不打破现有 `RETRIEVAL_EMBEDDING_*` 契约。
+2. **#12 sqlite-vec**：评估扩展可用性、兼容性、收益与回滚成本。
+3. **#13 Write Lane + WAL**：评估高并发收益与一致性风险。
+4. **#5 外部导入 / #6 自动学习隐式化**：需先过安全评审与噪声治理方案。
+
+Go/No-Go 标准：
+1. 无法证明收益显著且回滚简单时，保持 `HOLD`。
+2. 不满足安全基线时，不进入开发阶段。
+
+---
+
+## 6. 验证门禁（每阶段执行）
+
+最小门禁：
 
 ```bash
-python -m pytest backend/tests/ -v  # 现有回归
+cd Memory-Palace/backend && .venv/bin/pytest tests -q
+cd Memory-Palace/frontend && npm run test && npm run build
+bash new/run_post_change_checks.sh --with-docker --docker-profile b --skip-sse
 ```
 
-新增测试文件覆盖改进 1-14（每项一个测试文件）。
+增强门禁（涉及检索改动时）：
+
+```bash
+cd Memory-Palace/backend && .venv/bin/pytest tests/benchmark -q
+```
+
+---
+
+## 7. 决策记录（本次重构结果）
+
+### 7.1 保留执行
+
+- #1、#2、#3、#4、#7、#14（其中 #14 为实验项）
+- short memory 契约增强（作为本轮新增治理项）
+
+### 7.2 暂缓（HOLD）
+
+- #5、#6、#11、#12、#13
+
+### 7.3 关闭（DONE/不再作为新增）
+
+- #8、#9、#10
+
+---
+
+## 8. 后续维护规则
+
+1. 每次状态变更只更新本文件，不再维护平行版本计划。
+2. 新改进项必须先写“默认行为是否变化 + 回滚策略 + 验收命令”。
+3. 不允许再引入与 `A/B/C/D` 契约冲突的新档位，除非先更新部署规范并完成兼容评审。
+
+---
+
+## 9. 下次开工指令模板（可直接复制）
+
+目标：让执行从第一条消息就进入“低风险、可回滚、可验收”模式。
+
+### 模板 A（按阶段执行，推荐）
+
+```text
+请按 /Users/yangjunjie/Desktop/clawanti/Memory-Palace/docs/improvement/implementation_plan.md 执行 Phase <A|B|C|D>。
+要求：
+1) 仅修改该阶段必要文件，禁止无关重构。
+2) 每完成一个子任务先跑最小验证，再进入下一步。
+3) 若出现失败，先定位根因并给出修复，再继续推进。
+4) 阶段结束后执行文档中的“验证门禁”命令并汇总结果。
+5) 输出：改动文件清单、风险点、回滚点、验证结果。
+暂时不要做下一阶段。
+```
+
+### 模板 B（一次执行到“可提交”）
+
+```text
+请从 implementation_plan.md 的当前待执行阶段开始，连续执行到形成一次可提交变更。
+要求：
+1) 严格遵守“执行边界”和“争议方向裁决”。
+2) #14 必须保持默认关闭（实验开关）；#5/#12/#13 按计划仅做对应级别动作（不得越级）。
+3) 前后端、docker scripts、部署与运行记录都要覆盖验证。
+4) 输出最终建议 commit message（Conventional Commits）和验证摘要。
+```
+
+---
+
+## 10. 模块级执行清单（避免漏项）
+
+| 模块 | 何时必须覆盖 | 最低执行动作 |
+|---|---|---|
+| `backend/` | 检索、记忆、runtime、API 任一改动 | 跑相关 pytest；阶段末跑 `backend tests -q` |
+| `frontend/` | API 契约或页面行为改动 | 跑相关前端测试；阶段末 `npm run test && npm run build` |
+| `scripts/` + `deploy/` + `docker-compose.yml` | 部署/脚本/端口/档位改动 | 跑 `run_post_change_checks.sh` 的 docker 门禁 |
+| `docs/` | 参数、流程、接口行为变更 | 同步本文件与相关文档，避免计划漂移 |
+| `new/*.md` 运行记录 | 每次阶段验收 | 记录门禁 run 结果与失败原因/修复结论 |
+| `snapshots/` | 需要文件级快照留痕时 | 当前仓库为空目录；如本轮需快照，先定义命名规范再写入 |
+
+说明：`snapshots/` 目前不在默认门禁产物链中，现阶段以 `new/` 下验证日志为主要审计锚点。
+
+---
+
+## 11. Bug 预防执行规则（开工即生效）
+
+1. 每次只推进一个阶段，不跨阶段并行改动。
+2. 每个子任务“改动 -> 最小验证 -> 再改动”，避免堆叠故障。
+3. 默认不开启实验特性（尤其 #14），除非该任务明确要求。
+4. 任何影响部署行为的改动必须补一条 docker 门禁验证。
+5. 验收失败时不跳过，必须给出“失败原因 + 修复动作 + 复验结果”。

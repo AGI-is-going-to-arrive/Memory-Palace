@@ -15,6 +15,7 @@ import hashlib
 import sqlite3
 import time
 import httpx
+from pathlib import Path as FilePath
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List, Tuple
 from contextlib import asynccontextmanager
@@ -290,12 +291,23 @@ class SQLiteClient:
             )
             or "hash-v1"
         )
+        self._embedding_provider_chain_enabled = self._env_bool(
+            "EMBEDDING_PROVIDER_CHAIN_ENABLED", False
+        )
+        self._embedding_provider_fail_open = self._env_bool(
+            "EMBEDDING_PROVIDER_FAIL_OPEN", False
+        )
+        self._embedding_provider_fallback = (
+            str(os.getenv("EMBEDDING_PROVIDER_FALLBACK") or "hash").strip().lower()
+            or "hash"
+        )
         self._embedding_api_base = self._resolve_embedding_api_base(
             self._embedding_backend
         )
         self._embedding_api_key = self._resolve_embedding_api_key(
             self._embedding_backend
         )
+        self._embedding_provider_candidates = self._build_embedding_provider_candidates()
         self._embedding_dim = max(16, self._env_int("RETRIEVAL_EMBEDDING_DIM", 64))
         self._remote_http_timeout_sec = max(
             1.0, self._env_float("RETRIEVAL_REMOTE_TIMEOUT_SEC", 8.0)
@@ -338,6 +350,39 @@ class SQLiteClient:
         self._recency_half_life_days = max(
             1.0, self._env_float("RETRIEVAL_RECENCY_HALF_LIFE_DAYS", 30.0)
         )
+        self._mmr_enabled = self._env_bool("RETRIEVAL_MMR_ENABLED", False)
+        self._mmr_lambda = min(1.0, max(0.0, self._env_float("RETRIEVAL_MMR_LAMBDA", 0.65)))
+        self._mmr_candidate_factor = max(
+            1, self._env_int("RETRIEVAL_MMR_CANDIDATE_FACTOR", 3)
+        )
+        self._intent_llm_enabled = self._env_bool("INTENT_LLM_ENABLED", False)
+        self._intent_llm_api_base = self._normalize_chat_api_base(
+            self._first_env(
+                [
+                    "INTENT_LLM_API_BASE",
+                    "LLM_RESPONSES_URL",
+                    "OPENAI_BASE_URL",
+                    "OPENAI_API_BASE",
+                    "ROUTER_API_BASE",
+                ]
+            )
+        )
+        self._intent_llm_api_key = self._first_env(
+            [
+                "INTENT_LLM_API_KEY",
+                "LLM_API_KEY",
+                "OPENAI_API_KEY",
+                "ROUTER_API_KEY",
+            ]
+        )
+        self._intent_llm_model = self._first_env(
+            [
+                "INTENT_LLM_MODEL",
+                "LLM_MODEL_NAME",
+                "OPENAI_MODEL",
+                "ROUTER_CHAT_MODEL",
+            ]
+        )
         self._vitality_max_score = max(
             0.1, self._env_float("VITALITY_MAX_SCORE", 3.0)
         )
@@ -364,6 +409,26 @@ class SQLiteClient:
             "false",
             "0",
         }
+        self._sqlite_vec_enabled = self._env_bool("RETRIEVAL_SQLITE_VEC_ENABLED", False)
+        self._sqlite_vec_extension_path = self._first_env(
+            ["RETRIEVAL_SQLITE_VEC_EXTENSION_PATH"]
+        )
+        self._vector_engine_requested = self._normalize_vector_engine(
+            os.getenv("RETRIEVAL_VECTOR_ENGINE", "legacy")
+        )
+        self._sqlite_vec_read_ratio = min(
+            100, max(0, self._env_int("RETRIEVAL_SQLITE_VEC_READ_RATIO", 0))
+        )
+        self._sqlite_vec_capability: Dict[str, Any] = {
+            "status": "disabled",
+            "sqlite_vec_readiness": "hold",
+            "diag_code": "sqlite_vec_disabled",
+            "extension_path_input": self._sqlite_vec_extension_path,
+            "extension_path": "",
+            "extension_loaded": False,
+            "extension_path_exists": False,
+        }
+        self._vector_engine_effective = "legacy"
 
     @staticmethod
     def _env_int(name: str, default: int) -> int:
@@ -452,6 +517,81 @@ class SQLiteClient:
             ["RETRIEVAL_EMBEDDING_API_KEY", "RETRIEVAL_EMBEDDING_KEY", "ROUTER_API_KEY", "OPENAI_API_KEY"]
         )
 
+    def _resolve_embedding_model(self, backend: str) -> str:
+        backend_value = (backend or "").strip().lower()
+        if backend_value == "router":
+            return (
+                self._first_env(
+                    [
+                        "ROUTER_EMBEDDING_MODEL",
+                        "RETRIEVAL_EMBEDDING_MODEL",
+                        "OPENAI_EMBEDDING_MODEL",
+                    ],
+                    default=self._embedding_model,
+                )
+                or self._embedding_model
+            )
+        if backend_value == "openai":
+            return (
+                self._first_env(
+                    [
+                        "OPENAI_EMBEDDING_MODEL",
+                        "RETRIEVAL_EMBEDDING_MODEL",
+                        "ROUTER_EMBEDDING_MODEL",
+                    ],
+                    default=self._embedding_model,
+                )
+                or self._embedding_model
+            )
+        return (
+            self._first_env(
+                [
+                    "RETRIEVAL_EMBEDDING_MODEL",
+                    "OPENAI_EMBEDDING_MODEL",
+                    "ROUTER_EMBEDDING_MODEL",
+                ],
+                default=self._embedding_model,
+            )
+            or self._embedding_model
+        )
+
+    def _resolve_chain_fallback_backend(self) -> str:
+        value = (self._embedding_provider_fallback or "hash").strip().lower()
+        if value in {
+            "api",
+            "router",
+            "openai",
+            "hash",
+            "none",
+            "off",
+            "disabled",
+            "false",
+            "0",
+        }:
+            return value
+        return "hash"
+
+    def _build_embedding_provider_candidates(self) -> List[str]:
+        primary_backend = (self._embedding_backend or "hash").strip().lower() or "hash"
+        candidates: List[str] = [primary_backend]
+
+        if not self._embedding_provider_chain_enabled:
+            return candidates
+
+        if self._embedding_provider_fail_open:
+            for backend in ("api", "router", "openai"):
+                if backend not in candidates:
+                    candidates.append(backend)
+            return candidates
+
+        fallback_backend = self._resolve_chain_fallback_backend()
+        if (
+            fallback_backend in {"api", "router", "openai"}
+            and fallback_backend not in candidates
+        ):
+            candidates.append(fallback_backend)
+        return candidates
+
     async def init_db(self):
         """Create tables if they don't exist, and run migrations for schema changes."""
         async with self.engine.begin() as conn:
@@ -463,6 +603,9 @@ class SQLiteClient:
             capabilities = await conn.run_sync(self._setup_index_infra)
             self._fts_available = capabilities.get("fts_available", False)
             self._vector_available = capabilities.get("vector_available", True)
+            self._sqlite_vec_capability = self._probe_sqlite_vec_capability()
+            self._refresh_vector_engine_state()
+            await conn.run_sync(self._sync_set_vector_engine_meta)
         await self._bootstrap_indexes()
 
     @staticmethod
@@ -522,7 +665,75 @@ class SQLiteClient:
         )
         self._sync_set_index_meta(connection, "embedding_backend", self._embedding_backend, now)
         self._sync_set_index_meta(connection, "embedding_model", self._embedding_model, now)
+        self._sync_set_index_meta(
+            connection,
+            "embedding_provider_chain_enabled",
+            "1" if self._embedding_provider_chain_enabled else "0",
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "embedding_provider_fail_open",
+            "1" if self._embedding_provider_fail_open else "0",
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "embedding_provider_fallback",
+            self._resolve_chain_fallback_backend(),
+            now,
+        )
         return {"fts_available": fts_available, "vector_available": self._vector_available}
+
+    def _sync_set_vector_engine_meta(self, connection) -> None:
+        now = _utc_now_naive().isoformat()
+        sqlite_vec_status = str(self._sqlite_vec_capability.get("status", "disabled"))
+        sqlite_vec_diag_code = str(self._sqlite_vec_capability.get("diag_code", ""))
+        sqlite_vec_readiness = str(
+            self._sqlite_vec_capability.get("sqlite_vec_readiness", "hold")
+        )
+        self._sync_set_index_meta(
+            connection,
+            "sqlite_vec_enabled",
+            "1" if self._sqlite_vec_enabled else "0",
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "sqlite_vec_read_ratio",
+            str(int(self._sqlite_vec_read_ratio)),
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "sqlite_vec_status",
+            sqlite_vec_status,
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "sqlite_vec_readiness",
+            sqlite_vec_readiness,
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "sqlite_vec_diag_code",
+            sqlite_vec_diag_code,
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "vector_engine_requested",
+            self._vector_engine_requested,
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "vector_engine_effective",
+            self._vector_engine_effective,
+            now,
+        )
 
     async def _bootstrap_indexes(self) -> None:
         """
@@ -894,6 +1105,128 @@ class SQLiteClient:
         return normalized
 
     @staticmethod
+    def _normalize_vector_engine(value: Optional[str]) -> str:
+        engine = str(value or "legacy").strip().lower() or "legacy"
+        if engine in {"legacy", "vec", "dual"}:
+            return engine
+        return "legacy"
+
+    @staticmethod
+    def _resolve_sqlite_extension_file(path_input: str) -> Optional[FilePath]:
+        raw_path = str(path_input or "").strip()
+        if not raw_path:
+            return None
+        base = FilePath(raw_path).expanduser().resolve()
+        candidates = [base]
+        if base.suffix == "":
+            candidates.extend(
+                FilePath(str(base) + suffix) for suffix in (".dylib", ".so", ".dll")
+            )
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return None
+
+    def _probe_sqlite_vec_capability(self) -> Dict[str, Any]:
+        capability: Dict[str, Any] = {
+            "status": "disabled",
+            "sqlite_vec_readiness": "hold",
+            "diag_code": "",
+            "extension_path_input": self._sqlite_vec_extension_path,
+            "extension_path": "",
+            "extension_loaded": False,
+            "extension_path_exists": False,
+        }
+
+        if not self._sqlite_vec_enabled:
+            capability["diag_code"] = "sqlite_vec_disabled"
+            return capability
+
+        extension_input = str(self._sqlite_vec_extension_path or "").strip()
+        if not extension_input:
+            capability["status"] = "skipped_no_extension_path"
+            capability["diag_code"] = "path_not_provided"
+            return capability
+
+        resolved_extension = self._resolve_sqlite_extension_file(extension_input)
+        if resolved_extension is None:
+            capability["status"] = "invalid_extension_path"
+            capability["diag_code"] = "path_not_found"
+            return capability
+
+        capability["extension_path"] = str(resolved_extension)
+        capability["extension_path_exists"] = True
+        if not resolved_extension.is_file():
+            capability["status"] = "invalid_extension_path"
+            capability["diag_code"] = "path_not_file"
+            return capability
+
+        connection: Optional[sqlite3.Connection] = None
+        try:
+            connection = sqlite3.connect(":memory:")
+            try:
+                connection.enable_load_extension(True)
+            except (AttributeError, sqlite3.Error):
+                capability["status"] = "extension_loading_unavailable"
+                capability["diag_code"] = "enable_load_extension_failed"
+                return capability
+
+            try:
+                connection.load_extension(str(resolved_extension))
+            except sqlite3.Error:
+                capability["status"] = "extension_load_failed"
+                capability["diag_code"] = "load_extension_failed"
+                return capability
+            finally:
+                try:
+                    connection.enable_load_extension(False)
+                except sqlite3.Error:
+                    pass
+
+            capability["status"] = "ok"
+            capability["sqlite_vec_readiness"] = "ready"
+            capability["diag_code"] = ""
+            capability["extension_loaded"] = True
+            return capability
+        except sqlite3.Error:
+            capability["status"] = "sqlite_runtime_error"
+            capability["diag_code"] = "sqlite_runtime_error"
+            return capability
+        finally:
+            if connection is not None:
+                connection.close()
+
+    def _refresh_vector_engine_state(self) -> None:
+        requested = self._normalize_vector_engine(self._vector_engine_requested)
+        self._vector_engine_requested = requested
+        if requested == "legacy":
+            self._vector_engine_effective = "legacy"
+            return
+
+        capability_ready = (
+            str(self._sqlite_vec_capability.get("sqlite_vec_readiness", "hold")) == "ready"
+        )
+        if not self._sqlite_vec_enabled or not capability_ready:
+            self._vector_engine_effective = "legacy"
+            return
+        self._vector_engine_effective = requested
+
+    def _resolve_vector_engine_for_query(self, query: str) -> str:
+        effective = self._normalize_vector_engine(self._vector_engine_effective)
+        if effective in {"legacy", "vec"}:
+            return effective
+
+        if self._sqlite_vec_read_ratio <= 0:
+            return "legacy"
+        if self._sqlite_vec_read_ratio >= 100:
+            return "vec"
+
+        normalized_query = (query or "").strip().lower()
+        digest = hashlib.sha256(normalized_query.encode("utf-8")).digest()
+        bucket = int.from_bytes(digest[:2], byteorder="big") % 100
+        return "vec" if bucket < self._sqlite_vec_read_ratio else "legacy"
+
+    @staticmethod
     def _append_degrade_reason(
         degrade_reasons: Optional[List[str]], reason: str
     ) -> None:
@@ -1100,6 +1433,150 @@ class SQLiteClient:
         }
 
     @staticmethod
+    def _intent_strategy_template(intent: str) -> str:
+        mapping = {
+            "factual": "factual_high_precision",
+            "exploratory": "exploratory_high_recall",
+            "temporal": "temporal_time_filtered",
+            "causal": "causal_wide_pool",
+            "unknown": "default",
+        }
+        return mapping.get(intent, "default")
+
+    async def classify_intent_with_llm(
+        self, query: str, rewritten_query: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Experimental intent classifier with LLM routing and safe fallback.
+
+        Returns heuristic classification when LLM is disabled or fails.
+        """
+        fallback = self.classify_intent(query, rewritten_query)
+        if not self._intent_llm_enabled:
+            return fallback
+
+        degrade_reasons: List[str] = []
+        if not self._intent_llm_api_base or not self._intent_llm_model:
+            degrade_reasons.append("intent_llm_config_missing")
+            return {
+                **fallback,
+                "intent_llm_enabled": True,
+                "intent_llm_applied": False,
+                "degraded": True,
+                "degrade_reason": degrade_reasons[0],
+                "degrade_reasons": degrade_reasons,
+            }
+
+        system_prompt = (
+            "You classify retrieval intent for a memory search system. "
+            "Return strict JSON only with keys: intent, confidence, signals. "
+            "intent must be one of: factual, exploratory, temporal, causal, unknown."
+        )
+        user_prompt = (
+            "Original query:\n"
+            f"{query}\n\n"
+            "Rewritten query:\n"
+            f"{rewritten_query or query}\n\n"
+            "Decide intent for retrieval strategy."
+        )
+        payload = {
+            "model": self._intent_llm_model,
+            "temperature": 0,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        response = await self._post_json(
+            self._intent_llm_api_base,
+            "/chat/completions",
+            payload,
+            self._intent_llm_api_key,
+        )
+        if response is None:
+            degrade_reasons.append("intent_llm_request_failed")
+            return {
+                **fallback,
+                "intent_llm_enabled": True,
+                "intent_llm_applied": False,
+                "degraded": True,
+                "degrade_reason": degrade_reasons[0],
+                "degrade_reasons": degrade_reasons,
+            }
+
+        message_text = self._extract_chat_message_text(response)
+        if not message_text:
+            degrade_reasons.append("intent_llm_response_empty")
+            return {
+                **fallback,
+                "intent_llm_enabled": True,
+                "intent_llm_applied": False,
+                "degraded": True,
+                "degrade_reason": degrade_reasons[0],
+                "degrade_reasons": degrade_reasons,
+            }
+
+        parsed: Optional[Dict[str, Any]] = None
+        try:
+            loaded = json.loads(message_text)
+            if isinstance(loaded, dict):
+                parsed = loaded
+        except (TypeError, ValueError):
+            parsed = None
+
+        if parsed is None:
+            degrade_reasons.append("intent_llm_response_invalid")
+            return {
+                **fallback,
+                "intent_llm_enabled": True,
+                "intent_llm_applied": False,
+                "degraded": True,
+                "degrade_reason": degrade_reasons[0],
+                "degrade_reasons": degrade_reasons,
+            }
+
+        intent_value = str(parsed.get("intent") or "").strip().lower()
+        if intent_value not in {"factual", "exploratory", "temporal", "causal", "unknown"}:
+            degrade_reasons.append("intent_llm_intent_invalid")
+            return {
+                **fallback,
+                "intent_llm_enabled": True,
+                "intent_llm_applied": False,
+                "degraded": True,
+                "degrade_reason": degrade_reasons[0],
+                "degrade_reasons": degrade_reasons,
+            }
+
+        confidence_raw = parsed.get("confidence")
+        try:
+            confidence = float(confidence_raw)
+        except (TypeError, ValueError):
+            confidence = 0.62
+        confidence = round(max(0.0, min(1.0, confidence)), 2)
+
+        signals_raw = parsed.get("signals")
+        if isinstance(signals_raw, list):
+            signals = [
+                str(item).strip()
+                for item in signals_raw
+                if isinstance(item, str) and str(item).strip()
+            ][:6]
+        else:
+            signals = []
+        if not signals:
+            signals = [f"intent_llm:{intent_value}"]
+
+        return {
+            "intent": intent_value,
+            "strategy_template": self._intent_strategy_template(intent_value),
+            "method": "intent_llm",
+            "confidence": confidence,
+            "signals": signals,
+            "intent_llm_enabled": True,
+            "intent_llm_applied": True,
+        }
+
+    @staticmethod
     def _normalize_unit_score(value: Any) -> Optional[float]:
         try:
             numeric = float(value)
@@ -1255,6 +1732,101 @@ class SQLiteClient:
             self._append_degrade_reason(degrade_reasons, "embedding_response_invalid")
         return embedding
 
+    async def _fetch_remote_embedding_for_backend(
+        self,
+        *,
+        backend: str,
+        content: str,
+        degrade_reasons: Optional[List[str]] = None,
+    ) -> Optional[List[float]]:
+        backend_value = (backend or "").strip().lower()
+        if backend_value not in {"router", "api", "openai"}:
+            return None
+
+        api_base = self._resolve_embedding_api_base(backend_value)
+        model = self._resolve_embedding_model(backend_value)
+        api_key = self._resolve_embedding_api_key(backend_value)
+        if not api_base or not model:
+            self._append_degrade_reason(degrade_reasons, "embedding_config_missing")
+            self._append_degrade_reason(
+                degrade_reasons, f"embedding_config_missing:{backend_value}"
+            )
+            return None
+
+        payload = {"model": model, "input": content}
+        response = await self._post_json(
+            api_base,
+            "/embeddings",
+            payload,
+            api_key,
+        )
+        if response is None:
+            self._append_degrade_reason(degrade_reasons, "embedding_request_failed")
+            self._append_degrade_reason(
+                degrade_reasons, f"embedding_request_failed:{backend_value}"
+            )
+            return None
+
+        embedding = self._extract_embedding_from_response(response)
+        if embedding is None:
+            self._append_degrade_reason(degrade_reasons, "embedding_response_invalid")
+            self._append_degrade_reason(
+                degrade_reasons, f"embedding_response_invalid:{backend_value}"
+            )
+        return embedding
+
+    async def _get_embedding_via_provider_chain(
+        self,
+        *,
+        normalized: str,
+        degrade_reasons: Optional[List[str]] = None,
+    ) -> List[float]:
+        attempted_backends: set[str] = set()
+        for backend in self._embedding_provider_candidates:
+            backend_value = (backend or "").strip().lower()
+            if not backend_value:
+                continue
+            attempted_backends.add(backend_value)
+
+            if backend_value in {"hash", "none", "off", "disabled", "false", "0"}:
+                continue
+
+            embedding = await self._fetch_remote_embedding_for_backend(
+                backend=backend_value,
+                content=normalized,
+                degrade_reasons=degrade_reasons,
+            )
+            if embedding is not None:
+                return embedding
+            self._append_degrade_reason(
+                degrade_reasons, f"embedding_provider_failed:{backend_value}"
+            )
+            if not self._embedding_provider_fail_open:
+                break
+
+        fallback_backend = self._resolve_chain_fallback_backend()
+        if (
+            fallback_backend in {"api", "router", "openai"}
+            and fallback_backend not in attempted_backends
+        ):
+            embedding = await self._fetch_remote_embedding_for_backend(
+                backend=fallback_backend,
+                content=normalized,
+                degrade_reasons=degrade_reasons,
+            )
+            if embedding is not None:
+                return embedding
+            self._append_degrade_reason(
+                degrade_reasons, f"embedding_provider_failed:{fallback_backend}"
+            )
+
+        if fallback_backend in {"hash", "", "default"} or self._embedding_provider_fail_open:
+            self._append_degrade_reason(degrade_reasons, "embedding_fallback_hash")
+            return self._hash_embedding(normalized, self._embedding_dim)
+
+        self._append_degrade_reason(degrade_reasons, "embedding_provider_chain_blocked")
+        raise RuntimeError("embedding_provider_chain_blocked")
+
     async def _get_rerank_scores(
         self,
         query: str,
@@ -1363,24 +1935,30 @@ class SQLiteClient:
                 pass
 
         embedding: Optional[List[float]] = None
-        backend_value = (self._embedding_backend or "hash").strip().lower()
-
-        if backend_value in {"router", "api", "openai"}:
-            embedding = await self._fetch_remote_embedding(
-                normalized, degrade_reasons=degrade_reasons
+        if self._embedding_provider_chain_enabled:
+            embedding = await self._get_embedding_via_provider_chain(
+                normalized=normalized,
+                degrade_reasons=degrade_reasons,
             )
-            if embedding is None:
-                self._append_degrade_reason(degrade_reasons, "embedding_fallback_hash")
-        elif backend_value not in {
-            "hash",
-            "local",
-            "none",
-            "off",
-            "disabled",
-            "false",
-            "0",
-        }:
-            self._append_degrade_reason(degrade_reasons, "embedding_backend_unsupported")
+        else:
+            backend_value = (self._embedding_backend or "hash").strip().lower()
+
+            if backend_value in {"router", "api", "openai"}:
+                embedding = await self._fetch_remote_embedding(
+                    normalized, degrade_reasons=degrade_reasons
+                )
+                if embedding is None:
+                    self._append_degrade_reason(degrade_reasons, "embedding_fallback_hash")
+            elif backend_value not in {
+                "hash",
+                "local",
+                "none",
+                "off",
+                "disabled",
+                "false",
+                "0",
+            }:
+                self._append_degrade_reason(degrade_reasons, "embedding_backend_unsupported")
 
         if embedding is None:
             embedding = self._hash_embedding(normalized, self._embedding_dim)
@@ -2001,7 +2579,7 @@ class SQLiteClient:
     # =========================================================================
 
     async def get_memory_by_path(
-        self, path: str, domain: str = "core"
+        self, path: str, domain: str = "core", reinforce_access: bool = True
     ) -> Optional[Dict[str, Any]]:
         """
         Get a memory by its path.
@@ -2009,6 +2587,7 @@ class SQLiteClient:
         Args:
             path: The path to look up
             domain: The domain/namespace (e.g., "core", "writer", "game")
+            reinforce_access: Whether to reinforce access_count/vitality on read
 
         Returns:
             Memory dict with id, content, priority, disclosure, created_at
@@ -2028,7 +2607,8 @@ class SQLiteClient:
                 return None
 
             memory, path_obj = row
-            await self._reinforce_memory_access(session, [memory.id])
+            if reinforce_access:
+                await self._reinforce_memory_access(session, [memory.id])
             gist_map = await self._get_latest_gists_map(session, [memory.id])
             gist = gist_map.get(memory.id) or {}
             return {
@@ -2945,7 +3525,20 @@ class SQLiteClient:
             try:
                 parsed = json.loads(item)
             except (TypeError, ValueError):
-                continue
+                # Real-world model outputs may be JSON-like (e.g. unquoted keys).
+                # Try a conservative normalization before giving up.
+                normalized = item
+                normalized = re.sub(r"([{,]\s*)([A-Za-z_][A-Za-z0-9_\-]*)(\s*:)", r'\1"\2"\3', normalized)
+                normalized = re.sub(r",\s*([}\]])", r"\1", normalized)
+                if "'" in normalized and '"' not in normalized:
+                    normalized = normalized.replace("'", '"')
+                if normalized != item:
+                    try:
+                        parsed = json.loads(normalized)
+                    except (TypeError, ValueError):
+                        continue
+                else:
+                    continue
             if isinstance(parsed, dict):
                 return parsed
         return None
@@ -3452,6 +4045,122 @@ class SQLiteClient:
             keyword_top=keyword_top,
         )
 
+    @staticmethod
+    def _mmr_tokens(row: Dict[str, Any]) -> set[str]:
+        snippet = str(row.get("snippet") or "")
+        metadata = row.get("metadata")
+        path = ""
+        if isinstance(metadata, dict):
+            path = str(metadata.get("path") or "")
+        source = f"{snippet} {path}".lower()
+        return set(re.findall(r"[a-z0-9_]+", source))
+
+    @staticmethod
+    def _jaccard_similarity(tokens_a: set[str], tokens_b: set[str]) -> float:
+        if not tokens_a or not tokens_b:
+            return 0.0
+        union = tokens_a | tokens_b
+        if not union:
+            return 0.0
+        return len(tokens_a & tokens_b) / len(union)
+
+    def _apply_mmr_rerank(
+        self, scored_results: List[Dict[str, Any]], max_results: int
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        if not scored_results:
+            return [], {
+                "mmr_applied": False,
+                "mmr_candidate_count": 0,
+                "mmr_selected_count": 0,
+            }
+
+        selection_limit = max(1, int(max_results))
+        candidate_limit = min(
+            len(scored_results), selection_limit * max(1, self._mmr_candidate_factor)
+        )
+        candidate_pool = list(scored_results[:candidate_limit])
+        if len(candidate_pool) <= 1:
+            selected = candidate_pool[:selection_limit]
+            return selected, {
+                "mmr_applied": False,
+                "mmr_candidate_count": len(candidate_pool),
+                "mmr_selected_count": len(selected),
+            }
+
+        max_final = max(
+            float(item.get("scores", {}).get("final", 0.0)) for item in candidate_pool
+        )
+        if max_final <= 0:
+            max_final = 1.0
+
+        token_cache = [self._mmr_tokens(item) for item in candidate_pool]
+        selected_indices: List[int] = []
+        remaining = set(range(len(candidate_pool)))
+
+        while remaining and len(selected_indices) < selection_limit:
+            best_idx: Optional[int] = None
+            best_score = float("-inf")
+            best_relevance = float("-inf")
+            best_diversity = float("inf")
+
+            for idx in remaining:
+                raw_final = float(candidate_pool[idx].get("scores", {}).get("final", 0.0))
+                relevance = max(0.0, raw_final) / max_final
+
+                if not selected_indices:
+                    diversity_penalty = 0.0
+                else:
+                    diversity_penalty = max(
+                        self._jaccard_similarity(token_cache[idx], token_cache[picked])
+                        for picked in selected_indices
+                    )
+                mmr_score = (self._mmr_lambda * relevance) - (
+                    (1.0 - self._mmr_lambda) * diversity_penalty
+                )
+
+                if best_idx is None or mmr_score > best_score + 1e-12:
+                    best_idx = idx
+                    best_score = mmr_score
+                    best_relevance = relevance
+                    best_diversity = diversity_penalty
+                    continue
+
+                if abs(mmr_score - best_score) <= 1e-12:
+                    if relevance > best_relevance + 1e-12:
+                        best_idx = idx
+                        best_relevance = relevance
+                        best_diversity = diversity_penalty
+                        continue
+                    if (
+                        abs(relevance - best_relevance) <= 1e-12
+                        and diversity_penalty < best_diversity - 1e-12
+                    ):
+                        best_idx = idx
+                        best_diversity = diversity_penalty
+                        continue
+                    if (
+                        abs(relevance - best_relevance) <= 1e-12
+                        and abs(diversity_penalty - best_diversity) <= 1e-12
+                    ):
+                        current_uri = str(candidate_pool[idx].get("uri") or "")
+                        best_uri = str(
+                            candidate_pool[best_idx].get("uri") or ""
+                        )
+                        if current_uri < best_uri:
+                            best_idx = idx
+
+            if best_idx is None:
+                break
+            selected_indices.append(best_idx)
+            remaining.discard(best_idx)
+
+        selected_results = [candidate_pool[idx] for idx in selected_indices]
+        return selected_results, {
+            "mmr_applied": True,
+            "mmr_candidate_count": len(candidate_pool),
+            "mmr_selected_count": len(selected_results),
+        }
+
     async def search_advanced(
         self,
         query: str,
@@ -3497,6 +4206,22 @@ class SQLiteClient:
             "strategy_template": strategy_template,
             "candidate_multiplier_applied": applied_candidate_multiplier,
         }
+        default_mmr_metadata = {
+            "mmr_applied": False,
+            "mmr_candidate_count": 0,
+            "mmr_selected_count": 0,
+        }
+        vector_engine_metadata = {
+            "vector_engine_requested": self._vector_engine_requested,
+            "vector_engine_effective": self._vector_engine_effective,
+            "vector_engine_selected": "legacy",
+            "sqlite_vec_enabled": self._sqlite_vec_enabled,
+            "sqlite_vec_read_ratio": int(self._sqlite_vec_read_ratio),
+            "sqlite_vec_status": str(self._sqlite_vec_capability.get("status", "disabled")),
+            "sqlite_vec_readiness": str(
+                self._sqlite_vec_capability.get("sqlite_vec_readiness", "hold")
+            ),
+        }
 
         if not query:
             degrade_reasons = ["empty_query"]
@@ -3511,6 +4236,8 @@ class SQLiteClient:
                     "degraded": True,
                     "degrade_reasons": degrade_reasons,
                     **strategy_metadata,
+                    **vector_engine_metadata,
+                    **default_mmr_metadata,
                 },
             }
 
@@ -3689,6 +4416,28 @@ class SQLiteClient:
                         )
 
             if mode_value in {"semantic", "hybrid"}:
+                requested_vector_engine = self._normalize_vector_engine(
+                    self._vector_engine_requested
+                )
+                selected_vector_engine = self._resolve_vector_engine_for_query(query)
+                vector_engine_metadata["vector_engine_selected"] = selected_vector_engine
+                if (
+                    requested_vector_engine != "legacy"
+                    and self._vector_engine_effective == "legacy"
+                ):
+                    self._append_degrade_reason(
+                        degrade_reasons, "sqlite_vec_fallback_legacy"
+                    )
+                if selected_vector_engine == "vec":
+                    self._append_degrade_reason(
+                        degrade_reasons, "sqlite_vec_fallback_legacy"
+                    )
+                    self._append_degrade_reason(
+                        degrade_reasons,
+                        f"sqlite_vec_status:{vector_engine_metadata['sqlite_vec_status']}",
+                    )
+                    vector_engine_metadata["vector_engine_selected"] = "legacy"
+
                 query_embedding = await self._get_embedding(
                     session,
                     query,
@@ -3787,6 +4536,8 @@ class SQLiteClient:
                         "degraded": degraded,
                         "degrade_reasons": list(degrade_reasons),
                         **strategy_metadata,
+                        **vector_engine_metadata,
+                        **default_mmr_metadata,
                     },
                 }
 
@@ -3926,7 +4677,31 @@ class SQLiteClient:
                 )
 
             scored_results.sort(key=lambda row: row["scores"]["final"], reverse=True)
-            top_results = scored_results[:max_results]
+            mmr_metadata: Dict[str, Any] = {
+                "mmr_applied": False,
+                "mmr_candidate_count": 0,
+                "mmr_selected_count": 0,
+            }
+            if self._mmr_enabled and mode_value == "hybrid":
+                try:
+                    top_results, mmr_metadata = self._apply_mmr_rerank(
+                        scored_results,
+                        max_results=max_results,
+                    )
+                except Exception:
+                    self._append_degrade_reason(degrade_reasons, "mmr_rerank_failed")
+                    top_results = scored_results[:max_results]
+                    mmr_metadata = {
+                        "mmr_applied": False,
+                        "mmr_candidate_count": min(
+                            len(scored_results),
+                            max(1, max_results * max(1, self._mmr_candidate_factor)),
+                        ),
+                        "mmr_selected_count": len(top_results),
+                    }
+            else:
+                top_results = scored_results[:max_results]
+                mmr_metadata["mmr_selected_count"] = len(top_results)
             await self._reinforce_memory_access(
                 session,
                 [
@@ -3947,6 +4722,8 @@ class SQLiteClient:
                     "degraded": degraded,
                     "degrade_reasons": list(degrade_reasons),
                     **strategy_metadata,
+                    **vector_engine_metadata,
+                    **mmr_metadata,
                 },
             }
 
@@ -4170,6 +4947,21 @@ class SQLiteClient:
                     "embedding_backend": self._embedding_backend,
                     "embedding_model": self._embedding_model,
                     "embedding_dim": self._embedding_dim,
+                    "embedding_provider_chain_enabled": self._embedding_provider_chain_enabled,
+                    "embedding_provider_fail_open": self._embedding_provider_fail_open,
+                    "embedding_provider_fallback": self._resolve_chain_fallback_backend(),
+                    "embedding_provider_candidates": list(self._embedding_provider_candidates),
+                    "sqlite_vec_enabled": self._sqlite_vec_enabled,
+                    "sqlite_vec_read_ratio": int(self._sqlite_vec_read_ratio),
+                    "sqlite_vec_status": str(self._sqlite_vec_capability.get("status", "disabled")),
+                    "sqlite_vec_readiness": str(
+                        self._sqlite_vec_capability.get("sqlite_vec_readiness", "hold")
+                    ),
+                    "sqlite_vec_diag_code": str(
+                        self._sqlite_vec_capability.get("diag_code", "")
+                    ),
+                    "vector_engine_requested": self._vector_engine_requested,
+                    "vector_engine_effective": self._vector_engine_effective,
                     "reranker_enabled": self._reranker_enabled,
                     "reranker_model": self._reranker_model,
                     "rerank_weight": self._rerank_weight,

@@ -227,6 +227,7 @@ export default function ObservabilityPage() {
     sessionId: 'api-observability',
     domain: '',
     pathPrefix: '',
+    scopeHint: '',
     maxPriority: '',
   });
   const activeJobId = summary?.health?.runtime?.index_worker?.active_job_id || null;
@@ -326,6 +327,9 @@ export default function ObservabilityPage() {
         session_id: form.sessionId.trim() || null,
         filters,
       };
+      if (form.scopeHint.trim()) {
+        payload.scope_hint = form.scopeHint.trim();
+      }
 
       const data = await runObservabilitySearch(payload);
       setSearchResult(data);
@@ -469,6 +473,9 @@ export default function ObservabilityPage() {
   const runtime = health.runtime || {};
   const worker = runtime.index_worker || {};
   const sleepConsolidation = runtime.sleep_consolidation || summary?.sleep_consolidation || {};
+  const smLite = runtime.sm_lite || {};
+  const smSession = smLite.session_cache || {};
+  const smFlush = smLite.flush_tracker || {};
   const indexLatency = summary?.index_latency || {};
   const cleanupQueryStats = summary?.cleanup_query_stats || {};
   const cleanupLatency = cleanupQueryStats.latency_ms || {};
@@ -710,6 +717,18 @@ export default function ObservabilityPage() {
                 />
               </div>
 
+              <div className="mb-3">
+                <input
+                  id="obs-scope-hint-input"
+                  name="scope_hint"
+                  aria-label="Scope hint"
+                  value={form.scopeHint}
+                  onChange={(e) => onFieldChange('scopeHint', e.target.value)}
+                  className={INPUT_CLASS}
+                  placeholder="scope hint (e.g. core://agent)"
+                />
+              </div>
+
               <div className="mb-4 flex items-center justify-between gap-2">
                 <input
                   id="obs-max-priority-input"
@@ -780,6 +799,10 @@ export default function ObservabilityPage() {
                 <p>last worker error: {worker.last_error || '-'}</p>
                 <p>sleep pending: {String(Boolean(worker.sleep_pending))}</p>
                 <p>sleep last reason: {sleepConsolidation.reason || '-'}</p>
+                <p>sm-lite sessions: {smSession.session_count ?? '-'}</p>
+                <p>sm-lite pending events: {smFlush.pending_events ?? '-'}</p>
+                <p>sm-lite degraded: {String(Boolean(smLite.degraded))}</p>
+                <p>sm-lite reason: {smLite.reason || '-'}</p>
                 <p>cleanup queries: {formatNumber(cleanupQueryStats.total_queries)}</p>
                 <p>updated at: {summary?.timestamp || '-'}</p>
               </div>

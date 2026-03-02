@@ -52,3 +52,16 @@ async def test_search_memory_rejects_non_string_query() -> None:
     assert payload["ok"] is False
     assert payload["error"] == "query must be a string."
 
+
+@pytest.mark.asyncio
+async def test_search_memory_invalid_mode_validated_before_db_init(monkeypatch) -> None:
+    def _boom():
+        raise RuntimeError("should_not_init_db_for_invalid_mode")
+
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", _boom)
+
+    raw = await mcp_server.search_memory("memory queue", mode="invalid-mode")
+    payload = json.loads(raw)
+
+    assert payload["ok"] is False
+    assert "Invalid mode" in payload["error"]

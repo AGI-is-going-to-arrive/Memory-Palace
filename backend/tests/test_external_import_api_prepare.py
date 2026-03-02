@@ -29,6 +29,7 @@ def _prepare_payload(file_path: Path) -> dict:
 @pytest.fixture(autouse=True)
 def _reset_import_job_store(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(maintenance_api, "_IMPORT_JOBS", {})
+    monkeypatch.setattr(maintenance_api, "_LEARN_JOBS", {})
     monkeypatch.setattr(maintenance_api, "_EXTERNAL_IMPORT_GUARD", None)
     monkeypatch.setattr(maintenance_api, "_EXTERNAL_IMPORT_GUARD_FINGERPRINT", None)
 
@@ -205,7 +206,8 @@ def test_import_prepare_returns_prepared_job_payload(
     assert payload.get("ok") is True
     assert payload.get("status") == "prepared"
     assert payload.get("dry_run") is True
-    assert str(payload.get("job_id") or "").startswith("import-")
+    job_id = str(payload.get("job_id") or "")
+    assert job_id.startswith("import-")
     job = payload.get("job") or {}
     assert job.get("status") == "prepared"
     assert job.get("file_count") == 1
@@ -218,3 +220,5 @@ def test_import_prepare_returns_prepared_job_payload(
     assert len(files) == 1
     assert files[0].get("target_uri", "").startswith("notes://")
     assert "content" not in files[0]
+    assert job_id in maintenance_api._IMPORT_JOBS
+    assert job_id not in maintenance_api._LEARN_JOBS

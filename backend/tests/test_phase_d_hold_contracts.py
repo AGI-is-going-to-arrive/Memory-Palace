@@ -27,7 +27,7 @@ async def _active_counts(client: SQLiteClient) -> tuple[int, int]:
         )
 
 
-def test_phase_d_hold_external_import_has_no_runtime_entry_http_and_mcp() -> None:
+def test_phase_d_hold_http_and_mcp_contracts() -> None:
     business_paths = [
         route.path
         for route in main.app.routes
@@ -51,6 +51,13 @@ def test_phase_d_hold_external_import_has_no_runtime_entry_http_and_mcp() -> Non
         "/maintenance/index/reindex/{memory_id}",
         "/maintenance/index/sleep-consolidation",
         "/maintenance/index/worker",
+        "/maintenance/import/execute",
+        "/maintenance/import/jobs/{job_id}",
+        "/maintenance/import/jobs/{job_id}/rollback",
+        "/maintenance/import/prepare",
+        "/maintenance/learn/jobs/{job_id}",
+        "/maintenance/learn/jobs/{job_id}/rollback",
+        "/maintenance/learn/trigger",
         "/maintenance/observability/search",
         "/maintenance/observability/summary",
         "/maintenance/orphans",

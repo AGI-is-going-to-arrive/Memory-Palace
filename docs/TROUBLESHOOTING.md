@@ -154,7 +154,7 @@
 
 **排查步骤**：
 
-1. **查看 `degrade_reasons`**：`search_memory` MCP 工具返回的 `degrade_reasons` 字段会告诉你具体降级原因。常见值包括：
+1. **查看 `degrade_reasons`**：`search_memory` MCP 工具返回的 `degrade_reasons` 字段会告诉你检索链路的具体降级原因。常见值包括：
 
    | `degrade_reasons` 值 | 含义 | 来源文件 |
    |---|---|---|
@@ -163,13 +163,17 @@
    | `embedding_request_failed` | Embedding API 请求失败 | `backend/db/sqlite_client.py` |
    | `reranker_request_failed` | Reranker API 请求失败 | `backend/db/sqlite_client.py` |
    | `reranker_config_missing` | Reranker 配置缺失 | `backend/db/sqlite_client.py` |
-   | `write_guard_exception` | Write Guard LLM 异常 | `backend/mcp_server.py` |
    | `compact_gist_llm_empty` | Compact Gist LLM 返回空结果 | `backend/mcp_server.py` |
    | `index_enqueue_dropped` | 索引任务入队被丢弃 | `backend/mcp_server.py` |
+
+   > `write_guard_exception` 属于写入/学习链路（如 `create_memory`、`update_memory`、显式学习触发），语义为写入已 fail-closed 拒绝，并非检索质量降级。
 
 2. **检查 Embedding / Reranker API 可达性**：
 
    ```bash
+   # 配置语义：RETRIEVAL_EMBEDDING_BACKEND 只控制 embedding。
+   # reranker 不存在 RETRIEVAL_RERANKER_BACKEND；如需本地强制走自有 reranker API，
+   # 请显式设置 RETRIEVAL_RERANKER_ENABLED=true 与 RETRIEVAL_RERANKER_API_BASE/API_KEY/MODEL。
    # 注意：RETRIEVAL_*_API_BASE 可能已包含 /v1，避免再手动拼接 /v1
    # 用实际调用端点做健康检查更准确：
    curl -fsS -X POST <RETRIEVAL_EMBEDDING_API_BASE>/embeddings \

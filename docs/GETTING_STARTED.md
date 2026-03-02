@@ -91,11 +91,17 @@ bash scripts/apply_profile.sh macos b
 | `DATABASE_URL` | SQLite 数据库路径（**必须使用绝对路径**） | `sqlite+aiosqlite:////absolute/path/to/memory_palace/memory_palace.db` |
 | `SEARCH_DEFAULT_MODE` | 检索模式：`keyword` / `semantic` / `hybrid` | `keyword` |
 | `RETRIEVAL_EMBEDDING_BACKEND` | 嵌入后端：`none` / `hash` / `router` / `api` / `openai` | `none` |
+| `RETRIEVAL_RERANKER_ENABLED` | 是否启用 Reranker | `false` |
+| `RETRIEVAL_RERANKER_API_BASE` | Reranker API 地址 | 空 |
+| `RETRIEVAL_RERANKER_API_KEY` | Reranker API 密钥 | 空 |
+| `RETRIEVAL_RERANKER_MODEL` | Reranker 模型名 | 空 |
 | `MCP_API_KEY` | HTTP/SSE 接口鉴权密钥 | 空（见下方鉴权说明） |
 | `MCP_API_KEY_ALLOW_INSECURE_LOCAL` | 本地调试时允许无 Key 访问（仅对 `127.0.0.1` 生效） | `false` |
 | `VALID_DOMAINS` | 允许的记忆 URI 域 | `core,writer,game,notes` |
 
 > B 档位默认使用本地 hash Embedding 且不启用 Reranker；C/D 档位需要配置外部 Embedding 与 Reranker，详见 [DEPLOYMENT_PROFILES.md](DEPLOYMENT_PROFILES.md)。
+>
+> 配置语义说明：`RETRIEVAL_EMBEDDING_BACKEND` 只作用于 Embedding。Reranker 不存在 `RETRIEVAL_RERANKER_BACKEND` 开关，优先读取 `RETRIEVAL_RERANKER_*`，缺失时才回退 `ROUTER_*`（最后回退 `OPENAI_*` 的 base/key）。
 
 ### Step 2：启动后端
 

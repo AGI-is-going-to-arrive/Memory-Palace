@@ -111,6 +111,8 @@
 1. 入口限制在 `maintenance` 域，不进入公开读面。
 2. 仅允许白名单目录 + 白名单文件类型。
 3. 导入过程拆成 `prepare -> execute -> rollback`，避免一步到位。
+4. 限流采用 `actor_id + session_id` 双桶并行判定，任一桶超限即返回 `429`，防止通过轮换 `session_id` 绕过。
+5. `rate_limit_state_file` 必须执行过期桶清理（TTL + 桶数量上限）；清理失败或状态损坏时按 fail-closed 拒绝导入并记录审计。
 
 建议新增配置（默认关闭）：
 
@@ -133,7 +135,8 @@
 
 1. 仅允许显式触发，不允许隐式自动学习。
 2. 写入前必须经过 `write_guard` 与去重策略。
-3. 每次触发必须可追踪来源与回滚句柄。
+3. `write_guard` 任一异常必须 fail-closed：直接拒绝并审计，不得返回 `prepared/accepted`。
+4. 每次触发必须可追踪来源与回滚句柄。
 
 建议新增配置（默认关闭）：
 
@@ -374,4 +377,3 @@ cd Memory-Palace/backend && .venv/bin/pytest tests/benchmark -q -k "profile_a or
 1. 默认关闭不改变现有行为。
 2. 对应测试通过并有回滚说明。
 3. 通过 `small gate -> profile gate -> full gate`。
-

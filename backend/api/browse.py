@@ -108,7 +108,9 @@ async def get_node(
         breadcrumbs = [{"path": "", "label": "root"}]
     else:
         # Get the node itself
-        memory = await client.get_memory_by_path(path, domain=domain)
+        memory = await client.get_memory_by_path(
+            path, domain=domain, reinforce_access=False
+        )
         
         if not memory:
             raise HTTPException(status_code=404, detail=f"Path not found: {domain}://{path}")

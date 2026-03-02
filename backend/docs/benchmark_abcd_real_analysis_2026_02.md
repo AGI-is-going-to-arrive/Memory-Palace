@@ -1,17 +1,17 @@
 # A/B/C/D Benchmark Analysis vs 2026-02 Reference
 
-- generated_at_utc: 2026-02-18T21:22:48+00:00
+- generated_at_utc: 2026-03-02T01:34:44+00:00
 - dataset_scope: squad_v2_dev, beir_nfcorpus
-- sample_size_requested: 8
+- sample_size_requested: 10
 
 ## Profile Means (dataset-average)
 
 | Profile | HR@10 | MRR | NDCG@10 | Recall@10 | p95(ms) |
 |---|---:|---:|---:|---:|---:|
-| profile_a | 0.125 | 0.125 | 0.125 | 0.125 | 1.8 |
-| profile_b | 0.688 | 0.390 | 0.462 | 0.688 | 5.0 |
-| profile_c | 0.875 | 0.783 | 0.805 | 0.875 | 559.8 |
-| profile_d | 0.875 | 0.825 | 0.837 | 0.875 | 2221.7 |
+| profile_a | 0.150 | 0.150 | 0.150 | 0.150 | 2.4 |
+| profile_b | 0.400 | 0.256 | 0.291 | 0.400 | 10.3 |
+| profile_c | 0.750 | 0.667 | 0.686 | 0.750 | 656.8 |
+| profile_d | 0.800 | 0.698 | 0.722 | 0.800 | 2054.4 |
 
 ## 2026-02 Reference Ranges (from project docs)
 
@@ -25,7 +25,7 @@
 
 ## Positioning
 
-- Profile D dataset-mean NDCG@10: `0.837`
+- Profile D dataset-mean NDCG@10: `0.722`
 - Relative to hybrid+reranker reference (`~0.58–0.62`): above-range
 
 ## Comparability Notes

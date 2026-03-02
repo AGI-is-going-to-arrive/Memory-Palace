@@ -48,6 +48,15 @@
 - **C vs D**：算法路径一致；默认模板中主要差异为模型服务地址（本地 vs 远程），并且默认 `RETRIEVAL_RERANKER_WEIGHT` 也不同（C=`0.30`，D=`0.35`）
 
 > **口径说明（避免与评测文档混淆）**：部署模板里的 C 默认开启 reranker；`docs/EVALUATION.md` 的“真实 A/B/C/D 运行”里，`profile_c` 作为对照组会关闭 reranker（`profile_d` 才开启），用于观测增益。
+>
+> **本地开发临时策略（重要）**：为降低本地联调复杂度，可临时将 `RETRIEVAL_EMBEDDING_BACKEND=api`，并显式配置 `RETRIEVAL_EMBEDDING_*` 与 `RETRIEVAL_RERANKER_*`。该策略仅用于本地开发；面向客户交付前，应根据客户环境回切到目标部署口径（通常为 C/D 模板的 `router` 路线）。
+>
+> **本仓本地联调补充（记录）**：`new/run_post_change_checks.sh` 在 `--docker-profile c|d` 时会尝试加载 runtime 覆盖文件（优先 `Memory-Palace/.env`，其次 `~/Desktop/clawmemo/nocturne_memory/.env`），用于本地 API 链路联调。该机制仅用于开发机验证，不会改写 `deploy/profiles/*` 模板默认值。
+>
+> **配置优先级说明（避免误配）**：
+> - `RETRIEVAL_EMBEDDING_BACKEND` 只影响 Embedding 链路，不影响 Reranker。
+> - Reranker 没有 `RETRIEVAL_RERANKER_BACKEND` 开关；是否启用仅由 `RETRIEVAL_RERANKER_ENABLED` 控制。
+> - Reranker 的地址/密钥优先读取 `RETRIEVAL_RERANKER_API_BASE/API_KEY`，缺失时才回退 `ROUTER_API_BASE/ROUTER_API_KEY`，最后回退 `OPENAI_BASE_URL/OPENAI_API_BASE` 与 `OPENAI_API_KEY`。
 
 ---
 
@@ -108,6 +117,20 @@ RETRIEVAL_RERANKER_MODEL=Qwen/Qwen3-Reranker-8B
 RETRIEVAL_RERANKER_WEIGHT=0.30                     # 推荐 0.20 ~ 0.40
 ```
 
+本地开发时若采用临时 `api` 后端，请使用以下覆盖项（不改模型名）：
+
+```bash
+# 临时本地开发覆盖（交付客户前请回切）
+RETRIEVAL_EMBEDDING_BACKEND=api
+RETRIEVAL_RERANKER_ENABLED=true
+RETRIEVAL_RERANKER_API_BASE=http://127.0.0.1:PORT/v1
+RETRIEVAL_RERANKER_API_KEY=replace-with-your-key
+# 保持以下模型配置不变
+RETRIEVAL_EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B
+RETRIEVAL_RERANKER_MODEL=Qwen/Qwen3-Reranker-8B
+# 注意：不存在 RETRIEVAL_RERANKER_BACKEND 配置项
+```
+
 **Profile D**（远程 API 服务）——无需本地 GPU，使用云端模型：
 
 ```bash
@@ -119,6 +142,20 @@ RETRIEVAL_RERANKER_WEIGHT=0.35                     # 远程推荐略高
 ```
 
 > **🔑 C/D 第一调参项**：`RETRIEVAL_RERANKER_WEIGHT`，建议范围 `0.20 ~ 0.40`，以 `0.05` 步长微调。
+>
+> **回切提醒**：本地开发阶段若临时改为 `RETRIEVAL_EMBEDDING_BACKEND=api`，在客户部署前需按目标环境恢复（通常恢复为模板中的 `router` 口径），并重新验证 C/D profile 烟测。
+
+上线前建议固定执行以下回切验收：
+
+```bash
+# 以下命令在仓库根目录（clawanti）执行
+# 1) 确认模板仍为 router 默认（不允许被开发联调改写）
+bash new/run_post_change_checks.sh --skip-frontend --skip-sse
+
+# 2) 在不加载本地 runtime 覆盖的环境下，复验 C/D 烟测
+bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse
+bash new/run_post_change_checks.sh --with-docker --docker-profile d --skip-sse
+```
 
 ### 推荐模型选型
 

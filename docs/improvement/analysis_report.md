@@ -4,6 +4,8 @@
 
 对比 [Claude Code Memory 官方文档](https://code.claude.com/docs/en/memory) 与当前 Memory Palace 项目，在 **不偏离项目原有目的**（AI Agent 长期记忆操作系统）的前提下，提炼出可落地的改进方向。
 
+> 说明：本文件是早期方案分析，不代表当前默认执行语义。`#5/#6` 的现行口径以 `docs/improvement/hold_items_next_step_plan.md` 与 `llmdoc/reference/phase-status.md` 为准（显式触发、`actor+session` 双桶限流、`write_guard` 异常 fail-closed）。
+
 ## 核心差异对比
 
 | 维度 | Claude Code Memory | Memory Palace 现状 | 差距评估 |

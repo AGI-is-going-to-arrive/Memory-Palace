@@ -512,7 +512,8 @@ index_status()
 
 ## 降级机制
 
-当远程 Embedding / Reranker 服务不可用或返回异常时，系统会**自动降级**并在响应中返回 `degrade_reasons` 字段。
+检索链路中，当远程 Embedding / Reranker 服务不可用或返回异常时，系统会**自动降级**并在响应中返回 `degrade_reasons` 字段。  
+写入链路中，若出现 `write_guard_exception`，系统会 fail-closed 拒绝写入并记录审计，不属于“继续写入的自动降级”。
 
 **常见降级原因：**
 
@@ -521,7 +522,7 @@ index_status()
 | `embedding_fallback_hash` | Embedding API 不可用，回退到本地 hash |
 | `embedding_request_failed` | Embedding 请求失败 |
 | `reranker_request_failed` | Reranker 请求失败 |
-| `write_guard_exception` | Write Guard 执行异常 |
+| `write_guard_exception` | Write Guard 执行异常，写入已被拒绝（fail-closed） |
 | `query_preprocess_failed` | 查询预处理失败 |
 | `index_enqueue_dropped` | 索引任务入队失败 |
 
@@ -577,7 +578,7 @@ Memory Palace 支持多种检索 Profile。Profile C 和 D 使用混合检索路
 
 ```bash
 # ── Embedding 配置 ──
-RETRIEVAL_EMBEDDING_BACKEND=none      # 可选: none / openai
+RETRIEVAL_EMBEDDING_BACKEND=none      # 可选: none / hash / router / api / openai
 RETRIEVAL_EMBEDDING_API_BASE=         # API 地址
 RETRIEVAL_EMBEDDING_API_KEY=          # API 密钥
 RETRIEVAL_EMBEDDING_MODEL=            # 模型名称
@@ -596,6 +597,8 @@ RETRIEVAL_HYBRID_SEMANTIC_WEIGHT=0.3  # 语义权重
 ```
 
 > 💡 **首要调参项**是 `RETRIEVAL_RERANKER_WEIGHT`。即使 Embedding / Reranker 是本地部署的，也必须配置 OpenAI-compatible API 参数。
+>
+> 配置语义说明：`RETRIEVAL_EMBEDDING_BACKEND` 仅控制 Embedding 路径；Reranker 没有 `RETRIEVAL_RERANKER_BACKEND` 开关。Reranker 参数优先使用 `RETRIEVAL_RERANKER_*`，缺失时才回退 `ROUTER_*`（最后回退 `OPENAI_*` 的 base/key）。
 >
 > 预置 Profile 配置文件位于 `deploy/profiles/` 目录下（macOS / Windows / Docker）。
 

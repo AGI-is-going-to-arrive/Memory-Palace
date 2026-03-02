@@ -423,6 +423,11 @@ RETRIEVAL_RERANKER_MODEL=bge-reranker-v2-m3
 RETRIEVAL_RERANKER_WEIGHT=0.25
 ```
 
+> 配置语义说明：
+> - `RETRIEVAL_EMBEDDING_BACKEND` 只控制 Embedding 链路。
+> - Reranker 没有 `RETRIEVAL_RERANKER_BACKEND` 开关，启用与否由 `RETRIEVAL_RERANKER_ENABLED` 控制。
+> - Reranker 连接参数优先读取 `RETRIEVAL_RERANKER_API_BASE/API_KEY/MODEL`；缺失时才回退 `ROUTER_*`（其中 base/key 还可继续回退 `OPENAI_*`）。
+
 ### 可选：LLM 驱动的 Write Guard 与 Gist
 
 ```bash

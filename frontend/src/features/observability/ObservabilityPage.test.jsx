@@ -22,6 +22,12 @@ const buildSummary = ({
   timestamp = '2026-01-01T00:00:00Z',
   queueDepth = recentJobs.length,
   lastError = null,
+  smLite = {
+    storage: 'runtime_ephemeral',
+    promotion_path: 'compact_context + auto_flush',
+    session_cache: { session_count: 0, total_hits: 0 },
+    flush_tracker: { session_count: 0, pending_events: 0 },
+  },
 } = {}) => ({
   status: 'ok',
   timestamp,
@@ -38,6 +44,7 @@ const buildSummary = ({
         last_error: lastError,
       },
       sleep_consolidation: {},
+      sm_lite: smLite,
     },
   },
   index_latency: {},
@@ -323,6 +330,42 @@ describe('ObservabilityPage', () => {
         }),
       );
     });
+  });
+
+  it('sends scope_hint when provided', async () => {
+    const user = userEvent.setup();
+    render(<ObservabilityPage />);
+
+    const input = await screen.findByLabelText('Scope hint');
+    await user.type(input, 'core://agent');
+    await user.click(screen.getByRole('button', { name: /Run Diagnostic Search/i }));
+
+    await waitFor(() => {
+      expect(api.runObservabilitySearch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope_hint: 'core://agent',
+        }),
+      );
+    });
+  });
+
+  it('renders sm-lite runtime metrics', async () => {
+    api.getObservabilitySummary.mockResolvedValue(
+      buildSummary({
+        smLite: {
+          storage: 'runtime_ephemeral',
+          promotion_path: 'compact_context + auto_flush',
+          session_cache: { session_count: 2, total_hits: 6 },
+          flush_tracker: { session_count: 1, pending_events: 3 },
+          degraded: false,
+        },
+      }),
+    );
+
+    render(<ObservabilityPage />);
+
+    expect(await screen.findByText(/sm-lite sessions:\s*2/i)).toBeInTheDocument();
+    expect(screen.getByText(/sm-lite pending events:\s*3/i)).toBeInTheDocument();
   });
 
   it('shows explicit message when cancel returns 404', async () => {

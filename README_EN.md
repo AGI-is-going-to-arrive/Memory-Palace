@@ -423,6 +423,11 @@ RETRIEVAL_RERANKER_MODEL=bge-reranker-v2-m3
 RETRIEVAL_RERANKER_WEIGHT=0.25
 ```
 
+> Configuration semantics:
+> - `RETRIEVAL_EMBEDDING_BACKEND` controls only the embedding path.
+> - There is no `RETRIEVAL_RERANKER_BACKEND` switch; reranker activation is controlled by `RETRIEVAL_RERANKER_ENABLED`.
+> - Reranker connection settings are resolved from `RETRIEVAL_RERANKER_API_BASE/API_KEY/MODEL` first, and fall back to `ROUTER_*` only when missing (with base/key then able to fall back to `OPENAI_*`).
+
 ### Optional: LLM-Powered Write Guard & Gist
 
 ```bash

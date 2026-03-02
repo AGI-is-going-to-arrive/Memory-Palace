@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import hmac
+import importlib
 import inspect
 import json
 import math
@@ -11,7 +12,7 @@ import uuid
 from collections import Counter, deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Deque, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional, Tuple, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -191,6 +192,17 @@ class ImportRollbackRequest(BaseModel):
     reason: str = Field(default="manual_rollback", min_length=1, max_length=240)
 
 
+class LearnTriggerRequest(BaseModel):
+    content: str = Field(min_length=1)
+    source: str = Field(default="manual_review", min_length=1, max_length=128)
+    reason: str = Field(default="", max_length=240)
+    session_id: str = Field(min_length=1, max_length=128)
+    actor_id: Optional[str] = Field(default=None, max_length=128)
+    domain: str = Field(default="notes", min_length=1, max_length=32)
+    path_prefix: str = Field(default="corrections", min_length=1, max_length=256)
+    execute: bool = True
+
+
 IMPORT_LEARN_AUDIT_META_KEY = "audit.import_learn.summary.v1"
 _IMPORT_LEARN_META_PERSIST_LOCK = asyncio.Lock()
 _IMPORT_JOB_MAX_PENDING = 64
@@ -198,11 +210,18 @@ _IMPORT_JOBS: Dict[str, Dict[str, Any]] = {}
 _IMPORT_JOBS_GUARD = asyncio.Lock()
 _IMPORT_JOBS_META_KEY = "maintenance.import.jobs.v1"
 _IMPORT_JOBS_META_PERSIST_LOCK = asyncio.Lock()
+_LEARN_JOB_MAX_PENDING = 64
+_LEARN_JOBS: Dict[str, Dict[str, Any]] = {}
+_LEARN_JOBS_GUARD = asyncio.Lock()
+_LEARN_JOBS_META_KEY = "maintenance.learn.jobs.v1"
+_LEARN_JOBS_META_PERSIST_LOCK = asyncio.Lock()
 _IMPORT_TITLE_SEGMENT_PATTERN = re.compile(r"[^a-zA-Z0-9._-]+")
 _EXTERNAL_IMPORT_GUARD: Optional[ExternalImportGuard] = None
 _EXTERNAL_IMPORT_GUARD_FINGERPRINT: Optional[Tuple[Any, ...]] = None
 _EXTERNAL_IMPORT_GUARD_LOCK = asyncio.Lock()
 _EXTERNAL_IMPORT_ALLOWED_DOMAINS_ENV = "EXTERNAL_IMPORT_ALLOWED_DOMAINS"
+_EXPLICIT_LEARN_SERVICE: Optional[Callable[..., Awaitable[Dict[str, Any]]]] = None
+_EXPLICIT_LEARN_SERVICE_LOCK = asyncio.Lock()
 
 
 def _utc_iso_now() -> str:
@@ -231,6 +250,117 @@ def _safe_non_negative_int(value: Any) -> int:
         return max(0, int(value))
     except (TypeError, ValueError):
         return 0
+
+
+class _LazySQLiteClientProxy:
+    """Defer sqlite client resolution until an attribute is actually used."""
+
+    def __init__(self, client_factory: Callable[[], Any]) -> None:
+        self._client_factory = client_factory
+        self._resolved_client: Optional[Any] = None
+
+    def _resolve(self) -> Any:
+        if self._resolved_client is None:
+            self._resolved_client = self._client_factory()
+        return self._resolved_client
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._resolve(), name)
+
+
+def _normalize_import_job_type(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    return "learn" if normalized == "learn" else "import"
+
+
+def _normalize_created_namespace_memories(entries: Any) -> List[Dict[str, Any]]:
+    if not isinstance(entries, list):
+        return []
+    normalized_entries: List[Dict[str, Any]] = []
+    seen_uris: set[str] = set()
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        domain = str(item.get("domain") or "notes").strip().lower() or "notes"
+        path = _normalize_import_parent_path(str(item.get("path") or ""))
+        uri = str(item.get("uri") or "").strip()
+        if not path and uri:
+            match = _SCOPE_URI_PATTERN.match(uri)
+            if match:
+                domain = str(match.group(1) or domain).strip().lower() or domain
+                path = _normalize_import_parent_path(match.group(2))
+        if not path:
+            continue
+        normalized_uri = f"{domain}://{path}"
+        if normalized_uri in seen_uris:
+            continue
+        seen_uris.add(normalized_uri)
+        normalized_entries.append(
+            {
+                "domain": domain,
+                "path": path,
+                "uri": normalized_uri,
+                "memory_id": _safe_non_negative_int(item.get("memory_id")),
+            }
+        )
+    return normalized_entries
+
+
+def _has_created_memory_ids(created_memories: Any) -> bool:
+    if not isinstance(created_memories, list):
+        return False
+    for item in created_memories:
+        if not isinstance(item, dict):
+            continue
+        if _safe_non_negative_int(item.get("memory_id")) > 0:
+            return True
+    return False
+
+
+def _is_rollback_protected_import_job(payload: Dict[str, Any]) -> bool:
+    if _normalize_import_job_type(payload.get("job_type")) != "import":
+        return False
+    if str(payload.get("status") or "").strip().lower() == "rolled_back":
+        return False
+    return _has_created_memory_ids(payload.get("created_memories"))
+
+
+async def _resolve_explicit_learn_service() -> Callable[..., Awaitable[Dict[str, Any]]]:
+    global _EXPLICIT_LEARN_SERVICE
+
+    if callable(_EXPLICIT_LEARN_SERVICE):
+        return _EXPLICIT_LEARN_SERVICE
+
+    async with _EXPLICIT_LEARN_SERVICE_LOCK:
+        if callable(_EXPLICIT_LEARN_SERVICE):
+            return _EXPLICIT_LEARN_SERVICE
+        try:
+            module = importlib.import_module("mcp_server")
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "explicit_learn_service_unavailable",
+                    "reason": "import_failed",
+                    "message": type(exc).__name__,
+                },
+            ) from exc
+
+        service = getattr(module, "run_explicit_learn_service", None)
+        if not callable(service):
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "explicit_learn_service_unavailable",
+                    "reason": "missing_entrypoint",
+                },
+            )
+
+        _EXPLICIT_LEARN_SERVICE = cast(
+            Callable[..., Awaitable[Dict[str, Any]]],
+            service,
+        )
+        return _EXPLICIT_LEARN_SERVICE
 
 
 def _normalize_import_parent_path(parent_path: Optional[str]) -> str:
@@ -285,7 +415,9 @@ def _clone_import_payload_for_persistence(payload: Dict[str, Any]) -> Dict[str, 
     return persisted_payload
 
 
-def _trim_import_jobs(jobs: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+def _trim_jobs_with_limit(
+    jobs: Dict[str, Dict[str, Any]], max_pending: int
+) -> Dict[str, Dict[str, Any]]:
     ordered = sorted(
         (
             (job_id, payload)
@@ -294,12 +426,20 @@ def _trim_import_jobs(jobs: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, An
         ),
         key=lambda item: (str(item[1].get("created_at") or ""), item[0]),
     )
-    if len(ordered) > _IMPORT_JOB_MAX_PENDING:
-        ordered = ordered[-_IMPORT_JOB_MAX_PENDING:]
+    if len(ordered) > max_pending:
+        ordered = ordered[-max_pending:]
     return {
         job_id: _clone_import_payload(payload)
         for job_id, payload in ordered
     }
+
+
+def _trim_import_jobs(jobs: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    return _trim_jobs_with_limit(jobs, _IMPORT_JOB_MAX_PENDING)
+
+
+def _trim_learn_jobs(jobs: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    return _trim_jobs_with_limit(jobs, _LEARN_JOB_MAX_PENDING)
 
 
 def _serialize_import_jobs_for_runtime_meta(
@@ -334,8 +474,66 @@ def _parse_import_jobs_from_runtime_meta(raw: Optional[str]) -> Dict[str, Dict[s
         normalized_job_id = str(job_id or "").strip()
         if not normalized_job_id or not isinstance(job_payload, dict):
             continue
-        parsed[normalized_job_id] = _clone_import_payload_for_persistence(job_payload)
+        normalized_payload = _clone_import_payload_for_persistence(job_payload)
+        normalized_payload["job_type"] = _normalize_import_job_type(
+            normalized_payload.get("job_type")
+        )
+        if "reason_text" not in normalized_payload and isinstance(
+            normalized_payload.get("reason"), str
+        ):
+            normalized_payload["reason_text"] = str(normalized_payload.get("reason"))
+        if "reason" not in normalized_payload and isinstance(
+            normalized_payload.get("reason_text"), str
+        ):
+            normalized_payload["reason"] = str(normalized_payload.get("reason_text"))
+        parsed[normalized_job_id] = normalized_payload
     return _trim_import_jobs(parsed)
+
+
+def _serialize_learn_jobs_for_runtime_meta(
+    jobs: Dict[str, Dict[str, Any]],
+) -> str:
+    trimmed_jobs = _trim_learn_jobs(jobs)
+    payload = {
+        "version": 1,
+        "updated_at": _utc_iso_now(),
+        "jobs": {
+            job_id: _clone_import_payload_for_persistence(job_payload)
+            for job_id, job_payload in trimmed_jobs.items()
+        },
+    }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def _parse_learn_jobs_from_runtime_meta(raw: Optional[str]) -> Dict[str, Dict[str, Any]]:
+    if not raw or not isinstance(raw, str):
+        return {}
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    jobs = payload.get("jobs")
+    if not isinstance(jobs, dict):
+        return {}
+    parsed: Dict[str, Dict[str, Any]] = {}
+    for job_id, job_payload in jobs.items():
+        normalized_job_id = str(job_id or "").strip()
+        if not normalized_job_id or not isinstance(job_payload, dict):
+            continue
+        normalized_payload = _clone_import_payload_for_persistence(job_payload)
+        normalized_payload["job_type"] = "learn"
+        if "reason_text" not in normalized_payload and isinstance(
+            normalized_payload.get("reason"), str
+        ):
+            normalized_payload["reason_text"] = str(normalized_payload.get("reason"))
+        if "reason" not in normalized_payload and isinstance(
+            normalized_payload.get("reason_text"), str
+        ):
+            normalized_payload["reason"] = str(normalized_payload.get("reason_text"))
+        parsed[normalized_job_id] = normalized_payload
+    return _trim_learn_jobs(parsed)
 
 
 async def _persist_import_jobs_runtime_meta(
@@ -353,6 +551,21 @@ async def _persist_import_jobs_runtime_meta(
         return
 
 
+async def _persist_learn_jobs_runtime_meta(
+    jobs: Dict[str, Dict[str, Any]],
+) -> None:
+    try:
+        client = get_sqlite_client()
+        set_runtime_meta = getattr(client, "set_runtime_meta", None)
+        if not callable(set_runtime_meta):
+            return
+        payload = _serialize_learn_jobs_for_runtime_meta(jobs)
+        async with _LEARN_JOBS_META_PERSIST_LOCK:
+            await set_runtime_meta(_LEARN_JOBS_META_KEY, payload)
+    except Exception:
+        return
+
+
 async def _load_import_jobs_from_runtime_meta() -> Dict[str, Dict[str, Any]]:
     try:
         client = get_sqlite_client()
@@ -363,6 +576,18 @@ async def _load_import_jobs_from_runtime_meta() -> Dict[str, Dict[str, Any]]:
     except Exception:
         return {}
     return _parse_import_jobs_from_runtime_meta(raw)
+
+
+async def _load_learn_jobs_from_runtime_meta() -> Dict[str, Dict[str, Any]]:
+    try:
+        client = get_sqlite_client()
+        get_runtime_meta = getattr(client, "get_runtime_meta", None)
+        if not callable(get_runtime_meta):
+            return {}
+        raw = await get_runtime_meta(_LEARN_JOBS_META_KEY)
+    except Exception:
+        return {}
+    return _parse_learn_jobs_from_runtime_meta(raw)
 
 
 async def _hydrate_import_jobs_cache(job_id: Optional[str] = None) -> None:
@@ -384,6 +609,25 @@ async def _hydrate_import_jobs_cache(job_id: Optional[str] = None) -> None:
         _IMPORT_JOBS.update(trimmed)
 
 
+async def _hydrate_learn_jobs_cache(job_id: Optional[str] = None) -> None:
+    normalized_job_id = str(job_id or "").strip()
+    async with _LEARN_JOBS_GUARD:
+        if normalized_job_id and normalized_job_id in _LEARN_JOBS:
+            return
+    persisted_jobs = await _load_learn_jobs_from_runtime_meta()
+    if not persisted_jobs:
+        return
+    async with _LEARN_JOBS_GUARD:
+        if normalized_job_id and normalized_job_id in _LEARN_JOBS:
+            return
+        for persisted_job_id, persisted_payload in persisted_jobs.items():
+            if persisted_job_id not in _LEARN_JOBS:
+                _LEARN_JOBS[persisted_job_id] = _clone_import_payload(persisted_payload)
+        trimmed = _trim_learn_jobs(_LEARN_JOBS)
+        _LEARN_JOBS.clear()
+        _LEARN_JOBS.update(trimmed)
+
+
 def _external_import_allowed_domains() -> Tuple[str, ...]:
     raw = str(os.getenv(_EXTERNAL_IMPORT_ALLOWED_DOMAINS_ENV, "notes") or "")
     allowed_domains: List[str] = []
@@ -396,6 +640,11 @@ def _external_import_allowed_domains() -> Tuple[str, ...]:
 
 def _public_import_job_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     public_payload = _clone_import_payload(payload)
+    public_payload["job_type"] = _normalize_import_job_type(public_payload.get("job_type"))
+    if "reason_text" not in public_payload and isinstance(public_payload.get("reason"), str):
+        public_payload["reason_text"] = str(public_payload.get("reason"))
+    if "reason" not in public_payload and isinstance(public_payload.get("reason_text"), str):
+        public_payload["reason"] = str(public_payload.get("reason_text"))
     files = public_payload.get("files")
     if isinstance(files, list):
         for item in files:
@@ -445,6 +694,33 @@ def _http_error_for_import_guard(result: Dict[str, Any]) -> HTTPException:
             return HTTPException(status_code=403, detail=detail)
         return HTTPException(status_code=422, detail=detail)
     return HTTPException(status_code=422, detail=detail)
+
+
+def _http_error_for_learn_trigger(
+    *,
+    result: Dict[str, Any],
+    job_id: str,
+    job_payload: Dict[str, Any],
+) -> HTTPException:
+    reason = str(result.get("reason") or "rejected")
+    detail: Dict[str, Any] = {
+        "error": "explicit_learn_trigger_rejected",
+        "reason": reason,
+        "job_id": job_id,
+        "job": _public_import_job_payload(job_payload),
+        "result": result,
+    }
+    if reason == "write_guard_unavailable":
+        return HTTPException(status_code=503, detail=detail)
+    if reason in {
+        "source_required",
+        "reason_required",
+        "session_id_required",
+        "content_required",
+        "domain_not_allowed",
+    }:
+        return HTTPException(status_code=422, detail=detail)
+    return HTTPException(status_code=409, detail=detail)
 
 
 def _validate_import_domain(domain: str) -> str:
@@ -585,15 +861,45 @@ async def _put_import_job(payload: Dict[str, Any]) -> None:
     job_id = str(payload.get("job_id") or "").strip()
     if not job_id:
         return
+    incoming_job_type = _normalize_import_job_type(payload.get("job_type"))
+    normalized_payload = _clone_import_payload(payload)
+    normalized_payload["job_type"] = incoming_job_type
+    if "reason_text" not in normalized_payload and isinstance(
+        normalized_payload.get("reason"), str
+    ):
+        normalized_payload["reason_text"] = str(normalized_payload.get("reason"))
+    if "reason" not in normalized_payload and isinstance(
+        normalized_payload.get("reason_text"), str
+    ):
+        normalized_payload["reason"] = str(normalized_payload.get("reason_text"))
     snapshot: Dict[str, Dict[str, Any]] = {}
     async with _IMPORT_JOBS_GUARD:
         while len(_IMPORT_JOBS) >= _IMPORT_JOB_MAX_PENDING:
+            same_type_items = [
+                (item_job_id, item_payload)
+                for item_job_id, item_payload in _IMPORT_JOBS.items()
+                if _normalize_import_job_type(item_payload.get("job_type"))
+                == incoming_job_type
+            ]
+            if same_type_items:
+                eviction_pool = same_type_items
+            else:
+                cross_type_items = list(_IMPORT_JOBS.items())
+                if incoming_job_type == "learn":
+                    unprotected_items = [
+                        (item_job_id, item_payload)
+                        for item_job_id, item_payload in cross_type_items
+                        if not _is_rollback_protected_import_job(item_payload)
+                    ]
+                    eviction_pool = unprotected_items if unprotected_items else cross_type_items
+                else:
+                    eviction_pool = cross_type_items
             oldest_key = min(
-                _IMPORT_JOBS.items(),
-                key=lambda item: str(item[1].get("created_at") or ""),
+                eviction_pool,
+                key=lambda item: (str(item[1].get("created_at") or ""), item[0]),
             )[0]
             _IMPORT_JOBS.pop(oldest_key, None)
-        _IMPORT_JOBS[job_id] = _clone_import_payload(payload)
+        _IMPORT_JOBS[job_id] = _clone_import_payload(normalized_payload)
         trimmed = _trim_import_jobs(_IMPORT_JOBS)
         _IMPORT_JOBS.clear()
         _IMPORT_JOBS.update(trimmed)
@@ -602,6 +908,39 @@ async def _put_import_job(payload: Dict[str, Any]) -> None:
             for item_job_id, item_payload in _IMPORT_JOBS.items()
         }
     await _persist_import_jobs_runtime_meta(snapshot)
+
+
+async def _put_learn_job(payload: Dict[str, Any]) -> None:
+    job_id = str(payload.get("job_id") or "").strip()
+    if not job_id:
+        return
+    normalized_payload = _clone_import_payload(payload)
+    normalized_payload["job_type"] = "learn"
+    if "reason_text" not in normalized_payload and isinstance(
+        normalized_payload.get("reason"), str
+    ):
+        normalized_payload["reason_text"] = str(normalized_payload.get("reason"))
+    if "reason" not in normalized_payload and isinstance(
+        normalized_payload.get("reason_text"), str
+    ):
+        normalized_payload["reason"] = str(normalized_payload.get("reason_text"))
+    snapshot: Dict[str, Dict[str, Any]] = {}
+    async with _LEARN_JOBS_GUARD:
+        while len(_LEARN_JOBS) >= _LEARN_JOB_MAX_PENDING:
+            oldest_key = min(
+                _LEARN_JOBS.items(),
+                key=lambda item: (str(item[1].get("created_at") or ""), item[0]),
+            )[0]
+            _LEARN_JOBS.pop(oldest_key, None)
+        _LEARN_JOBS[job_id] = _clone_import_payload(normalized_payload)
+        trimmed = _trim_learn_jobs(_LEARN_JOBS)
+        _LEARN_JOBS.clear()
+        _LEARN_JOBS.update(trimmed)
+        snapshot = {
+            item_job_id: _clone_import_payload(item_payload)
+            for item_job_id, item_payload in _LEARN_JOBS.items()
+        }
+    await _persist_learn_jobs_runtime_meta(snapshot)
 
 
 async def _get_import_job(job_id: str) -> Optional[Dict[str, Any]]:
@@ -621,11 +960,33 @@ async def _get_import_job(job_id: str) -> Optional[Dict[str, Any]]:
         return _clone_import_payload(persisted_payload)
 
 
+async def _get_learn_job(job_id: str) -> Optional[Dict[str, Any]]:
+    normalized = str(job_id or "").strip()
+    if not normalized:
+        return None
+    async with _LEARN_JOBS_GUARD:
+        payload = _LEARN_JOBS.get(normalized)
+    if isinstance(payload, dict):
+        return _clone_import_payload(payload)
+
+    await _hydrate_learn_jobs_cache(job_id=normalized)
+    async with _LEARN_JOBS_GUARD:
+        persisted_payload = _LEARN_JOBS.get(normalized)
+        if not isinstance(persisted_payload, dict):
+            return None
+        return _clone_import_payload(persisted_payload)
+
+
 async def _update_import_job(job_id: str, payload: Dict[str, Any]) -> None:
     normalized = str(job_id or "").strip()
     if not normalized:
         return
     cloned = _clone_import_payload(payload)
+    cloned["job_type"] = _normalize_import_job_type(cloned.get("job_type"))
+    if "reason_text" not in cloned and isinstance(cloned.get("reason"), str):
+        cloned["reason_text"] = str(cloned.get("reason"))
+    if "reason" not in cloned and isinstance(cloned.get("reason_text"), str):
+        cloned["reason"] = str(cloned.get("reason_text"))
     cloned["updated_at"] = _utc_iso_now()
     snapshot: Dict[str, Dict[str, Any]] = {}
     async with _IMPORT_JOBS_GUARD:
@@ -638,6 +999,30 @@ async def _update_import_job(job_id: str, payload: Dict[str, Any]) -> None:
             for item_job_id, item_payload in _IMPORT_JOBS.items()
         }
     await _persist_import_jobs_runtime_meta(snapshot)
+
+
+async def _update_learn_job(job_id: str, payload: Dict[str, Any]) -> None:
+    normalized = str(job_id or "").strip()
+    if not normalized:
+        return
+    cloned = _clone_import_payload(payload)
+    cloned["job_type"] = "learn"
+    if "reason_text" not in cloned and isinstance(cloned.get("reason"), str):
+        cloned["reason_text"] = str(cloned.get("reason"))
+    if "reason" not in cloned and isinstance(cloned.get("reason_text"), str):
+        cloned["reason"] = str(cloned.get("reason_text"))
+    cloned["updated_at"] = _utc_iso_now()
+    snapshot: Dict[str, Dict[str, Any]] = {}
+    async with _LEARN_JOBS_GUARD:
+        _LEARN_JOBS[normalized] = cloned
+        trimmed = _trim_learn_jobs(_LEARN_JOBS)
+        _LEARN_JOBS.clear()
+        _LEARN_JOBS.update(trimmed)
+        snapshot = {
+            item_job_id: _clone_import_payload(item_payload)
+            for item_job_id, item_payload in _LEARN_JOBS.items()
+        }
+    await _persist_learn_jobs_runtime_meta(snapshot)
 
 
 async def _transition_import_job_status(
@@ -673,10 +1058,45 @@ async def _transition_import_job_status(
     return updated, None
 
 
+async def _transition_learn_job_status(
+    job_id: str,
+    *,
+    allowed_from: set[str],
+    next_status: str,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    normalized = str(job_id or "").strip()
+    if not normalized:
+        return None, "job_id_required"
+    await _hydrate_learn_jobs_cache(job_id=normalized)
+    snapshot: Dict[str, Dict[str, Any]] = {}
+    async with _LEARN_JOBS_GUARD:
+        payload = _LEARN_JOBS.get(normalized)
+        if not isinstance(payload, dict):
+            return None, "job_not_found"
+        current_status = str(payload.get("status") or "unknown")
+        if current_status not in allowed_from:
+            return _clone_import_payload(payload), f"invalid_status:{current_status}"
+        updated = _clone_import_payload(payload)
+        updated["job_type"] = "learn"
+        updated["status"] = next_status
+        updated["updated_at"] = _utc_iso_now()
+        _LEARN_JOBS[normalized] = _clone_import_payload(updated)
+        trimmed = _trim_learn_jobs(_LEARN_JOBS)
+        _LEARN_JOBS.clear()
+        _LEARN_JOBS.update(trimmed)
+        snapshot = {
+            item_job_id: _clone_import_payload(item_payload)
+            for item_job_id, item_payload in _LEARN_JOBS.items()
+        }
+    await _persist_learn_jobs_runtime_meta(snapshot)
+    return updated, None
+
+
 async def _rollback_import_created_memories(
     *,
     client: Any,
     created_memories: List[Dict[str, Any]],
+    created_namespace_memories: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     attempted_memory_ids: List[int] = []
     rolled_back: List[int] = []
@@ -702,16 +1122,109 @@ async def _rollback_import_created_memories(
                 }
             )
 
+    namespace_cleanup = await _best_effort_cleanup_learn_namespace(
+        client=client,
+        created_namespace_memories=created_namespace_memories or [],
+    )
+    namespace_attempted = bool(namespace_cleanup.get("attempted_paths"))
+    namespace_has_skipped = bool(namespace_cleanup.get("skipped"))
+
     return {
         "attempted_memory_ids": attempted_memory_ids,
         "rolled_back_memory_ids": rolled_back,
         "rolled_back_count": len(rolled_back),
         "error_count": len(errors),
         "errors": errors,
-        "side_effects_audit_required": bool(attempted_memory_ids),
-        "residual_artifacts_review_required": bool(attempted_memory_ids),
-        "side_effects_note": "rollback_only_covers_created_memory_ids",
+        "namespace_cleanup": namespace_cleanup,
+        "side_effects_audit_required": bool(attempted_memory_ids) or namespace_attempted,
+        "residual_artifacts_review_required": bool(attempted_memory_ids)
+        or namespace_attempted
+        or namespace_has_skipped,
+        "side_effects_note": (
+            "rollback_covers_created_memory_ids_and_best_effort_namespace_cleanup"
+            if namespace_attempted
+            else "rollback_only_covers_created_memory_ids"
+        ),
         "completed_at": _utc_iso_now(),
+    }
+
+
+async def _best_effort_cleanup_learn_namespace(
+    *,
+    client: Any,
+    created_namespace_memories: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    normalized_entries = _normalize_created_namespace_memories(created_namespace_memories)
+    if not normalized_entries:
+        return {
+            "attempted_paths": [],
+            "removed_paths": [],
+            "deleted_memory_ids": [],
+            "skipped": [],
+            "skipped_count": 0,
+        }
+
+    remove_path = getattr(client, "remove_path", None)
+    permanently_delete_memory = getattr(client, "permanently_delete_memory", None)
+    if not callable(remove_path) or not callable(permanently_delete_memory):
+        attempted_paths = [str(item.get("uri") or "") for item in normalized_entries]
+        return {
+            "attempted_paths": attempted_paths,
+            "removed_paths": [],
+            "deleted_memory_ids": [],
+            "skipped": [
+                {
+                    "uri": str(item.get("uri") or ""),
+                    "reason": "namespace_cleanup_methods_unavailable",
+                }
+                for item in normalized_entries
+            ],
+            "skipped_count": len(normalized_entries),
+        }
+
+    attempted_paths: List[str] = []
+    removed_paths: List[str] = []
+    deleted_memory_ids: List[int] = []
+    skipped: List[Dict[str, Any]] = []
+
+    for entry in reversed(normalized_entries):
+        domain = str(entry.get("domain") or "notes").strip().lower() or "notes"
+        path = _normalize_import_parent_path(str(entry.get("path") or ""))
+        uri = str(entry.get("uri") or f"{domain}://{path}")
+        if not path:
+            continue
+        attempted_paths.append(uri)
+        try:
+            remove_result = await remove_path(path, domain=domain)
+            removed_paths.append(uri)
+        except Exception as exc:
+            skipped.append({"uri": uri, "reason": str(exc) or type(exc).__name__})
+            continue
+
+        removed_memory_id = 0
+        if isinstance(remove_result, dict):
+            removed_memory_id = _safe_non_negative_int(remove_result.get("memory_id"))
+        target_memory_id = removed_memory_id or _safe_non_negative_int(entry.get("memory_id"))
+        if target_memory_id <= 0:
+            continue
+        try:
+            await permanently_delete_memory(target_memory_id, require_orphan=True)
+            deleted_memory_ids.append(target_memory_id)
+        except Exception as exc:
+            skipped.append(
+                {
+                    "uri": uri,
+                    "memory_id": target_memory_id,
+                    "reason": str(exc) or type(exc).__name__,
+                }
+            )
+
+    return {
+        "attempted_paths": attempted_paths,
+        "removed_paths": removed_paths,
+        "deleted_memory_ids": deleted_memory_ids,
+        "skipped": skipped,
+        "skipped_count": len(skipped),
     }
 
 
@@ -1435,6 +1948,7 @@ async def prepare_external_import(payload: ImportPrepareRequest):
     now_iso = _utc_iso_now()
     job_payload: Dict[str, Any] = {
         "job_id": job_id,
+        "job_type": "import",
         "status": "prepared",
         "created_at": now_iso,
         "updated_at": now_iso,
@@ -1443,6 +1957,7 @@ async def prepare_external_import(payload: ImportPrepareRequest):
         "actor_id": actor_id,
         "session_id": session_id,
         "source": source,
+        "reason": reason_text,
         "reason_text": reason_text,
         "domain": domain,
         "parent_path": parent_path,
@@ -1508,6 +2023,7 @@ async def prepare_external_import(payload: ImportPrepareRequest):
         "ok": True,
         "status": "prepared",
         "job_id": job_id,
+        "job_type": "import",
         "dry_run": True,
         "file_count": len(prepared_files),
         "total_bytes": total_bytes,
@@ -1782,35 +2298,75 @@ async def execute_external_import(payload: ImportExecuteRequest):
         "ok": True,
         "status": "executed",
         "job_id": job_id,
+        "job_type": _normalize_import_job_type(job.get("job_type")),
         "created_count": len(created_memories),
         "created_memories": created_memories,
         "job": _public_import_job_payload(job),
     }
 
 
-@router.get("/import/jobs/{job_id}")
-async def get_external_import_job(job_id: str):
-    payload = await _get_import_job(job_id)
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=404, detail={"error": "import_job_not_found"})
-    return {
-        "ok": True,
-        "job_id": str(payload.get("job_id") or job_id),
-        "status": str(payload.get("status") or "unknown"),
-        "job": _public_import_job_payload(payload),
-    }
+async def _load_job_from_pool(
+    job_id: str, *, prefer_learn: bool, allow_fallback: bool
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    if prefer_learn:
+        primary_fetcher = _get_learn_job
+        primary_pool = "learn"
+        fallback_fetcher = _get_import_job
+        fallback_pool = "import"
+    else:
+        primary_fetcher = _get_import_job
+        primary_pool = "import"
+        fallback_fetcher = _get_learn_job
+        fallback_pool = "learn"
+
+    payload = await primary_fetcher(job_id)
+    if isinstance(payload, dict):
+        return payload, primary_pool
+    if not allow_fallback:
+        return None, None
+    fallback_payload = await fallback_fetcher(job_id)
+    if isinstance(fallback_payload, dict):
+        return fallback_payload, fallback_pool
+    return None, None
 
 
-@router.post("/import/jobs/{job_id}/rollback")
-async def rollback_external_import_job(job_id: str, payload: ImportRollbackRequest):
-    current_job = await _get_import_job(job_id)
-    if not isinstance(current_job, dict):
-        raise HTTPException(status_code=404, detail={"error": "import_job_not_found"})
+def _transition_and_update_by_pool(
+    pool: str,
+) -> Tuple[
+    Callable[..., Awaitable[Tuple[Optional[Dict[str, Any]], Optional[str]]]],
+    Callable[[str, Dict[str, Any]], Awaitable[None]],
+]:
+    if pool == "learn":
+        return _transition_learn_job_status, _update_learn_job
+    return _transition_import_job_status, _update_import_job
+
+
+async def _rollback_job(
+    *,
+    job_id: str,
+    payload: ImportRollbackRequest,
+    prefer_learn: bool,
+    allow_fallback: bool,
+    not_found_error: str,
+) -> Dict[str, Any]:
+    current_job, job_pool = await _load_job_from_pool(
+        job_id,
+        prefer_learn=prefer_learn,
+        allow_fallback=allow_fallback,
+    )
+    if not isinstance(current_job, dict) or not isinstance(job_pool, str):
+        raise HTTPException(status_code=404, detail={"error": not_found_error})
 
     current_status = str(current_job.get("status") or "unknown")
+    current_job_type = _normalize_import_job_type(current_job.get("job_type"))
     created_memories = (
         current_job.get("created_memories")
         if isinstance(current_job.get("created_memories"), list)
+        else []
+    )
+    current_created_namespace_memories = (
+        _normalize_created_namespace_memories(current_job.get("created_namespace_memories"))
+        if current_job_type == "learn"
         else []
     )
 
@@ -1819,6 +2375,7 @@ async def rollback_external_import_job(job_id: str, payload: ImportRollbackReque
             "ok": True,
             "status": "rolled_back",
             "job_id": str(current_job.get("job_id") or job_id),
+            "job_type": current_job_type,
             "job": _public_import_job_payload(current_job),
         }
 
@@ -1831,16 +2388,18 @@ async def rollback_external_import_job(job_id: str, payload: ImportRollbackReque
                 "job_id": job_id,
             },
         )
-    if not created_memories:
+    has_rollback_targets = bool(created_memories) or bool(current_created_namespace_memories)
+    if not has_rollback_targets:
         raise HTTPException(
             status_code=409,
             detail={
-                "error": "import_job_no_created_memories",
+                "error": "import_job_no_rollback_targets",
                 "job_id": job_id,
             },
         )
 
-    transitioned_job, transition_error = await _transition_import_job_status(
+    transition_job_status, update_job = _transition_and_update_by_pool(job_pool)
+    transitioned_job, transition_error = await transition_job_status(
         job_id,
         allowed_from={"executed", "failed", "rollback_failed"},
         next_status="rolling_back",
@@ -1855,22 +2414,31 @@ async def rollback_external_import_job(job_id: str, payload: ImportRollbackReque
             },
         )
     if not isinstance(transitioned_job, dict):
-        raise HTTPException(status_code=404, detail={"error": "import_job_not_found"})
+        raise HTTPException(status_code=404, detail={"error": not_found_error})
 
     client = get_sqlite_client()
+    job_type = _normalize_import_job_type(transitioned_job.get("job_type"))
+    created_namespace_memories = []
+    if job_type == "learn":
+        created_namespace_memories = _normalize_created_namespace_memories(
+            transitioned_job.get("created_namespace_memories")
+        )
+
     rollback_summary = await _rollback_import_created_memories(
         client=client,
         created_memories=created_memories,
+        created_namespace_memories=created_namespace_memories,
     )
     has_errors = bool(rollback_summary.get("error_count"))
     final_status = "rollback_failed" if has_errors else "rolled_back"
     transitioned_job["status"] = final_status
     transitioned_job["rollback"] = rollback_summary
-    await _update_import_job(job_id, transitioned_job)
+    await update_job(job_id, transitioned_job)
 
+    rollback_operation = "learn_rollback" if job_type == "learn" else "import_rollback"
     await _record_import_learn_event(
         event_type="rollback",
-        operation="import_rollback",
+        operation=rollback_operation,
         decision="rejected" if has_errors else "rolled_back",
         reason=(
             "rollback_failed"
@@ -1892,6 +2460,13 @@ async def rollback_external_import_job(job_id: str, payload: ImportRollbackReque
             "residual_artifacts_review_required": bool(
                 rollback_summary.get("residual_artifacts_review_required")
             ),
+            "namespace_cleanup_skipped_count": _safe_non_negative_int(
+                (
+                    rollback_summary.get("namespace_cleanup") or {}
+                ).get("skipped_count")
+                if isinstance(rollback_summary.get("namespace_cleanup"), dict)
+                else 0
+            ),
         },
     )
 
@@ -1899,9 +2474,180 @@ async def rollback_external_import_job(job_id: str, payload: ImportRollbackReque
         "ok": not has_errors,
         "status": final_status,
         "job_id": str(transitioned_job.get("job_id") or job_id),
+        "job_type": job_type,
         "rollback": rollback_summary,
         "job": _public_import_job_payload(transitioned_job),
     }
+
+
+@router.get("/import/jobs/{job_id}")
+async def get_external_import_job(job_id: str):
+    payload, _ = await _load_job_from_pool(
+        job_id,
+        prefer_learn=False,
+        allow_fallback=True,
+    )
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=404, detail={"error": "import_job_not_found"})
+    job_type = _normalize_import_job_type(payload.get("job_type"))
+    return {
+        "ok": True,
+        "job_id": str(payload.get("job_id") or job_id),
+        "job_type": job_type,
+        "status": str(payload.get("status") or "unknown"),
+        "job": _public_import_job_payload(payload),
+    }
+
+
+@router.get("/learn/jobs/{job_id}")
+async def get_explicit_learn_job(job_id: str):
+    payload = await _get_learn_job(job_id)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=404, detail={"error": "learn_job_not_found"})
+    return {
+        "ok": True,
+        "job_id": str(payload.get("job_id") or job_id),
+        "job_type": "learn",
+        "status": str(payload.get("status") or "unknown"),
+        "job": _public_import_job_payload(payload),
+    }
+
+
+@router.post("/learn/jobs/{job_id}/rollback")
+async def rollback_explicit_learn_job(job_id: str, payload: ImportRollbackRequest):
+    return await _rollback_job(
+        job_id=job_id,
+        payload=payload,
+        prefer_learn=True,
+        allow_fallback=False,
+        not_found_error="learn_job_not_found",
+    )
+
+
+@router.post("/import/jobs/{job_id}/rollback")
+async def rollback_external_import_job(job_id: str, payload: ImportRollbackRequest):
+    return await _rollback_job(
+        job_id=job_id,
+        payload=payload,
+        prefer_learn=False,
+        allow_fallback=True,
+        not_found_error="import_job_not_found",
+    )
+
+
+@router.post("/learn/trigger")
+async def trigger_explicit_learn(payload: LearnTriggerRequest):
+    domain = _validate_import_domain(payload.domain)
+    normalized_source = str(payload.source or "manual_review").strip() or "manual_review"
+    normalized_session_id = str(payload.session_id or "").strip()
+    normalized_reason = str(payload.reason or "").strip()
+    normalized_actor_id = (str(payload.actor_id).strip() if payload.actor_id is not None else "") or None
+    normalized_path_prefix = str(payload.path_prefix or "corrections").strip() or "corrections"
+    execute = bool(payload.execute)
+    explicit_learn_service = await _resolve_explicit_learn_service()
+
+    result = await explicit_learn_service(
+        content=str(payload.content or ""),
+        source=normalized_source,
+        reason=normalized_reason,
+        session_id=normalized_session_id,
+        actor_id=normalized_actor_id,
+        domain=domain,
+        path_prefix=normalized_path_prefix,
+        execute=execute,
+        client=_LazySQLiteClientProxy(get_sqlite_client),
+    )
+
+    created_memories: List[Dict[str, Any]] = []
+    created_memory = result.get("created_memory")
+    if isinstance(created_memory, dict):
+        memory_id = _safe_non_negative_int(created_memory.get("id"))
+        if memory_id > 0:
+            created_memories.append(
+                {
+                    "memory_id": memory_id,
+                    "uri": str(created_memory.get("uri") or ""),
+                    "path": str(created_memory.get("path") or ""),
+                    "source_hash": str(result.get("source_hash") or ""),
+                }
+            )
+
+    created_namespace_memories = _normalize_created_namespace_memories(
+        result.get("created_namespace_memories")
+    )
+
+    accepted = bool(result.get("accepted"))
+    reason = str(result.get("reason") or "")
+    job_status = "failed"
+    if accepted and reason == "executed":
+        job_status = "executed"
+    elif accepted:
+        job_status = "prepared"
+
+    batch_id = str(result.get("batch_id") or "").strip()
+    if not batch_id:
+        batch_id = f"learn-{uuid.uuid4().hex[:16]}"
+        result["batch_id"] = batch_id
+
+    now = _utc_iso_now()
+    job_payload: Dict[str, Any] = {
+        "job_id": batch_id,
+        "job_type": "learn",
+        "status": job_status,
+        "created_at": now,
+        "updated_at": now,
+        "source": normalized_source,
+        "reason": normalized_reason,
+        "reason_text": normalized_reason,
+        "actor_id": normalized_actor_id,
+        "session_id": normalized_session_id,
+        "domain": domain,
+        "path_prefix": normalized_path_prefix,
+        "execute": execute,
+        "source_hash": str(result.get("source_hash") or ""),
+        "target_parent_uri": str(result.get("target_parent_uri") or ""),
+        "created_memories": created_memories,
+        "created_namespace_memories": created_namespace_memories,
+        "result": result,
+    }
+    if job_status == "executed":
+        job_payload["rollback"] = {
+            "status": "not_started",
+            "rolled_back_count": 0,
+            "error_count": 0,
+            "errors": [],
+            "completed_at": None,
+            "side_effects_audit_required": True,
+            "residual_artifacts_review_required": True,
+        }
+    elif job_status == "failed":
+        job_payload["failure"] = {
+            "reason": reason or "rejected",
+            "updated_at": now,
+        }
+
+    await _put_learn_job(job_payload)
+
+    response_payload = {
+        "ok": accepted,
+        "status": job_status,
+        "job_id": batch_id,
+        "job_type": "learn",
+        "result": result,
+        "job": _public_import_job_payload(job_payload),
+        "rollback_endpoint": f"/maintenance/import/jobs/{batch_id}/rollback",
+        "rollback_endpoint_aliases": [
+            f"/maintenance/import/jobs/{batch_id}/rollback",
+            f"/maintenance/learn/jobs/{batch_id}/rollback",
+        ],
+    }
+    if not accepted:
+        raise _http_error_for_learn_trigger(
+            result=result,
+            job_id=batch_id,
+            job_payload=job_payload,
+        )
+    return response_payload
 
 
 @router.get("/orphans")

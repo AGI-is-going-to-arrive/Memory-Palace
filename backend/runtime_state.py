@@ -246,6 +246,33 @@ class SessionSearchCache:
         ranked = sorted(by_uri.values(), key=lambda row: row["score"], reverse=True)
         return ranked[: max(1, limit)]
 
+    async def summary(self) -> Dict[str, Any]:
+        """Return lightweight, process-local stats for SM-Lite observability."""
+        async with self._guard:
+            snapshot = {sid: len(queue) for sid, queue in self._hits.items()}
+
+        session_count = len(snapshot)
+        total_hits = sum(snapshot.values())
+        max_hits = max(snapshot.values(), default=0)
+        top_sessions = sorted(
+            (
+                {"session_id": session_id, "hits": hit_count}
+                for session_id, hit_count in snapshot.items()
+                if hit_count > 0
+            ),
+            key=lambda item: item["hits"],
+            reverse=True,
+        )[:5]
+
+        return {
+            "session_count": session_count,
+            "total_hits": total_hits,
+            "max_hits_in_session": max_hits,
+            "max_hits_per_session": self._max_hits_per_session,
+            "half_life_seconds": self._half_life_seconds,
+            "top_sessions": top_sessions,
+        }
+
 
 class SessionFlushTracker:
     """Tracks session activity and produces compact flush summaries."""
@@ -292,6 +319,41 @@ class SessionFlushTracker:
         sid = _normalize_session_id(session_id)
         async with self._guard:
             self._events.pop(sid, None)
+
+    async def summary(self) -> Dict[str, Any]:
+        """Return pending flush workload stats for SM-Lite observability."""
+        async with self._guard:
+            snapshot = {
+                sid: {"events": len(queue), "chars": sum(len(item) for item in queue)}
+                for sid, queue in self._events.items()
+                if queue
+            }
+
+        session_count = len(snapshot)
+        pending_events = sum(item["events"] for item in snapshot.values())
+        pending_chars = sum(item["chars"] for item in snapshot.values())
+        top_sessions = sorted(
+            (
+                {
+                    "session_id": session_id,
+                    "events": stats["events"],
+                    "chars": stats["chars"],
+                }
+                for session_id, stats in snapshot.items()
+            ),
+            key=lambda item: (item["events"], item["chars"]),
+            reverse=True,
+        )[:5]
+
+        return {
+            "session_count": session_count,
+            "pending_events": pending_events,
+            "pending_chars": pending_chars,
+            "trigger_chars": self._trigger_chars,
+            "min_events": self._min_events,
+            "max_events_per_session": self._max_events,
+            "top_sessions": top_sessions,
+        }
 
 
 @dataclass
@@ -382,6 +444,258 @@ class GuardDecisionTracker:
                 for reason, count in reason_counter.most_common(5)
             ],
             "last_event_at": snapshot[-1].timestamp,
+        }
+
+
+@dataclass
+class ImportLearnAuditEvent:
+    timestamp: str
+    event_type: str
+    operation: str
+    decision: str
+    reason: str
+    source: str
+    session_id: str
+    actor_id: Optional[str]
+    batch_id: Optional[str]
+    metadata: Dict[str, Any]
+
+
+class ImportLearnAuditTracker:
+    """In-process audit tracker for import/learn/reject/rollback workflows."""
+
+    _ALLOWED_EVENT_TYPES = {"import", "learn", "reject", "rollback", "unknown"}
+    _ALLOWED_DECISIONS = {"accepted", "rejected", "executed", "rolled_back", "unknown"}
+
+    def __init__(self) -> None:
+        self._max_events = _env_int(
+            "RUNTIME_IMPORT_LEARN_AUDIT_LIMIT", 300, minimum=50
+        )
+        self._events: Deque[ImportLearnAuditEvent] = deque(maxlen=self._max_events)
+        self._guard = asyncio.Lock()
+
+    async def record_event(
+        self,
+        *,
+        event_type: str,
+        operation: str,
+        decision: str,
+        reason: str,
+        source: str,
+        session_id: Optional[str],
+        actor_id: Optional[str] = None,
+        batch_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        normalized_event_type = (
+            (event_type or "unknown").strip().lower() or "unknown"
+        )
+        if normalized_event_type not in self._ALLOWED_EVENT_TYPES:
+            normalized_event_type = "unknown"
+
+        normalized_decision = (decision or "unknown").strip().lower() or "unknown"
+        if normalized_decision not in self._ALLOWED_DECISIONS:
+            normalized_decision = "unknown"
+
+        event = ImportLearnAuditEvent(
+            timestamp=_utc_iso_now(),
+            event_type=normalized_event_type,
+            operation=(operation or "unknown").strip() or "unknown",
+            decision=normalized_decision,
+            reason=(reason or "").strip(),
+            source=(source or "unknown").strip() or "unknown",
+            session_id=_normalize_session_id(session_id),
+            actor_id=(str(actor_id).strip() if actor_id is not None else None) or None,
+            batch_id=(str(batch_id).strip() if batch_id is not None else None) or None,
+            metadata=dict(metadata) if isinstance(metadata, dict) else {},
+        )
+        async with self._guard:
+            self._events.append(event)
+
+    async def summary(self) -> Dict[str, Any]:
+        async with self._guard:
+            snapshot = list(self._events)
+
+        if not snapshot:
+            return {
+                "window_size": self._max_events,
+                "total_events": 0,
+                "event_type_breakdown": {},
+                "operation_breakdown": {},
+                "decision_breakdown": {},
+                "rejected_events": 0,
+                "rollback_events": 0,
+                "top_reasons": [],
+                "last_event_at": None,
+                "recent_events": [],
+            }
+
+        event_type_counter = Counter(item.event_type for item in snapshot)
+        operation_counter = Counter(item.operation for item in snapshot)
+        decision_counter = Counter(item.decision for item in snapshot)
+        reason_counter = Counter(item.reason for item in snapshot if item.reason)
+        rejected_events = sum(
+            1
+            for item in snapshot
+            if item.decision == "rejected" or item.event_type == "reject"
+        )
+        rollback_events = sum(
+            1
+            for item in snapshot
+            if item.decision == "rolled_back" or item.event_type == "rollback"
+        )
+        recent_events = [
+            {
+                "timestamp": item.timestamp,
+                "event_type": item.event_type,
+                "operation": item.operation,
+                "decision": item.decision,
+                "reason": item.reason,
+                "source": item.source,
+                "session_id": item.session_id,
+                "actor_id": item.actor_id,
+                "batch_id": item.batch_id,
+            }
+            for item in snapshot[-5:]
+        ]
+
+        return {
+            "window_size": self._max_events,
+            "total_events": len(snapshot),
+            "event_type_breakdown": dict(event_type_counter),
+            "operation_breakdown": dict(operation_counter),
+            "decision_breakdown": dict(decision_counter),
+            "rejected_events": rejected_events,
+            "rollback_events": rollback_events,
+            "top_reasons": [
+                {"reason": reason, "count": count}
+                for reason, count in reason_counter.most_common(5)
+            ],
+            "last_event_at": snapshot[-1].timestamp,
+            "recent_events": recent_events,
+        }
+
+
+@dataclass
+class SessionPromotionEvent:
+    timestamp: str
+    session_id: str
+    source: str
+    trigger_reason: str
+    uri: str
+    memory_id: Optional[int]
+    gist_method: str
+    quality: float
+    degraded: bool
+    degrade_reasons: List[str]
+    index_queued: int
+    index_dropped: int
+    index_deduped: int
+
+
+class SessionPromotionTracker:
+    """In-process tracker for SM-Lite promotion events."""
+
+    def __init__(self) -> None:
+        self._max_events = _env_int("RUNTIME_PROMOTION_EVENT_LIMIT", 200, minimum=20)
+        self._events: Deque[SessionPromotionEvent] = deque(maxlen=self._max_events)
+        self._guard = asyncio.Lock()
+
+    async def record_event(
+        self,
+        *,
+        session_id: Optional[str],
+        source: str,
+        trigger_reason: str,
+        uri: str,
+        memory_id: Optional[int],
+        gist_method: str,
+        quality: Optional[float],
+        degraded: bool = False,
+        degrade_reasons: Optional[List[str]] = None,
+        index_queued: int = 0,
+        index_dropped: int = 0,
+        index_deduped: int = 0,
+    ) -> None:
+        def _safe_non_negative_int(value: Any) -> int:
+            try:
+                return max(0, int(value))
+            except (TypeError, ValueError):
+                return 0
+
+        event = SessionPromotionEvent(
+            timestamp=_utc_iso_now(),
+            session_id=_normalize_session_id(session_id),
+            source=(source or "compact_context").strip().lower() or "compact_context",
+            trigger_reason=(trigger_reason or "manual").strip() or "manual",
+            uri=(uri or "").strip(),
+            memory_id=memory_id if isinstance(memory_id, int) and memory_id > 0 else None,
+            gist_method=(gist_method or "unknown").strip().lower() or "unknown",
+            quality=float(quality) if isinstance(quality, (int, float)) else 0.0,
+            degraded=bool(degraded),
+            degrade_reasons=[
+                item
+                for item in (degrade_reasons or [])
+                if isinstance(item, str) and item.strip()
+            ],
+            index_queued=_safe_non_negative_int(index_queued),
+            index_dropped=_safe_non_negative_int(index_dropped),
+            index_deduped=_safe_non_negative_int(index_deduped),
+        )
+        async with self._guard:
+            self._events.append(event)
+
+    async def summary(self) -> Dict[str, Any]:
+        async with self._guard:
+            snapshot = list(self._events)
+
+        if not snapshot:
+            return {
+                "window_size": self._max_events,
+                "total_promotions": 0,
+                "degraded_promotions": 0,
+                "source_breakdown": {},
+                "reason_breakdown": {},
+                "gist_method_breakdown": {},
+                "avg_quality": 0.0,
+                "index_queue": {
+                    "queued": 0,
+                    "dropped": 0,
+                    "deduped": 0,
+                },
+                "top_sessions": [],
+                "last_promotion_at": None,
+            }
+
+        source_counter = Counter(item.source for item in snapshot)
+        reason_counter = Counter(item.trigger_reason for item in snapshot)
+        gist_counter = Counter(item.gist_method for item in snapshot)
+        session_counter = Counter(item.session_id for item in snapshot)
+        degraded_promotions = sum(1 for item in snapshot if item.degraded)
+        quality_values = [max(0.0, min(1.0, item.quality)) for item in snapshot]
+        avg_quality = sum(quality_values) / max(1, len(quality_values))
+        index_queued = sum(item.index_queued for item in snapshot)
+        index_dropped = sum(item.index_dropped for item in snapshot)
+        index_deduped = sum(item.index_deduped for item in snapshot)
+
+        return {
+            "window_size": self._max_events,
+            "total_promotions": len(snapshot),
+            "degraded_promotions": degraded_promotions,
+            "source_breakdown": dict(source_counter),
+            "reason_breakdown": dict(reason_counter),
+            "gist_method_breakdown": dict(gist_counter),
+            "avg_quality": round(avg_quality, 6),
+            "index_queue": {
+                "queued": index_queued,
+                "dropped": index_dropped,
+                "deduped": index_deduped,
+            },
+            "top_sessions": [
+                {"session_id": session_id, "count": count}
+                for session_id, count in session_counter.most_common(5)
+            ],
+            "last_promotion_at": snapshot[-1].timestamp,
         }
 
 
@@ -1620,7 +1934,9 @@ class RuntimeState:
         self.write_lanes = WriteLaneCoordinator()
         self.session_cache = SessionSearchCache()
         self.flush_tracker = SessionFlushTracker()
+        self.promotion_tracker = SessionPromotionTracker()
         self.guard_tracker = GuardDecisionTracker()
+        self.import_learn_tracker = ImportLearnAuditTracker()
         self.cleanup_reviews = CleanupReviewCoordinator()
         self.vitality_decay = VitalityDecayCoordinator()
         self.index_worker = IndexTaskWorker()
