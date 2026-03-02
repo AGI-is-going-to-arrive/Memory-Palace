@@ -88,7 +88,8 @@ read_memory(
     uri: str,                       # 必填，记忆 URI
     chunk_id: Optional[int] = None, # 可选，分片索引（0 起始）
     range: Optional[str] = None,    # 可选，字符范围（如 "0:500"）
-    max_chars: Optional[int] = None # 可选，返回字符数上限
+    max_chars: Optional[int] = None, # 可选，返回字符数上限
+    include_ancestors: Optional[bool] = False # 可选，是否附带父链记忆（仅非 system URI）
 )
 ```
 
@@ -98,6 +99,8 @@ read_memory(
 |---|---|---|
 | `system://boot` | 加载核心记忆 + 最近记忆 | 每次**会话启动**时调用 |
 | `system://index` | 查看所有记忆的完整索引 | 需要**概览全部记忆**时 |
+| `system://index-lite` | 查看 gist 轻量索引摘要 | 需要**低成本快速概览**时 |
+| `system://audit` | 查看聚合观测/审计摘要 | 需要**排障与运行态巡检**时 |
 | `system://recent` | 最近修改的 10 条记忆 | 快速查看**最新变更** |
 | `system://recent/N` | 最近修改的 N 条记忆 | 自定义数量（最多 100） |
 
@@ -299,7 +302,8 @@ search_memory(
     max_results: Optional[int] = None,           # 可选，返回结果数上限
     candidate_multiplier: Optional[int] = None,  # 可选，候选池倍率
     include_session: Optional[bool] = None,      # 可选，是否包含本会话记忆
-    filters: Optional[Dict] = None               # 可选，过滤条件
+    filters: Optional[Dict] = None,              # 可选，过滤条件
+    scope_hint: Optional[str] = None             # 可选，查询侧作用域提示（domain/path_prefix/URI 前缀）
 )
 ```
 
@@ -326,7 +330,7 @@ search_memory(
 |---|---|
 | `query_effective` | 实际生效的查询文本 |
 | `query_preprocess` | 查询预处理信息 |
-| `intent` | 意图分类：`factual` / `exploratory` / `temporal` / `causal` |
+| `intent` | 意图分类：`factual` / `exploratory` / `temporal` / `causal` / `unknown` |
 | `mode_applied` | 实际使用的检索模式 |
 | `results` | 搜索结果列表 |
 | `degrade_reasons` | 降级原因（如有） |
