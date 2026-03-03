@@ -287,7 +287,9 @@ async def update_node(
     client = get_sqlite_client()
     
     # Check exists
-    memory = await client.get_memory_by_path(path, domain=domain)
+    memory = await client.get_memory_by_path(
+        path, domain=domain, reinforce_access=False
+    )
     if not memory:
         raise HTTPException(status_code=404, detail=f"Path not found: {domain}://{path}")
 

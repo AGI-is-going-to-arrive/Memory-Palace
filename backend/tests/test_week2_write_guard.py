@@ -45,9 +45,15 @@ class _FakeClient:
             "index_targets": [11],
         }
 
-    async def get_memory_by_path(self, path: str, domain: str = "core") -> Optional[Dict[str, Any]]:
+    async def get_memory_by_path(
+        self,
+        path: str,
+        domain: str = "core",
+        reinforce_access: bool = True,
+    ) -> Optional[Dict[str, Any]]:
         _ = path
         _ = domain
+        _ = reinforce_access
         return dict(self.memory)
 
     async def update_memory(self, **kwargs: Any) -> Dict[str, Any]:
@@ -136,6 +142,30 @@ async def test_write_guard_exclude_memory_id_allows_add(tmp_path: Path) -> None:
 
     assert decision["action"] == "ADD"
     assert decision["target_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_write_guard_is_fail_closed_when_search_backends_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "guard-search-unavailable.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    async def _raise_search_advanced(*_: Any, **__: Any) -> Dict[str, Any]:
+        raise RuntimeError("search backend unavailable")
+
+    monkeypatch.setattr(client, "search_advanced", _raise_search_advanced)
+    decision = await client.write_guard(content="new candidate", domain="core")
+    await client.close()
+
+    assert decision["action"] == "NOOP"
+    assert decision["method"] == "exception"
+    assert decision["reason"] == "write_guard_unavailable"
+    assert decision["degraded"] is True
+    assert "write_guard_semantic_failed:RuntimeError" in decision["degrade_reasons"]
+    assert "write_guard_keyword_failed:RuntimeError" in decision["degrade_reasons"]
 
 
 @pytest.mark.asyncio
@@ -756,6 +786,15 @@ async def test_observability_summary_includes_guard_stats(
                 "avg_quality_score": 0.0,
                 "method_breakdown": {},
                 "latest_created_at": None,
+            }
+
+        async def get_vitality_stats(self) -> Dict[str, Any]:
+            return {
+                "degraded": False,
+                "total_paths": 0,
+                "low_vitality_paths": 0,
+                "deprecation_candidates": 0,
+                "total_memories": 0,
             }
 
     async def _ensure_started(_factory) -> None:

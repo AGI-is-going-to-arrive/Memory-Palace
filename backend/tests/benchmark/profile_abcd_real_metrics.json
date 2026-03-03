@@ -1,19 +1,18 @@
 {
-  "generated_at_utc": "2026-03-02T01:34:44+00:00",
+  "generated_at_utc": "2026-03-03T10:25:44+00:00",
   "source": "backend/tests/benchmark/helpers/profile_abcd_real_runner.py",
-  "sample_size_requested": 10,
+  "sample_size_requested": 1,
   "dataset_scope": [
-    "squad_v2_dev",
-    "beir_nfcorpus"
+    "squad_v2_dev"
   ],
   "dataset_labels": {
-    "squad_v2_dev": "SQuAD v2 Dev",
-    "beir_nfcorpus": "BEIR NFCorpus"
+    "squad_v2_dev": "SQuAD v2 Dev"
   },
   "real_run_strategy": {
     "first_relevant_only": true,
-    "extra_distractors": 80,
-    "seed": 20260219
+    "extra_distractors": 20,
+    "seed": 20260219,
+    "workdir": "/tmp/abcd-real-20260303T182320"
   },
   "profiles": {
     "profile_a": {
@@ -24,11 +23,11 @@
           "dataset": "squad_v2_dev",
           "dataset_label": "SQuAD v2 Dev",
           "mode": "keyword",
-          "sample_size": 10,
-          "query_count": 10,
-          "query_count_raw": 10,
+          "sample_size": 1,
+          "query_count": 1,
+          "query_count_raw": 1,
           "sample_bucket_size": 100,
-          "corpus_doc_count": 90,
+          "corpus_doc_count": 21,
           "quality": {
             "hr_at_5": 0.0,
             "hr_at_10": 0.0,
@@ -37,42 +36,12 @@
             "recall_at_10": 0.0
           },
           "latency_ms": {
-            "p50": 1.642647,
-            "p95": 2.780411,
-            "p99": 2.797916
+            "p50": 2.219583,
+            "p95": 2.219583,
+            "p99": 2.219583
           },
           "degradation": {
-            "queries": 10,
-            "degraded": 0,
-            "degrade_rate": 0.0,
-            "degrade_reasons": [],
-            "invalid_reasons": [],
-            "valid": true
-          }
-        },
-        {
-          "dataset": "beir_nfcorpus",
-          "dataset_label": "BEIR NFCorpus",
-          "mode": "keyword",
-          "sample_size": 10,
-          "query_count": 10,
-          "query_count_raw": 10,
-          "sample_bucket_size": 100,
-          "corpus_doc_count": 90,
-          "quality": {
-            "hr_at_5": 0.3,
-            "hr_at_10": 0.3,
-            "mrr": 0.3,
-            "ndcg_at_10": 0.3,
-            "recall_at_10": 0.3
-          },
-          "latency_ms": {
-            "p50": 1.732166,
-            "p95": 2.02775,
-            "p99": 2.03495
-          },
-          "degradation": {
-            "queries": 10,
+            "queries": 1,
             "degraded": 0,
             "degrade_rate": 0.0,
             "degrade_reasons": [],
@@ -90,55 +59,25 @@
           "dataset": "squad_v2_dev",
           "dataset_label": "SQuAD v2 Dev",
           "mode": "hybrid",
-          "sample_size": 10,
-          "query_count": 10,
-          "query_count_raw": 10,
+          "sample_size": 1,
+          "query_count": 1,
+          "query_count_raw": 1,
           "sample_bucket_size": 100,
-          "corpus_doc_count": 90,
+          "corpus_doc_count": 21,
           "quality": {
-            "hr_at_5": 0.3,
-            "hr_at_10": 0.3,
-            "mrr": 0.145,
-            "ndcg_at_10": 0.181753,
-            "recall_at_10": 0.3
+            "hr_at_5": 1.0,
+            "hr_at_10": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_10": 1.0,
+            "recall_at_10": 1.0
           },
           "latency_ms": {
-            "p50": 8.026187,
-            "p95": 9.361965,
-            "p99": 10.05966
+            "p50": 5.535125,
+            "p95": 5.535125,
+            "p99": 5.535125
           },
           "degradation": {
-            "queries": 10,
-            "degraded": 0,
-            "degrade_rate": 0.0,
-            "degrade_reasons": [],
-            "invalid_reasons": [],
-            "valid": true
-          }
-        },
-        {
-          "dataset": "beir_nfcorpus",
-          "dataset_label": "BEIR NFCorpus",
-          "mode": "hybrid",
-          "sample_size": 10,
-          "query_count": 10,
-          "query_count_raw": 10,
-          "sample_bucket_size": 100,
-          "corpus_doc_count": 90,
-          "quality": {
-            "hr_at_5": 0.5,
-            "hr_at_10": 0.5,
-            "mrr": 0.366667,
-            "ndcg_at_10": 0.4,
-            "recall_at_10": 0.5
-          },
-          "latency_ms": {
-            "p50": 10.802021,
-            "p95": 11.196906,
-            "p99": 11.241981
-          },
-          "degradation": {
-            "queries": 10,
+            "queries": 1,
             "degraded": 0,
             "degrade_rate": 0.0,
             "degrade_reasons": [],
@@ -156,60 +95,36 @@
           "dataset": "squad_v2_dev",
           "dataset_label": "SQuAD v2 Dev",
           "mode": "hybrid",
-          "sample_size": 10,
-          "query_count": 10,
-          "query_count_raw": 10,
+          "sample_size": 1,
+          "query_count": 1,
+          "query_count_raw": 1,
           "sample_bucket_size": 100,
-          "corpus_doc_count": 90,
+          "corpus_doc_count": 21,
           "quality": {
-            "hr_at_5": 0.9,
+            "hr_at_5": 1.0,
             "hr_at_10": 1.0,
-            "mrr": 0.834286,
-            "ndcg_at_10": 0.872019,
+            "mrr": 1.0,
+            "ndcg_at_10": 1.0,
             "recall_at_10": 1.0
           },
           "latency_ms": {
-            "p50": 386.857146,
-            "p95": 735.810164,
-            "p99": 744.822299
+            "p50": 3167.08325,
+            "p95": 3167.08325,
+            "p99": 3167.08325
           },
           "degradation": {
-            "queries": 10,
-            "degraded": 0,
-            "degrade_rate": 0.0,
-            "degrade_reasons": [],
-            "invalid_reasons": [],
-            "valid": true
-          }
-        },
-        {
-          "dataset": "beir_nfcorpus",
-          "dataset_label": "BEIR NFCorpus",
-          "mode": "hybrid",
-          "sample_size": 10,
-          "query_count": 10,
-          "query_count_raw": 10,
-          "sample_bucket_size": 100,
-          "corpus_doc_count": 90,
-          "quality": {
-            "hr_at_5": 0.5,
-            "hr_at_10": 0.5,
-            "mrr": 0.5,
-            "ndcg_at_10": 0.5,
-            "recall_at_10": 0.5
-          },
-          "latency_ms": {
-            "p50": 413.265542,
-            "p95": 577.867065,
-            "p99": 581.78478
-          },
-          "degradation": {
-            "queries": 10,
-            "degraded": 0,
-            "degrade_rate": 0.0,
-            "degrade_reasons": [],
-            "invalid_reasons": [],
-            "valid": true
+            "queries": 1,
+            "degraded": 1,
+            "degrade_rate": 1.0,
+            "degrade_reasons": [
+              "embedding_fallback_hash",
+              "embedding_request_failed"
+            ],
+            "invalid_reasons": [
+              "embedding_fallback_hash",
+              "embedding_request_failed"
+            ],
+            "valid": false
           }
         }
       ]
@@ -222,55 +137,25 @@
           "dataset": "squad_v2_dev",
           "dataset_label": "SQuAD v2 Dev",
           "mode": "hybrid",
-          "sample_size": 10,
-          "query_count": 10,
-          "query_count_raw": 10,
+          "sample_size": 1,
+          "query_count": 1,
+          "query_count_raw": 1,
           "sample_bucket_size": 100,
-          "corpus_doc_count": 90,
+          "corpus_doc_count": 21,
           "quality": {
             "hr_at_5": 1.0,
             "hr_at_10": 1.0,
-            "mrr": 0.845,
-            "ndcg_at_10": 0.881753,
+            "mrr": 1.0,
+            "ndcg_at_10": 1.0,
             "recall_at_10": 1.0
           },
           "latency_ms": {
-            "p50": 1646.579708,
-            "p95": 2071.655888,
-            "p99": 2266.045478
+            "p50": 1732.14725,
+            "p95": 1732.14725,
+            "p99": 1732.14725
           },
           "degradation": {
-            "queries": 10,
-            "degraded": 0,
-            "degrade_rate": 0.0,
-            "degrade_reasons": [],
-            "invalid_reasons": [],
-            "valid": true
-          }
-        },
-        {
-          "dataset": "beir_nfcorpus",
-          "dataset_label": "BEIR NFCorpus",
-          "mode": "hybrid",
-          "sample_size": 10,
-          "query_count": 10,
-          "query_count_raw": 10,
-          "sample_bucket_size": 100,
-          "corpus_doc_count": 90,
-          "quality": {
-            "hr_at_5": 0.6,
-            "hr_at_10": 0.6,
-            "mrr": 0.55,
-            "ndcg_at_10": 0.563093,
-            "recall_at_10": 0.6
-          },
-          "latency_ms": {
-            "p50": 1825.70675,
-            "p95": 2037.0771,
-            "p99": 2132.38572
-          },
-          "degradation": {
-            "queries": 10,
+            "queries": 1,
             "degraded": 0,
             "degrade_rate": 0.0,
             "degrade_reasons": [],
@@ -291,12 +176,6 @@
           "dataset_label": "SQuAD v2 Dev",
           "valid": true,
           "invalid_reasons": []
-        },
-        {
-          "dataset": "beir_nfcorpus",
-          "dataset_label": "BEIR NFCorpus",
-          "valid": true,
-          "invalid_reasons": []
         }
       ]
     },
@@ -305,35 +184,17 @@
         "dataset": "squad_v2_dev",
         "dataset_label": "SQuAD v2 Dev",
         "a_hr10": 0.0,
-        "b_hr10": 0.3,
+        "b_hr10": 1.0,
         "c_hr10": 1.0,
         "d_hr10": 1.0,
         "a_ndcg10": 0.0,
-        "b_ndcg10": 0.181753,
-        "c_ndcg10": 0.872019,
-        "d_ndcg10": 0.881753,
-        "a_p95": 2.780411,
-        "b_p95": 9.361965,
-        "c_p95": 735.810164,
-        "d_p95": 2071.655888,
-        "valid": true,
-        "invalid_reasons": []
-      },
-      {
-        "dataset": "beir_nfcorpus",
-        "dataset_label": "BEIR NFCorpus",
-        "a_hr10": 0.3,
-        "b_hr10": 0.5,
-        "c_hr10": 0.5,
-        "d_hr10": 0.6,
-        "a_ndcg10": 0.3,
-        "b_ndcg10": 0.4,
-        "c_ndcg10": 0.5,
-        "d_ndcg10": 0.563093,
-        "a_p95": 2.02775,
-        "b_p95": 11.196906,
-        "c_p95": 577.867065,
-        "d_p95": 2037.0771,
+        "b_ndcg10": 1.0,
+        "c_ndcg10": 1.0,
+        "d_ndcg10": 1.0,
+        "a_p95": 2.219583,
+        "b_p95": 5.535125,
+        "c_p95": 3167.08325,
+        "d_p95": 1732.14725,
         "valid": true,
         "invalid_reasons": []
       }

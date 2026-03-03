@@ -45,6 +45,7 @@ REAL_PROFILE_JSON_ARTIFACT = BENCHMARK_DIR / "profile_abcd_real_metrics.json"
 REAL_PROFILE_MARKDOWN_ARTIFACT = BENCHMARK_DIR / "benchmark_results_profile_abcd_real.md"
 REAL_PROFILE_CD_MARKDOWN_ARTIFACT = BENCHMARK_DIR / "benchmark_results_profile_cd_real.md"
 REAL_PROFILE_WORKDIR = BENCHMARK_DIR / ".real_profile_cache"
+REAL_PROFILE_WORKDIR_ENV = "BENCHMARK_REAL_PROFILE_WORKDIR"
 
 PROFILE_D_INVALID_GATE_REASONS = {
     "embedding_fallback_hash",
@@ -141,6 +142,34 @@ SOTA_BENCHMARK_REFERENCES_2026_02 = {
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _sanitize_report_path(raw_path: Path | str) -> str:
+    path_obj = Path(raw_path).expanduser()
+    if not path_obj.is_absolute():
+        return path_obj.as_posix()
+    try:
+        return path_obj.resolve(strict=False).relative_to(BACKEND_ROOT).as_posix()
+    except Exception:
+        pass
+    try:
+        return path_obj.resolve(strict=False).relative_to(BACKEND_ROOT.parent).as_posix()
+    except Exception:
+        pass
+    try:
+        return "<tmp>/" + path_obj.resolve(strict=False).relative_to(Path("/tmp")).as_posix()
+    except Exception:
+        pass
+    return f"<abs>/{path_obj.name}"
+
+
+def resolve_real_profile_workdir(workdir: Optional[Path] = None) -> Path:
+    if workdir is not None:
+        return Path(workdir).expanduser()
+    env_value = str(os.getenv(REAL_PROFILE_WORKDIR_ENV, "")).strip()
+    if env_value:
+        return Path(env_value).expanduser()
+    return REAL_PROFILE_WORKDIR
 
 
 def _slugify(value: str) -> str:
@@ -714,6 +743,7 @@ async def build_profile_abcd_real_metrics(
     first_relevant_only: bool = True,
     extra_distractors: int = 200,
     seed: int = REAL_RANDOM_SEED,
+    workdir: Optional[Path] = None,
 ) -> Dict[str, Any]:
     if int(sample_size) <= 0:
         raise ValueError("sample_size must be > 0")
@@ -737,9 +767,10 @@ async def build_profile_abcd_real_metrics(
     profile_results: Dict[str, Dict[str, Any]] = {}
     profile_doc_mappings: Dict[str, Dict[str, Dict[int, str]]] = {}
 
-    REAL_PROFILE_WORKDIR.mkdir(parents=True, exist_ok=True)
+    real_profile_workdir = resolve_real_profile_workdir(workdir)
+    real_profile_workdir.mkdir(parents=True, exist_ok=True)
     db_paths = {
-        config.key: REAL_PROFILE_WORKDIR / f"{config.key}.db"
+        config.key: real_profile_workdir / f"{config.key}.db"
         for config in PROFILE_CONFIGS
     }
 
@@ -782,6 +813,7 @@ async def build_profile_abcd_real_metrics(
             "first_relevant_only": bool(first_relevant_only),
             "extra_distractors": int(extra_distractors),
             "seed": int(seed),
+            "workdir": _sanitize_report_path(real_profile_workdir),
         },
         "profiles": profile_results,
         "phase6": {

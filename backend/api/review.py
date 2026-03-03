@@ -13,7 +13,7 @@ Design Philosophy:
 - The human can permanently delete deprecated memories after review
 """
 from fastapi import APIRouter, Depends, HTTPException
-from typing import List
+from typing import Any, Dict, List
 import difflib
 from urllib.parse import unquote
 
@@ -464,23 +464,64 @@ async def _rollback_path(data: dict) -> dict:
         descendant_memory_ids: List[int] = []
 
         if path:
-            descendant_prefix = f"{path}/"
-            all_paths = await client.get_all_paths(domain=domain)
-            descendants = [
-                item for item in all_paths
-                if str(item.get("path") or "").startswith(descendant_prefix)
-            ]
+            # Descendants may be created under any alias path that points to the same
+            # memory node, so we must scan across domains before deleting the root node.
+            all_paths = await client.get_all_paths(domain=None)
+            current = await client.get_memory_by_path(
+                path, domain, reinforce_access=False
+            )
+            current_memory_id = current.get("id") if isinstance(current, dict) else None
+
+            root_aliases: set[tuple[str, str]] = set()
+            if isinstance(current_memory_id, int) and current_memory_id > 0:
+                for item in all_paths:
+                    try:
+                        item_memory_id = int(item.get("memory_id"))
+                    except (TypeError, ValueError):
+                        continue
+                    if item_memory_id != current_memory_id:
+                        continue
+                    alias_domain = str(item.get("domain") or "").strip()
+                    alias_path = str(item.get("path") or "").strip()
+                    if alias_domain and alias_path:
+                        root_aliases.add((alias_domain, alias_path))
+
+            if not root_aliases:
+                root_aliases.add((str(domain or "core"), str(path)))
+
+            descendants_map: Dict[str, Dict[str, Any]] = {}
+            for alias_domain, alias_path in root_aliases:
+                descendant_prefix = f"{alias_path}/"
+                for item in all_paths:
+                    item_domain = str(item.get("domain") or "").strip()
+                    item_path = str(item.get("path") or "").strip()
+                    if item_domain != alias_domain:
+                        continue
+                    if not item_path.startswith(descendant_prefix):
+                        continue
+                    descendants_map[f"{item_domain}://{item_path}"] = item
+
+            descendants = list(descendants_map.values())
             descendants.sort(
-                key=lambda item: (str(item.get("path") or "").count("/"), str(item.get("path") or "")),
+                key=lambda item: (
+                    str(item.get("path") or "").count("/"),
+                    str(item.get("domain") or ""),
+                    str(item.get("path") or ""),
+                ),
                 reverse=True,
             )
 
             for item in descendants:
+                child_domain = str(item.get("domain") or "").strip()
                 child_path = str(item.get("path") or "").strip()
-                if not child_path or child_path == path:
+                if (
+                    not child_path
+                    or not child_domain
+                    or (child_domain, child_path) in root_aliases
+                ):
                     continue
                 try:
-                    await client.remove_path(child_path, domain)
+                    await client.remove_path(child_path, child_domain)
                     descendants_deleted += 1
                 except ValueError:
                     # Path already removed by concurrent/manual operations.
@@ -494,7 +535,9 @@ async def _rollback_path(data: dict) -> dict:
                 if parsed_memory_id > 0:
                     descendant_memory_ids.append(parsed_memory_id)
 
-        current = await client.get_memory_by_path(path, domain)
+        current = await client.get_memory_by_path(
+            path, domain, reinforce_access=False
+        )
 
         # Best-effort cleanup of memories orphaned by descendant path deletion.
         # require_orphan=True ensures we only delete in safe conditions.
@@ -528,8 +571,16 @@ async def _rollback_path(data: dict) -> dict:
         # Rollback of alias creation = remove the alias path only
         try:
             await client.remove_path(path, domain)
-        except ValueError:
-            pass  # Already removed
+        except ValueError as exc:
+            existing_alias = await client.get_memory_by_path(
+                path, domain, reinforce_access=False
+            )
+            if existing_alias is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Cannot rollback alias '{uri}': {exc}",
+                ) from exc
+            return {"deleted": True, "alias_removed": False, "no_change": True}
         return {"deleted": True, "alias_removed": True}
     
     elif operation_type == "delete":
@@ -557,7 +608,9 @@ async def _rollback_path(data: dict) -> dict:
     
     elif operation_type == "modify_meta":
         # Rollback of metadata change = restore original priority/disclosure
-        current = await client.get_memory_by_path(path, domain)
+        current = await client.get_memory_by_path(
+            path, domain, reinforce_access=False
+        )
         if not current:
             raise HTTPException(status_code=404, detail=f"'{uri}' no longer exists")
         
@@ -591,7 +644,9 @@ async def _rollback_memory_content(data: dict) -> dict:
             detail=f"旧版本 (memory_id={memory_id}) 已被永久删除，无法回滚。"
         )
     
-    current = await client.get_memory_by_path(path, domain)
+    current = await client.get_memory_by_path(
+        path, domain, reinforce_access=False
+    )
     
     # Fallback: if original path was deleted, try alternative paths from snapshot
     if not current:
@@ -602,7 +657,9 @@ async def _rollback_memory_content(data: dict) -> dict:
                 alt_domain, alt_path = "core", alt_uri_str
             if alt_path == path and alt_domain == domain:
                 continue  # Skip the one we already tried
-            current = await client.get_memory_by_path(alt_path, alt_domain)
+            current = await client.get_memory_by_path(
+                alt_path, alt_domain, reinforce_access=False
+            )
             if current:
                 path, domain = alt_path, alt_domain
                 break
@@ -639,7 +696,9 @@ async def _rollback_legacy_modify(data: dict) -> dict:
             detail=f"旧版本 (memory_id={snapshot_memory_id}) 已被永久删除，无法回滚。"
         )
     
-    current = await client.get_memory_by_path(path, domain)
+    current = await client.get_memory_by_path(
+        path, domain, reinforce_access=False
+    )
     if not current:
         raise HTTPException(status_code=404, detail=f"'{uri}' no longer exists")
     

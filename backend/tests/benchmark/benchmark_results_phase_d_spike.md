@@ -1,6 +1,6 @@
 # Benchmark Results - phase_d_spike
 
-> generated_at_utc: 2026-03-02T05:27:49+00:00
+> generated_at_utc: 2026-03-03T09:29:39+00:00
 
 ## Scope
 
@@ -8,7 +8,7 @@
 - focus: embedding provider routing / sqlite-vec compatibility / write lane WAL
 - sqlite_vec_readiness: ready
 - wal_load_profile: business_write_peak
-- wal_repeat: 2
+- wal_repeat: 3
 
 ## Probe Status
 
@@ -16,7 +16,7 @@
 |---|---|
 | embedding_provider | ok |
 | sqlite_vec | ok |
-| write_lane_wal | degraded |
+| write_lane_wal | ok |
 
 ## Embedding Cases
 
@@ -30,27 +30,34 @@
 
 ## Write Lane Throughput
 
-| Mode | Throughput (tx/s) | Success/Planned | Failed | Failure Rate | Persistence Gap |
-|---|---:|---:|---:|---:|---:|
-| DELETE | 1417.239 | 5252/5280 | 28 | 0.005303 | 0 |
-| WAL | 2126.207 | 5260/5280 | 20 | 0.003788 | 0 |
-- wal_vs_delete_throughput_ratio: 1.5
+| Mode | Throughput (tx/s) | Success/Planned | Failed | Failure Rate | Retry Rate | Persistence Gap |
+|---|---:|---:|---:|---:|---:|---:|
+| DELETE | 2639.7 | 7920/7920 | 0 | 0.0 | 0.003662 | 0 |
+| WAL | 10941.1 | 7920/7920 | 0 | 0.0 | 0.001389 | 0 |
+- wal_vs_delete_throughput_ratio: 4.145
 - wal_regression_gate_pass: True
 
 ## WAL Threshold Suggestion
 
-- profile_baseline: {'min_throughput_ratio': 1.02, 'max_failure_rate': 0.005, 'max_persistence_gap': 0}
-- suggested_stable_thresholds: {'min_throughput_ratio': 1.02, 'max_failure_rate': 0.005, 'max_persistence_gap': 0}
+- profile_baseline: {'min_throughput_ratio': 1.02, 'max_failure_rate': 0.005, 'max_retry_rate': 0.01, 'max_persistence_gap': 0}
+- suggested_stable_thresholds: {'min_throughput_ratio': 1.02, 'max_failure_rate': 0.005, 'max_retry_rate': 0.01, 'max_persistence_gap': 0}
+
+## HOLD Gate Snapshot (#11/#12/#13)
+
+- source_profile_metrics: /Users/yangjunjie/Desktop/clawanti/Memory-Palace/backend/tests/benchmark/profile_ab_metrics.json
+- source_profile_metrics_status: ok
+- #11: embedding_success_rate=1.0, embedding_fallback_hash_rate=0.0, search_degraded_rate=0.0, overall_pass=True
+- #12: extension_ready=True, latency_gate=False, quality_gate=True, no_new_500_proxy=True, overall_pass=False
+- #13: wal_failed_tx=0, wal_failure_rate=0.0, retry_rate_p95=0.001818, persistence_gap=0, wal_vs_delete_tps_ratio=4.145, overall_pass=True
 
 ## Go/No-Go
 
-- decision: NO_GO
-- summary: Spike produced blockers; keep HOLD and do not promote to default path.
+- decision: GO
+- summary: Spike baseline is executable. Continue with default-off feature flags.
 
 ## Risks
 
-- Write lane probe in DELETE mode observed failed transactions.
-- Write lane probe in WAL mode observed failed transactions.
+- No blocker detected in current spike scope; keep feature flags default-off.
 
 ## Rollback Points
 

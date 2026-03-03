@@ -2,6 +2,9 @@ from pathlib import Path
 
 from scripts.phase_d_spike_runner import (
     _lock_retry_delay_sec,
+    _build_hold_gate_11_from_profile_metrics,
+    _build_hold_gate_12_from_vec_isolation_metrics,
+    _build_hold_gate_13_from_wal_probe,
     _build_wal_regression_gate,
     _build_go_no_go,
     build_phase_d_report,
@@ -232,6 +235,32 @@ def test_go_no_go_allows_when_gate_passes_and_no_wal_failed_transactions() -> No
     assert decision["blockers"] == []
 
 
+def test_go_no_go_blocks_when_hold_gate_12_fails() -> None:
+    decision = _build_go_no_go(
+        embedding_probe={
+            "configured_backend": "hash",
+            "cases": [{"backend": "hash", "status": "ok"}],
+        },
+        sqlite_vec_probe={"status": "ok"},
+        wal_probe={
+            "status": "degraded",
+            "results": {
+                "delete": {"failed_tx": 0},
+                "wal": {"failed_tx": 0, "effective_journal_mode": "wal"},
+            },
+            "regression_gate": {"pass": True, "reasons": []},
+        },
+        hold_gate={
+            "gate_11": {"overall_pass": True},
+            "gate_12": {"overall_pass": False},
+            "gate_13": {"overall_pass": True},
+        },
+    )
+
+    assert decision["decision"] == "NO_GO"
+    assert "gate_12_failed" in decision["blockers"]
+
+
 def test_go_no_go_blocks_when_wal_mode_is_not_effective() -> None:
     decision = _build_go_no_go(
         embedding_probe={
@@ -328,6 +357,141 @@ def test_wal_regression_gate_blocks_when_retry_rate_exceeds_threshold() -> None:
 
     assert gate["pass"] is False
     assert any("wal_retry_rate_exceeded" in reason for reason in gate["reasons"])
+
+
+def test_hold_gate_11_collects_embedding_success_and_fallback_rates() -> None:
+    payload = _build_hold_gate_11_from_profile_metrics(
+        {
+            "profiles": {
+                "profile_cd": {
+                    "rows": [
+                        {
+                            "dataset": "alpha",
+                            "degradation": {
+                                "queries": 100,
+                                "degraded": 2,
+                                "degrade_reasons": [
+                                    "embedding_request_failed",
+                                    "embedding_fallback_hash",
+                                ],
+                                "degrade_reason_counts": {
+                                    "embedding_request_failed": 2,
+                                    "embedding_fallback_hash": 1,
+                                },
+                            },
+                        },
+                        {
+                            "dataset": "beta",
+                            "degradation": {
+                                "queries": 100,
+                                "degraded": 0,
+                                "degrade_reasons": [],
+                                "degrade_reason_counts": {},
+                            },
+                        },
+                    ]
+                }
+            }
+        }
+    )
+    assert payload["status"] == "ok"
+    assert payload["query_count"] == 200
+    assert payload["embedding_request_failed_queries"] == 2
+    assert payload["embedding_fallback_hash_queries"] == 1
+    assert payload["embedding_success_rate"] == 0.99
+    assert payload["embedding_fallback_hash_rate"] == 0.005
+    assert payload["search_degraded_rate"] == 0.01
+    assert payload["checks"]["embedding_success_rate"] is False
+    assert payload["checks"]["embedding_fallback_hash_rate"] is True
+    assert payload["checks"]["search_degraded_rate"] is True
+    assert payload["overall_pass"] is False
+
+
+def test_hold_gate_12_builds_latency_and_quality_comparison() -> None:
+    payload = _build_hold_gate_12_from_vec_isolation_metrics(
+        {
+            "status": "ok",
+            "path": "/tmp/profile_vec_isolation_metrics_v2.json",
+            "source": "primary",
+            "payload": {
+                "runs": [
+                    {
+                        "repeats": [
+                            {
+                                "rows": [
+                                    {
+                                        "dataset": "alpha",
+                                        "dataset_label": "Alpha",
+                                        "b_p95": 10.0,
+                                        "c_p95": 7.0,
+                                        "latency_improvement_ratio": 0.3,
+                                        "ndcg_delta": 0.0,
+                                        "recall_delta": 0.0,
+                                        "c_degrade_reasons": [],
+                                        "c_valid": True,
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+        },
+        sqlite_vec_probe={"status": "ok", "extension_loaded": True},
+    )
+    assert payload["status"] == "ok"
+    assert payload["row_count"] == 1
+    assert payload["rows"][0]["b_p95"] == 10.0
+    assert payload["rows"][0]["c_p95"] == 7.0
+    assert payload["rows"][0]["latency_improvement_ratio"] == 0.3
+    assert payload["rows"][0]["latency_pass"] is True
+    assert payload["rows"][0]["quality_pass"] is True
+    assert payload["checks"]["extension_ready"] is True
+    assert payload["checks"]["latency_improvement_gate"] is True
+    assert payload["checks"]["quality_non_regression_gate"] is True
+    assert payload["checks"]["rollback_ready"] is True
+    assert payload["overall_pass"] is True
+
+
+def test_hold_gate_12_fails_closed_when_vec_isolation_artifact_missing() -> None:
+    payload = _build_hold_gate_12_from_vec_isolation_metrics(
+        {
+            "status": "missing",
+            "path": "/tmp/missing_profile_vec_isolation_metrics_v2.json",
+            "payload": {},
+        },
+        sqlite_vec_probe={"status": "ok", "extension_loaded": True},
+    )
+    assert payload["status"] == "vec_isolation_artifact_missing"
+    assert payload["vec_isolation_status"] == "missing"
+    assert payload["checks"]["extension_ready"] is True
+    assert payload["checks"]["no_new_500_proxy"] is False
+    assert payload["checks"]["latency_improvement_gate"] is False
+    assert payload["checks"]["quality_non_regression_gate"] is False
+    assert payload["overall_pass"] is False
+
+
+def test_hold_gate_13_uses_wal_thresholds() -> None:
+    payload = _build_hold_gate_13_from_wal_probe(
+        {
+            "wal_vs_delete_throughput_ratio": 1.6,
+            "results": {
+                "wal": {
+                    "failed_tx": 0,
+                    "failure_rate": 0.0,
+                    "persistence_gap": 0,
+                    "retry_rate": 0.008,
+                }
+            },
+            "summary": {"wal": {"retry_rate_p95": 0.009}},
+        }
+    )
+    assert payload["status"] == "ok"
+    assert payload["wal_failed_tx"] == 0
+    assert payload["wal_failure_rate"] == 0.0
+    assert payload["retry_rate_p95"] == 0.009
+    assert payload["wal_vs_delete_tps_ratio"] == 1.6
+    assert payload["overall_pass"] is True
 
 
 def test_lock_retry_delay_is_deterministic_and_capped() -> None:

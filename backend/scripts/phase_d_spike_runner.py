@@ -21,8 +21,25 @@ DEFAULT_JSON_OUTPUT = (
 DEFAULT_MARKDOWN_OUTPUT = (
     BACKEND_ROOT / "tests" / "benchmark" / "benchmark_results_phase_d_spike.md"
 )
+PROFILE_AB_JSON_ARTIFACT = (
+    BACKEND_ROOT / "tests" / "benchmark" / "profile_ab_metrics.json"
+)
+PROFILE_VEC_ISOLATION_JSON_ARTIFACT_V2 = (
+    BACKEND_ROOT / "tests" / "benchmark" / "profile_vec_isolation_metrics_v2.json"
+)
+PROFILE_VEC_ISOLATION_JSON_ARTIFACT = (
+    BACKEND_ROOT / "tests" / "benchmark" / "profile_vec_isolation_metrics.json"
+)
 
 _API_DISABLED_BACKENDS = {"hash", "none", "off", "disabled", "false", "0"}
+_HOLD11_EMBEDDING_SUCCESS_THRESHOLD = 0.995
+_HOLD11_FALLBACK_HASH_RATE_THRESHOLD = 0.01
+_HOLD11_DEGRADED_RATE_THRESHOLD = 0.01
+_HOLD12_LATENCY_IMPROVEMENT_THRESHOLD = 0.20
+_HOLD12_QUALITY_DELTA_THRESHOLD = 0.0
+_HOLD13_FAILURE_RATE_THRESHOLD = 0.001
+_HOLD13_RETRY_RATE_P95_THRESHOLD = 0.01
+_HOLD13_THROUGHPUT_RATIO_THRESHOLD = 1.10
 _WAL_PROFILE_DEFAULTS: Dict[str, Dict[str, Union[int, float]]] = {
     "small": {
         "workers": 4,
@@ -77,6 +94,33 @@ _LOCK_RETRY_MAX_DELAY_SEC = 0.02
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _sanitize_report_path(raw_path: Optional[str]) -> str:
+    candidate = str(raw_path or "").strip()
+    if not candidate:
+        return ""
+    try:
+        path_obj = Path(candidate).expanduser()
+    except Exception:
+        return candidate
+
+    if not path_obj.is_absolute():
+        return candidate
+
+    try:
+        return path_obj.resolve(strict=False).relative_to(BACKEND_ROOT).as_posix()
+    except Exception:
+        pass
+    try:
+        return path_obj.resolve(strict=False).relative_to(BACKEND_ROOT.parent).as_posix()
+    except Exception:
+        pass
+    try:
+        return "<tmp>/" + path_obj.resolve(strict=False).relative_to(Path("/tmp")).as_posix()
+    except Exception:
+        pass
+    return f"<abs>/{path_obj.name}"
 
 
 def _normalize_embedding_api_base(base: str) -> str:
@@ -889,6 +933,535 @@ def run_write_lane_wal_probe(
     }
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_rate(numerator: float, denominator: float) -> float:
+    if denominator <= 0.0:
+        return 0.0
+    return round(numerator / denominator, 6)
+
+
+def _load_json_metrics_artifact(path: Path) -> Dict[str, Any]:
+    resolved = path.expanduser().resolve()
+    if not resolved.exists():
+        return {"path": str(resolved), "status": "missing", "payload": {}}
+    try:
+        payload = json.loads(resolved.read_text(encoding="utf-8"))
+    except Exception as exc:  # pragma: no cover - defensive path
+        return {
+            "path": str(resolved),
+            "status": "invalid_json",
+            "error": f"{type(exc).__name__}: {exc}",
+            "payload": {},
+        }
+    if not isinstance(payload, Mapping):
+        return {
+            "path": str(resolved),
+            "status": "invalid_payload",
+            "payload": {},
+        }
+    return {"path": str(resolved), "status": "ok", "payload": dict(payload)}
+
+
+def _load_profile_ab_metrics_artifact(path: Path) -> Dict[str, Any]:
+    return _load_json_metrics_artifact(path)
+
+
+def _load_vec_isolation_metrics_artifact(
+    primary_path: Path,
+    fallback_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    primary_artifact = _load_json_metrics_artifact(primary_path)
+    primary_status = str(primary_artifact.get("status", "missing"))
+    if primary_status == "ok":
+        primary_artifact["source"] = "primary"
+        return primary_artifact
+    if primary_status != "missing":
+        primary_artifact["source"] = "primary"
+        return primary_artifact
+    if fallback_path is None:
+        primary_artifact["source"] = "primary"
+        return primary_artifact
+
+    fallback_artifact = _load_json_metrics_artifact(fallback_path)
+    fallback_artifact["source"] = "fallback"
+    if str(fallback_artifact.get("status", "missing")) == "ok":
+        fallback_artifact["status"] = "ok_fallback"
+        fallback_artifact["fallback_from"] = str(primary_path.expanduser().resolve())
+    return fallback_artifact
+
+
+def _extract_profile_rows(
+    profile_metrics: Mapping[str, Any], profile_key: str
+) -> List[Mapping[str, Any]]:
+    profiles = profile_metrics.get("profiles")
+    if not isinstance(profiles, Mapping):
+        return []
+    profile_payload = profiles.get(profile_key)
+    if not isinstance(profile_payload, Mapping):
+        return []
+    rows = profile_payload.get("rows")
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, Mapping)]
+
+
+def _extract_vec_isolation_rows(vec_isolation_metrics: Mapping[str, Any]) -> List[Mapping[str, Any]]:
+    runs = vec_isolation_metrics.get("runs")
+    if not isinstance(runs, list):
+        return []
+    rows: List[Mapping[str, Any]] = []
+    for run_payload in runs:
+        if not isinstance(run_payload, Mapping):
+            continue
+
+        direct_rows = run_payload.get("rows")
+        if isinstance(direct_rows, list):
+            rows.extend(row for row in direct_rows if isinstance(row, Mapping))
+
+        repeats = run_payload.get("repeats")
+        if not isinstance(repeats, list):
+            continue
+        for repeat_payload in repeats:
+            if not isinstance(repeat_payload, Mapping):
+                continue
+            repeat_rows = repeat_payload.get("rows")
+            if not isinstance(repeat_rows, list):
+                continue
+            rows.extend(row for row in repeat_rows if isinstance(row, Mapping))
+    return rows
+
+
+def _read_optional_float(row: Mapping[str, Any], keys: Sequence[str]) -> Optional[float]:
+    for key in keys:
+        if key not in row:
+            continue
+        raw = row.get(key)
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _read_optional_delta(
+    row: Mapping[str, Any],
+    *,
+    delta_key: str,
+    baseline_keys: Sequence[str],
+    candidate_keys: Sequence[str],
+) -> Optional[float]:
+    direct_delta = _read_optional_float(row, [delta_key])
+    if direct_delta is not None:
+        return round(direct_delta, 6)
+
+    baseline = _read_optional_float(row, baseline_keys)
+    candidate = _read_optional_float(row, candidate_keys)
+    if baseline is None or candidate is None:
+        return None
+    return round(candidate - baseline, 6)
+
+
+def _parse_optional_bool(value: Any) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return None
+
+
+def _normalize_vec_isolation_row(row: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    dataset = str(row.get("dataset", "")).strip()
+    if not dataset:
+        return None
+
+    b_p95 = _read_optional_float(row, ("b_p95", "b_p95_ms", "legacy_p95_ms"))
+    c_p95 = _read_optional_float(row, ("c_p95", "c_p95_ms", "vec_candidate_p95_ms"))
+    if b_p95 is None or c_p95 is None or b_p95 <= 0.0:
+        return None
+
+    latency_ratio = _read_optional_float(row, ("latency_improvement_ratio",))
+    if latency_ratio is None:
+        latency_ratio = (b_p95 - c_p95) / b_p95
+
+    ndcg_delta = _read_optional_delta(
+        row,
+        delta_key="ndcg_delta",
+        baseline_keys=("b_ndcg_at_10", "legacy_ndcg_at_10"),
+        candidate_keys=("c_ndcg_at_10", "vec_candidate_ndcg_at_10"),
+    )
+    recall_delta = _read_optional_delta(
+        row,
+        delta_key="recall_delta",
+        baseline_keys=("b_recall_at_10", "legacy_recall_at_10"),
+        candidate_keys=("c_recall_at_10", "vec_candidate_recall_at_10"),
+    )
+    if ndcg_delta is None or recall_delta is None:
+        return None
+
+    raw_reasons = row.get("c_degrade_reasons")
+    if raw_reasons is None:
+        raw_reasons = row.get("invalid_reasons")
+    if raw_reasons is None:
+        raw_reasons = []
+    if not isinstance(raw_reasons, list):
+        return None
+    c_degrade_reasons = [str(item).strip() for item in raw_reasons if str(item).strip()]
+
+    c_valid = _parse_optional_bool(row.get("c_valid"))
+    if c_valid is None:
+        c_valid = len(c_degrade_reasons) == 0
+
+    return {
+        "dataset": dataset,
+        "dataset_label": str(row.get("dataset_label") or dataset),
+        "b_p95": round(b_p95, 6),
+        "c_p95": round(c_p95, 6),
+        "latency_improvement_ratio": round(float(latency_ratio), 6),
+        "ndcg_delta": round(float(ndcg_delta), 6),
+        "recall_delta": round(float(recall_delta), 6),
+        "c_degrade_reasons": c_degrade_reasons,
+        "c_valid": bool(c_valid),
+    }
+
+
+def _estimate_reason_count(
+    *,
+    reason: str,
+    reason_counts: Mapping[str, Any],
+    reason_union: Sequence[str],
+    degraded_queries: int,
+    total_queries: int,
+) -> int:
+    if reason in reason_counts:
+        return max(0, min(total_queries, _safe_int(reason_counts.get(reason), 0)))
+    if reason in reason_union:
+        if degraded_queries > 0:
+            return max(0, min(total_queries, degraded_queries))
+        return total_queries
+    return 0
+
+
+def _build_hold_gate_11_from_profile_metrics(
+    profile_metrics: Mapping[str, Any],
+) -> Dict[str, Any]:
+    rows = _extract_profile_rows(profile_metrics, "profile_cd")
+    if not rows:
+        return {
+            "status": "missing_profile_cd_rows",
+            "thresholds": {
+                "embedding_success_rate_min": _HOLD11_EMBEDDING_SUCCESS_THRESHOLD,
+                "embedding_fallback_hash_rate_max": _HOLD11_FALLBACK_HASH_RATE_THRESHOLD,
+                "search_degraded_rate_max": _HOLD11_DEGRADED_RATE_THRESHOLD,
+            },
+            "overall_pass": False,
+        }
+
+    total_queries = 0
+    degraded_queries = 0
+    embedding_request_failed_queries = 0
+    embedding_fallback_hash_queries = 0
+    count_source = "estimated_from_degrade_union"
+
+    for row in rows:
+        degradation = row.get("degradation")
+        if not isinstance(degradation, Mapping):
+            continue
+        row_queries = max(
+            0,
+            _safe_int(degradation.get("queries"), _safe_int(row.get("query_count"), 0)),
+        )
+        row_degraded = max(0, _safe_int(degradation.get("degraded"), 0))
+        reason_union = [
+            str(item).strip()
+            for item in (degradation.get("degrade_reasons") or [])
+            if str(item).strip()
+        ]
+        raw_reason_counts = degradation.get("degrade_reason_counts")
+        if isinstance(raw_reason_counts, Mapping):
+            row_reason_counts = {
+                str(key): _safe_int(value, 0)
+                for key, value in raw_reason_counts.items()
+                if str(key).strip()
+            }
+            count_source = "degrade_reason_counts"
+        else:
+            row_reason_counts = {}
+
+        total_queries += row_queries
+        degraded_queries += row_degraded
+        embedding_request_failed_queries += _estimate_reason_count(
+            reason="embedding_request_failed",
+            reason_counts=row_reason_counts,
+            reason_union=reason_union,
+            degraded_queries=row_degraded,
+            total_queries=row_queries,
+        )
+        embedding_fallback_hash_queries += _estimate_reason_count(
+            reason="embedding_fallback_hash",
+            reason_counts=row_reason_counts,
+            reason_union=reason_union,
+            degraded_queries=row_degraded,
+            total_queries=row_queries,
+        )
+
+    if total_queries <= 0:
+        return {
+            "status": "invalid_query_count",
+            "thresholds": {
+                "embedding_success_rate_min": _HOLD11_EMBEDDING_SUCCESS_THRESHOLD,
+                "embedding_fallback_hash_rate_max": _HOLD11_FALLBACK_HASH_RATE_THRESHOLD,
+                "search_degraded_rate_max": _HOLD11_DEGRADED_RATE_THRESHOLD,
+            },
+            "overall_pass": False,
+        }
+
+    embedding_success_rate = _safe_rate(
+        float(total_queries - embedding_request_failed_queries),
+        float(total_queries),
+    )
+    embedding_fallback_hash_rate = _safe_rate(
+        float(embedding_fallback_hash_queries),
+        float(total_queries),
+    )
+    search_degraded_rate = _safe_rate(float(degraded_queries), float(total_queries))
+
+    checks = {
+        "embedding_success_rate": embedding_success_rate >= _HOLD11_EMBEDDING_SUCCESS_THRESHOLD,
+        "embedding_fallback_hash_rate": embedding_fallback_hash_rate <= _HOLD11_FALLBACK_HASH_RATE_THRESHOLD,
+        "search_degraded_rate": search_degraded_rate <= _HOLD11_DEGRADED_RATE_THRESHOLD,
+    }
+
+    return {
+        "status": "ok",
+        "query_scope": "profile_cd",
+        "query_count": total_queries,
+        "degraded_queries": degraded_queries,
+        "embedding_request_failed_queries": embedding_request_failed_queries,
+        "embedding_fallback_hash_queries": embedding_fallback_hash_queries,
+        "embedding_success_rate": embedding_success_rate,
+        "embedding_fallback_hash_rate": embedding_fallback_hash_rate,
+        "search_degraded_rate": search_degraded_rate,
+        "count_source": count_source,
+        "thresholds": {
+            "embedding_success_rate_min": _HOLD11_EMBEDDING_SUCCESS_THRESHOLD,
+            "embedding_fallback_hash_rate_max": _HOLD11_FALLBACK_HASH_RATE_THRESHOLD,
+            "search_degraded_rate_max": _HOLD11_DEGRADED_RATE_THRESHOLD,
+        },
+        "checks": checks,
+        "overall_pass": all(checks.values()),
+    }
+
+
+def _build_hold_gate_12_from_vec_isolation_metrics(
+    vec_isolation_artifact: Mapping[str, Any],
+    sqlite_vec_probe: Mapping[str, Any],
+) -> Dict[str, Any]:
+    thresholds = {
+        "latency_improvement_ratio_min": _HOLD12_LATENCY_IMPROVEMENT_THRESHOLD,
+        "ndcg_delta_min": _HOLD12_QUALITY_DELTA_THRESHOLD,
+        "recall_delta_min": _HOLD12_QUALITY_DELTA_THRESHOLD,
+    }
+    sqlite_status = str(sqlite_vec_probe.get("status", ""))
+    extension_loaded = bool(sqlite_vec_probe.get("extension_loaded"))
+    extension_ready = sqlite_status == "ok" and extension_loaded
+    rollback_ready = sqlite_status != "sqlite_runtime_error"
+
+    artifact_status = str(vec_isolation_artifact.get("status", "missing"))
+    artifact_source = str(vec_isolation_artifact.get("source", "primary"))
+    artifact_path = _sanitize_report_path(str(vec_isolation_artifact.get("path", "")))
+    usable_artifact_statuses = {"ok", "ok_fallback"}
+
+    def _fail_closed(status: str) -> Dict[str, Any]:
+        checks = {
+            "extension_ready": extension_ready,
+            "no_new_500_proxy": False,
+            "latency_improvement_gate": False,
+            "quality_non_regression_gate": False,
+            "rollback_ready": rollback_ready,
+        }
+        return {
+            "status": status,
+            "vec_isolation_status": artifact_status,
+            "vec_isolation_source": artifact_source,
+            "vec_isolation_path": artifact_path,
+            "thresholds": thresholds,
+            "row_count": 0,
+            "latency_improvement_ratio_mean": 0.0,
+            "invalid_reasons": [],
+            "rows": [],
+            "checks": checks,
+            "overall_pass": False,
+        }
+
+    if artifact_status not in usable_artifact_statuses:
+        return _fail_closed(f"vec_isolation_artifact_{artifact_status}")
+
+    vec_payload = vec_isolation_artifact.get("payload")
+    if not isinstance(vec_payload, Mapping):
+        return _fail_closed("invalid_vec_isolation_payload")
+
+    raw_rows = _extract_vec_isolation_rows(vec_payload)
+    if not raw_rows:
+        return _fail_closed("invalid_vec_isolation_rows")
+
+    rows: List[Dict[str, Any]] = []
+    latency_checks: List[bool] = []
+    quality_checks: List[bool] = []
+    no_new_500_checks: List[bool] = []
+    latency_ratios: List[float] = []
+    invalid_reason_union: set[str] = set()
+
+    for raw_row in raw_rows:
+        normalized_row = _normalize_vec_isolation_row(raw_row)
+        if normalized_row is None:
+            return _fail_closed("invalid_vec_isolation_row")
+
+        latency_ratio = float(normalized_row["latency_improvement_ratio"])
+        ndcg_delta = float(normalized_row["ndcg_delta"])
+        recall_delta = float(normalized_row["recall_delta"])
+        c_degrade_reasons = list(normalized_row["c_degrade_reasons"])
+        c_valid = bool(normalized_row["c_valid"])
+
+        latency_pass = latency_ratio >= _HOLD12_LATENCY_IMPROVEMENT_THRESHOLD
+        quality_pass = (
+            ndcg_delta >= _HOLD12_QUALITY_DELTA_THRESHOLD
+            and recall_delta >= _HOLD12_QUALITY_DELTA_THRESHOLD
+        )
+        no_new_500_pass = c_valid and len(c_degrade_reasons) == 0
+
+        latency_checks.append(latency_pass)
+        quality_checks.append(quality_pass)
+        no_new_500_checks.append(no_new_500_pass)
+        latency_ratios.append(latency_ratio)
+        invalid_reason_union.update(c_degrade_reasons)
+        rows.append(
+            {
+                **normalized_row,
+                "latency_pass": latency_pass,
+                "quality_pass": quality_pass,
+            }
+        )
+
+    checks = {
+        "extension_ready": extension_ready,
+        "no_new_500_proxy": bool(no_new_500_checks) and all(no_new_500_checks),
+        "latency_improvement_gate": bool(latency_checks) and all(latency_checks),
+        "quality_non_regression_gate": bool(quality_checks) and all(quality_checks),
+        "rollback_ready": rollback_ready,
+    }
+
+    return {
+        "status": "ok",
+        "vec_isolation_status": artifact_status,
+        "vec_isolation_source": artifact_source,
+        "vec_isolation_path": artifact_path,
+        "thresholds": thresholds,
+        "row_count": len(rows),
+        "latency_improvement_ratio_mean": round(
+            sum(latency_ratios) / float(len(latency_ratios)), 6
+        )
+        if latency_ratios
+        else 0.0,
+        "invalid_reasons": sorted(invalid_reason_union),
+        "rows": rows,
+        "checks": checks,
+        "overall_pass": all(checks.values()),
+    }
+
+
+def _build_hold_gate_13_from_wal_probe(wal_probe: Mapping[str, Any]) -> Dict[str, Any]:
+    wal_results = wal_probe.get("results")
+    wal_metrics = wal_results.get("wal", {}) if isinstance(wal_results, Mapping) else {}
+    wal_summary = wal_probe.get("summary", {}).get("wal", {})
+    failed_tx = _safe_int(wal_metrics.get("failed_tx"), 0)
+    failure_rate = _safe_float(wal_metrics.get("failure_rate"), 0.0)
+    persistence_gap = _safe_int(wal_metrics.get("persistence_gap"), 0)
+    retry_rate_p95 = _safe_float(
+        wal_summary.get("retry_rate_p95", wal_metrics.get("retry_rate", 0.0)),
+        0.0,
+    )
+    throughput_ratio = _safe_float(wal_probe.get("wal_vs_delete_throughput_ratio"), 0.0)
+
+    checks = {
+        "wal_failed_tx": failed_tx == 0,
+        "wal_failure_rate": failure_rate <= _HOLD13_FAILURE_RATE_THRESHOLD,
+        "persistence_gap": persistence_gap == 0,
+        "retry_rate_p95": retry_rate_p95 <= _HOLD13_RETRY_RATE_P95_THRESHOLD,
+        "throughput_ratio": throughput_ratio >= _HOLD13_THROUGHPUT_RATIO_THRESHOLD,
+    }
+    return {
+        "status": "ok",
+        "thresholds": {
+            "wal_failed_tx_eq": 0,
+            "wal_failure_rate_max": _HOLD13_FAILURE_RATE_THRESHOLD,
+            "persistence_gap_eq": 0,
+            "retry_rate_p95_max": _HOLD13_RETRY_RATE_P95_THRESHOLD,
+            "throughput_ratio_min": _HOLD13_THROUGHPUT_RATIO_THRESHOLD,
+        },
+        "wal_failed_tx": failed_tx,
+        "wal_failure_rate": failure_rate,
+        "persistence_gap": persistence_gap,
+        "retry_rate_p95": retry_rate_p95,
+        "wal_vs_delete_tps_ratio": throughput_ratio,
+        "checks": checks,
+        "overall_pass": all(checks.values()),
+    }
+
+
+def _build_hold_gate_snapshot(
+    *,
+    profile_metrics_artifact: Mapping[str, Any],
+    vec_isolation_artifact: Mapping[str, Any],
+    sqlite_vec_probe: Mapping[str, Any],
+    wal_probe: Mapping[str, Any],
+) -> Dict[str, Any]:
+    profile_source_status = str(profile_metrics_artifact.get("status", "missing"))
+    profile_source_path = _sanitize_report_path(str(profile_metrics_artifact.get("path", "")))
+    profile_metrics_payload = profile_metrics_artifact.get("payload")
+    profile_metrics = (
+        profile_metrics_payload
+        if isinstance(profile_metrics_payload, Mapping)
+        else {}
+    )
+    vec_source_status = str(vec_isolation_artifact.get("status", "missing"))
+    vec_source_path = _sanitize_report_path(str(vec_isolation_artifact.get("path", "")))
+    vec_source = str(vec_isolation_artifact.get("source", "primary"))
+    return {
+        "generated_at_utc": _utc_now_iso(),
+        "source": {
+            "profile_metrics_json": profile_source_path,
+            "profile_metrics_status": profile_source_status,
+            "vec_isolation_metrics_json": vec_source_path,
+            "vec_isolation_metrics_status": vec_source_status,
+            "vec_isolation_metrics_source": vec_source,
+            "sqlite_vec_probe_source": "phase_d_spike_runtime",
+            "wal_probe_source": "phase_d_spike_runtime",
+        },
+        "gate_11": _build_hold_gate_11_from_profile_metrics(profile_metrics),
+        "gate_12": _build_hold_gate_12_from_vec_isolation_metrics(
+            vec_isolation_artifact, sqlite_vec_probe
+        ),
+        "gate_13": _build_hold_gate_13_from_wal_probe(wal_probe),
+    }
+
+
 def _derive_risks(
     embedding_probe: Mapping[str, Any],
     sqlite_vec_probe: Mapping[str, Any],
@@ -967,6 +1540,7 @@ def _build_go_no_go(
     embedding_probe: Mapping[str, Any],
     sqlite_vec_probe: Mapping[str, Any],
     wal_probe: Mapping[str, Any],
+    hold_gate: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     blockers: List[str] = []
 
@@ -1014,6 +1588,14 @@ def _build_go_no_go(
         # Hold contract: WAL probe must not report failed transactions.
         blockers.append("wal_failed_transactions")
 
+    if isinstance(hold_gate, Mapping):
+        for gate_key in ("gate_11", "gate_12", "gate_13"):
+            gate_payload = hold_gate.get(gate_key)
+            if not isinstance(gate_payload, Mapping):
+                continue
+            if bool(gate_payload.get("overall_pass")) is False:
+                blockers.append(f"{gate_key}_failed")
+
     if blockers:
         return {
             "decision": "NO_GO",
@@ -1041,6 +1623,7 @@ def _render_phase_d_markdown(report: Mapping[str, Any]) -> str:
     embedding_probe = probes.get("embedding_provider", {})
     sqlite_probe = probes.get("sqlite_vec", {})
     wal_probe = probes.get("write_lane_wal", {})
+    hold_gate = report.get("hold_gate", {})
     wal_results = wal_probe.get("results", {}) if isinstance(wal_probe, Mapping) else {}
     delete_metrics = wal_results.get("delete", {}) if isinstance(wal_results, Mapping) else {}
     wal_metrics = wal_results.get("wal", {}) if isinstance(wal_results, Mapping) else {}
@@ -1126,6 +1709,44 @@ def _render_phase_d_markdown(report: Mapping[str, Any]) -> str:
                 )
             ),
             "",
+            "## HOLD Gate Snapshot (#11/#12/#13)",
+            "",
+            f"- source_profile_metrics: {(hold_gate.get('source') or {}).get('profile_metrics_json', '')}",
+            f"- source_profile_metrics_status: {(hold_gate.get('source') or {}).get('profile_metrics_status', 'missing')}",
+            f"- source_vec_isolation_metrics: {(hold_gate.get('source') or {}).get('vec_isolation_metrics_json', '')}",
+            f"- source_vec_isolation_metrics_status: {(hold_gate.get('source') or {}).get('vec_isolation_metrics_status', 'missing')}",
+            f"- source_vec_isolation_metrics_source: {(hold_gate.get('source') or {}).get('vec_isolation_metrics_source', 'primary')}",
+            (
+                "- #11: embedding_success_rate={success}, embedding_fallback_hash_rate={fallback}, "
+                "search_degraded_rate={degraded}, overall_pass={passed}"
+            ).format(
+                success=(hold_gate.get("gate_11") or {}).get("embedding_success_rate", "n/a"),
+                fallback=(hold_gate.get("gate_11") or {}).get("embedding_fallback_hash_rate", "n/a"),
+                degraded=(hold_gate.get("gate_11") or {}).get("search_degraded_rate", "n/a"),
+                passed=(hold_gate.get("gate_11") or {}).get("overall_pass", False),
+            ),
+            (
+                "- #12: extension_ready={ext}, latency_gate={lat}, quality_gate={quality}, "
+                "no_new_500_proxy={no500}, overall_pass={passed}"
+            ).format(
+                ext=((hold_gate.get("gate_12") or {}).get("checks") or {}).get("extension_ready", False),
+                lat=((hold_gate.get("gate_12") or {}).get("checks") or {}).get("latency_improvement_gate", False),
+                quality=((hold_gate.get("gate_12") or {}).get("checks") or {}).get("quality_non_regression_gate", False),
+                no500=((hold_gate.get("gate_12") or {}).get("checks") or {}).get("no_new_500_proxy", False),
+                passed=(hold_gate.get("gate_12") or {}).get("overall_pass", False),
+            ),
+            (
+                "- #13: wal_failed_tx={failed}, wal_failure_rate={failure}, retry_rate_p95={retry}, "
+                "persistence_gap={gap}, wal_vs_delete_tps_ratio={ratio}, overall_pass={passed}"
+            ).format(
+                failed=(hold_gate.get("gate_13") or {}).get("wal_failed_tx", "n/a"),
+                failure=(hold_gate.get("gate_13") or {}).get("wal_failure_rate", "n/a"),
+                retry=(hold_gate.get("gate_13") or {}).get("retry_rate_p95", "n/a"),
+                gap=(hold_gate.get("gate_13") or {}).get("persistence_gap", "n/a"),
+                ratio=(hold_gate.get("gate_13") or {}).get("wal_vs_delete_tps_ratio", "n/a"),
+                passed=(hold_gate.get("gate_13") or {}).get("overall_pass", False),
+            ),
+            "",
             "## Go/No-Go",
             "",
             f"- decision: {report.get('go_no_go', {}).get('decision', 'HOLD')}",
@@ -1193,17 +1814,40 @@ def build_phase_d_report(
         max_retry_rate=wal_max_retry_rate,
         max_persistence_gap=wal_max_persistence_gap,
     )
+    profile_metrics_artifact = _load_profile_ab_metrics_artifact(
+        PROFILE_AB_JSON_ARTIFACT
+    )
+    vec_isolation_artifact = _load_vec_isolation_metrics_artifact(
+        PROFILE_VEC_ISOLATION_JSON_ARTIFACT_V2,
+        fallback_path=PROFILE_VEC_ISOLATION_JSON_ARTIFACT,
+    )
+    hold_gate = _build_hold_gate_snapshot(
+        profile_metrics_artifact=profile_metrics_artifact,
+        vec_isolation_artifact=vec_isolation_artifact,
+        sqlite_vec_probe=sqlite_vec_probe,
+        wal_probe=wal_probe,
+    )
 
     go_no_go = _build_go_no_go(
         embedding_probe=embedding_probe,
         sqlite_vec_probe=sqlite_vec_probe,
         wal_probe=wal_probe,
+        hold_gate=hold_gate,
     )
     risks = _derive_risks(
         embedding_probe=embedding_probe,
         sqlite_vec_probe=sqlite_vec_probe,
         wal_probe=wal_probe,
     )
+    sqlite_vec_probe_report = dict(sqlite_vec_probe)
+    if "extension_path_input" in sqlite_vec_probe_report:
+        sqlite_vec_probe_report["extension_path_input"] = _sanitize_report_path(
+            str(sqlite_vec_probe_report.get("extension_path_input", ""))
+        )
+    if "extension_path" in sqlite_vec_probe_report:
+        sqlite_vec_probe_report["extension_path"] = _sanitize_report_path(
+            str(sqlite_vec_probe_report.get("extension_path", ""))
+        )
     report: Dict[str, Any] = {
         "generated_at_utc": _utc_now_iso(),
         "scope": {
@@ -1217,13 +1861,16 @@ def build_phase_d_report(
                 "timeout_sec": wal_probe.get("timeout_sec", 0.0),
                 "regression_thresholds": wal_probe.get("regression_thresholds", {}),
             },
-            "sqlite_vec_extension_path": sqlite_vec_extension_path or "",
+            "sqlite_vec_extension_path": _sanitize_report_path(
+                sqlite_vec_extension_path or ""
+            ),
         },
         "probes": {
             "embedding_provider": embedding_probe,
-            "sqlite_vec": sqlite_vec_probe,
+            "sqlite_vec": sqlite_vec_probe_report,
             "write_lane_wal": wal_probe,
         },
+        "hold_gate": hold_gate,
         "go_no_go": go_no_go,
         "risks": risks,
         "rollback_points": _default_rollback_points(),

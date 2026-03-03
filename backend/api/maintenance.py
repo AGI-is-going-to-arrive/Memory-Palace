@@ -458,7 +458,46 @@ def _trim_jobs_with_limit(
 
 
 def _trim_import_jobs(jobs: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    return _trim_jobs_with_limit(jobs, _IMPORT_JOB_MAX_PENDING)
+    max_pending = _IMPORT_JOB_MAX_PENDING
+    if max_pending <= 0:
+        return {}
+
+    ordered = sorted(
+        (
+            (job_id, payload)
+            for job_id, payload in jobs.items()
+            if isinstance(job_id, str) and job_id and isinstance(payload, dict)
+        ),
+        key=lambda item: (str(item[1].get("created_at") or ""), item[0]),
+    )
+    if len(ordered) <= max_pending:
+        return {
+            job_id: _clone_import_payload(payload)
+            for job_id, payload in ordered
+        }
+
+    protected_items = [
+        (job_id, payload)
+        for job_id, payload in ordered
+        if _is_rollback_protected_import_job(payload)
+    ]
+    unprotected_items = [
+        (job_id, payload)
+        for job_id, payload in ordered
+        if not _is_rollback_protected_import_job(payload)
+    ]
+
+    if len(protected_items) >= max_pending:
+        selected = protected_items[-max_pending:]
+    else:
+        slots = max_pending - len(protected_items)
+        selected = protected_items + unprotected_items[-slots:]
+
+    selected.sort(key=lambda item: (str(item[1].get("created_at") or ""), item[0]))
+    return {
+        job_id: _clone_import_payload(payload)
+        for job_id, payload in selected
+    }
 
 
 def _trim_learn_jobs(jobs: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -904,19 +943,40 @@ async def _put_import_job(payload: Dict[str, Any]) -> None:
                 if _normalize_import_job_type(item_payload.get("job_type"))
                 == incoming_job_type
             ]
-            if same_type_items:
+            same_type_unprotected_items = [
+                (item_job_id, item_payload)
+                for item_job_id, item_payload in same_type_items
+                if not _is_rollback_protected_import_job(item_payload)
+            ]
+            cross_type_items = [
+                (item_job_id, item_payload)
+                for item_job_id, item_payload in _IMPORT_JOBS.items()
+                if _normalize_import_job_type(item_payload.get("job_type"))
+                != incoming_job_type
+            ]
+            cross_type_unprotected_items = [
+                (item_job_id, item_payload)
+                for item_job_id, item_payload in cross_type_items
+                if not _is_rollback_protected_import_job(item_payload)
+            ]
+            if same_type_unprotected_items:
+                eviction_pool = same_type_unprotected_items
+            elif incoming_job_type == "import" and cross_type_items:
+                eviction_pool = (
+                    cross_type_unprotected_items
+                    if cross_type_unprotected_items
+                    else cross_type_items
+                )
+            elif same_type_items:
                 eviction_pool = same_type_items
+            elif incoming_job_type == "learn" and cross_type_items:
+                eviction_pool = (
+                    cross_type_unprotected_items
+                    if cross_type_unprotected_items
+                    else cross_type_items
+                )
             else:
-                cross_type_items = list(_IMPORT_JOBS.items())
-                if incoming_job_type == "learn":
-                    unprotected_items = [
-                        (item_job_id, item_payload)
-                        for item_job_id, item_payload in cross_type_items
-                        if not _is_rollback_protected_import_job(item_payload)
-                    ]
-                    eviction_pool = unprotected_items if unprotected_items else cross_type_items
-                else:
-                    eviction_pool = cross_type_items
+                eviction_pool = list(_IMPORT_JOBS.items())
             oldest_key = min(
                 eviction_pool,
                 key=lambda item: (str(item[1].get("created_at") or ""), item[0]),
@@ -3071,7 +3131,12 @@ async def cancel_index_job(job_id: str, payload: Optional[IndexJobCancelRequest]
     result = await runtime_state.index_worker.cancel_job(job_id=job_id, reason=reason)
     if not result.get("ok"):
         error = str(result.get("error") or "job cancellation failed")
-        status_code = 404 if "not found" in error else 409
+        normalized_error = error.lower()
+        status_code = (
+            404
+            if "not found" in normalized_error or "job_not_found" in normalized_error
+            else 409
+        )
         raise HTTPException(status_code=status_code, detail=error)
     result["runtime_worker"] = await runtime_state.index_worker.status()
     return result
@@ -3626,7 +3691,7 @@ async def get_observability_summary():
             }
     else:
         vitality_stats = {
-            "degraded": False,
+            "degraded": True,
             "reason": "vitality_stats_unavailable",
             "source": "maintenance.observability.vitality_stats",
         }

@@ -1,6 +1,6 @@
 # Intent Accuracy Metrics
 
-> generated_at_utc: 2026-03-02T15:47:32+00:00
+> generated_at_utc: 2026-03-03T14:31:05+00:00
 > total_cases: 6
 
 | Metric | Value | Threshold | Pass |

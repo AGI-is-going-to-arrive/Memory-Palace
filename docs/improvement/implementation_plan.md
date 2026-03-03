@@ -211,7 +211,7 @@
 3. **#14 意图 LLM（实验）**：加入 `INTENT_LLM_ENABLED` 实验开关，失败回退关键词规则。
 4. **`SM-2/SM-3`**：补齐短期记忆晋升元数据与 session-first 可观测指标。
 5. **C/D 联调口径（临时）**：本地开发若 router 侧暂未提供 embedding/reranker/llm，可在保持模板 `router` 路径不变的前提下，使用 `--runtime-env-mode none --allow-runtime-env-injection --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env` 注入 API 地址/密钥/模型字段；其中 embedding/reranker 与 LLM（`gpt-5.2`）均按该文件口径执行。该约定仅用于本地联调，不改变模板策略键。
-6. **本地联调覆盖来源（记录）**：`new/run_post_change_checks.sh` 对 `--docker-profile c|d` 默认为 `--runtime-env-mode none`（不自动加载本地 runtime 覆盖）；仅在显式传入 `--runtime-env-mode auto|file`，或显式开启 `--allow-runtime-env-injection`（可选叠加 `--runtime-env-file`）时才注入覆盖。注入范围仅限 API/密钥/模型字段，不覆盖 `RETRIEVAL_EMBEDDING_BACKEND` 等模板策略键。
+6. **本地联调覆盖来源（记录）**：`new/run_post_change_checks.sh` 对 `--docker-profile c|d` 默认为 `--runtime-env-mode none`（不自动加载本地 runtime 覆盖）；仅在显式传入 `--runtime-env-mode auto|file`，或显式开启 `--allow-runtime-env-injection`（可选叠加 `--runtime-env-file`）时才注入覆盖。注入范围仅限 API/密钥/模型字段，不覆盖 `RETRIEVAL_EMBEDDING_BACKEND` 等模板策略键。前置条件：若 profile c/d 模板仍是占位值（`<your-router-host>` / `replace-with-your-key`），`runtime-env-mode none` 的 pure-template smoke 失败属于预期；要通过需真实 router 配置或显式注入联调。
 7. **上线与降级口径**：客户环境默认仍走 `router`；若 router 侧缺失 embedding/reranker/llm，系统应走既有 fallback 链路避免直接报错。客户环境建议执行一次默认模板链路复验；当前本地联调阶段不作为阻断项。
 
 验收：
@@ -220,7 +220,7 @@
 3. 不改变“长期层是唯一权威存储”的架构边界。
 4. 若本轮使用过 C/D `api` 联调口径，发布前必须执行一次“回切检查”：确认 `deploy/profiles/*/profile-c.env` 与 `profile-d.env` 仍保持 `router` 默认，并重新执行 `--docker-profile c|d` 烟测。
 5. 上线前复验建议在“未加载本地 runtime 覆盖”的环境执行，避免把开发机私有 API 配置带入交付判定。
-6. 对于 C/D，本地联调可使用 `clawmemo/nocturne_memory/.env` 注入；release 结论以客户环境 router 配置复验为准，`runtime-env-mode none` 纯模板复验为建议项，当前本地联调阶段不作为阻断。
+6. 对于 C/D，本地联调可使用 `clawmemo/nocturne_memory/.env` 注入；`runtime-env-mode none` 且不注入时会严格走模板值，模板占位值场景失败属于预期。release 结论仍以客户环境真实 router 配置复验为准。
 
 ---
 

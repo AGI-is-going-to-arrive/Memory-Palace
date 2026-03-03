@@ -75,6 +75,15 @@ def parse_args() -> argparse.Namespace:
         default=_default_analysis_path(),
         help="Output analysis markdown path.",
     )
+    parser.add_argument(
+        "--workdir",
+        type=Path,
+        default=None,
+        help=(
+            "Optional benchmark cache dir for per-profile sqlite files. "
+            "Use this when default cache dir has filesystem constraints."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -85,6 +94,7 @@ async def _run(args: argparse.Namespace) -> None:
         dataset_keys=dataset_keys,
         first_relevant_only=not bool(args.all_relevant),
         extra_distractors=int(args.extra_distractors),
+        workdir=args.workdir,
     )
     artifact_paths = write_profile_abcd_real_artifacts(
         payload,

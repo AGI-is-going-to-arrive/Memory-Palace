@@ -53,6 +53,10 @@
 >
 > **本仓本地联调补充（记录）**：`new/run_post_change_checks.sh` 在 `--docker-profile c|d` 下默认 `--runtime-env-mode none`（不加载本地 runtime 覆盖）；仅在显式传入 `--runtime-env-mode auto|file` 且附加 `--allow-runtime-env-debug` 时，才会加载覆盖文件（优先 `Memory-Palace/.env`，其次 `~/Desktop/clawmemo/nocturne_memory/.env`）。若保持 `--runtime-env-mode none`，可通过 `--allow-runtime-env-injection` 把当前进程环境变量注入 `.env.docker`（适配 CI secrets 注入）；若同时显式传入 `--runtime-env-file`，会先加载该文件再注入（不做自动探测）。注入范围仅限 API 地址/密钥/模型字段，不会覆盖模板中的路由策略键（如 `RETRIEVAL_EMBEDDING_BACKEND`）。
 >
+> **当前本地开发约定（避免重复踩坑）**：当本机 router 未部署 embedding/reranker 时，C/D 本地联调使用 `/Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env` 提供 embedding/reranker 配置；LLM 相关字段统一使用该文件中的 `gpt-5.2` 口径。推荐命令：`bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse --runtime-env-mode none --allow-runtime-env-injection --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env`（`profile d` 同理）。
+>
+> **上线口径不变**：面向客户环境时仍以 C/D 模板中的 `router` 作为默认入口；若 router 侧未提供 embedding/reranker/llm，系统按既有降级链路 fallback，不因缺失而直接中断。
+>
 > **配置优先级说明（避免误配）**：
 > - `RETRIEVAL_EMBEDDING_BACKEND` 只影响 Embedding 链路，不影响 Reranker。
 > - Reranker 没有 `RETRIEVAL_RERANKER_BACKEND` 开关；是否启用仅由 `RETRIEVAL_RERANKER_ENABLED` 控制。
@@ -153,8 +157,8 @@ RETRIEVAL_RERANKER_WEIGHT=0.35                     # 远程推荐略高
 bash new/run_post_change_checks.sh --skip-frontend --skip-sse
 
 # 2) 在不加载本地 runtime 覆盖的环境下，复验 C/D 烟测
-bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse
-bash new/run_post_change_checks.sh --with-docker --docker-profile d --skip-sse
+bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse --runtime-env-mode none
+bash new/run_post_change_checks.sh --with-docker --docker-profile d --skip-sse --runtime-env-mode none
 ```
 
 ### 推荐模型选型

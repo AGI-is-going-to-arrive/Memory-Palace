@@ -249,6 +249,8 @@ bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse -
 bash new/run_post_change_checks.sh --with-docker --docker-profile d --skip-sse --runtime-env-mode none
 ```
 
+前置条件：`profile c/d` 在 `--runtime-env-mode none` 下不会自动加载本地 runtime 覆盖。若模板仍含占位值（如 `ROUTER_API_BASE=<your-router-host>`、`RETRIEVAL_*_API_KEY=replace-with-your-key`），pure-template 链路失败属于预期（防假绿）；要通过需满足其一：`router` 已配置真实可用路由，或显式使用 `--allow-runtime-env-injection --runtime-env-file ...` 注入联调。
+
 本地 C/D 联调（router 未提供 embedding/reranker/llm）：
 
 ```bash
@@ -281,7 +283,7 @@ cd Memory-Palace/backend && .venv/bin/pytest tests/benchmark -q -k "profile_a or
 4. 线上发布判定仍以客户环境 router 配置复验为准，不使用开发机私有覆盖文件；若 router 侧缺 embedding/reranker/llm，系统按既有 fallback 链路降级，避免直接报错。
 5. 本地 C/D 当前使用 `/Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env` 提供 embedding/reranker 与 LLM（`gpt-5.2`）注入口径；该口径仅用于开发环境对齐，不改变发布模板。
 6. 若 `tests/benchmark/run_profile_abcd_real.py` 在默认缓存目录触发 `sqlite disk I/O error`，使用 `--workdir /tmp/<run-id>` 规避文件系统限制（已在 runner 支持）。
-7. `--runtime-env-mode none` 且不附加注入参数的 pure-template 复验在客户环境仍建议执行；当前本地联调阶段不作为阻断项。
+7. `--runtime-env-mode none` 且不附加注入参数的 pure-template 复验严格使用模板值；模板占位值场景失败属于预期，不应判为脚本误报。仅在 router 已提供真实配置时，该复验结果才可作为通过依据。
 
 ---
 

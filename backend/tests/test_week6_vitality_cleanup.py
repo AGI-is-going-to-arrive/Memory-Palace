@@ -1152,6 +1152,73 @@ async def test_observability_summary_includes_vitality_sections(
 
 
 @pytest.mark.asyncio
+async def test_observability_summary_marks_degraded_when_vitality_stats_getter_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _DummyClientWithoutVitalityStats:
+        async def get_index_status(self) -> Dict[str, Any]:
+            return {"degraded": False, "index_available": True}
+
+        async def get_gist_stats(self) -> Dict[str, Any]:
+            return {"degraded": False, "total_rows": 0}
+
+    async def _ensure_started(_factory) -> None:
+        return None
+
+    async def _index_worker_status() -> Dict[str, Any]:
+        return {"enabled": True, "running": False, "recent_jobs": [], "stats": {}}
+
+    async def _write_lane_status() -> Dict[str, Any]:
+        return {
+            "global_concurrency": 1,
+            "global_active": 0,
+            "global_waiting": 0,
+            "session_waiting_count": 0,
+            "session_waiting_sessions": 0,
+            "max_session_waiting": 0,
+            "wait_warn_ms": 2000,
+        }
+
+    async def _decay_status() -> Dict[str, Any]:
+        return {"applied": True, "degraded": False}
+
+    async def _cleanup_summary() -> Dict[str, Any]:
+        return {"pending_reviews": 0}
+
+    monkeypatch.setattr(
+        maintenance_api,
+        "get_sqlite_client",
+        lambda: _DummyClientWithoutVitalityStats(),
+    )
+    monkeypatch.setattr(maintenance_api.runtime_state, "ensure_started", _ensure_started)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.index_worker, "status", _index_worker_status
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.write_lanes, "status", _write_lane_status
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.vitality_decay, "status", _decay_status
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.cleanup_reviews, "summary", _cleanup_summary
+    )
+
+    async with maintenance_api._search_events_guard:
+        maintenance_api._search_events.clear()
+    async with maintenance_api._cleanup_query_events_guard:
+        maintenance_api._cleanup_query_events.clear()
+    monkeypatch.setattr(maintenance_api, "_search_events_loaded", True)
+
+    payload = await maintenance_api.get_observability_summary()
+
+    assert payload["status"] == "degraded"
+    assert payload["vitality_stats"]["degraded"] is True
+    assert payload["vitality_stats"]["reason"] == "vitality_stats_unavailable"
+    assert payload["vitality_decay"]["degraded"] is False
+
+
+@pytest.mark.asyncio
 async def test_vitality_cleanup_query_stats_are_exposed_in_observability_summary(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

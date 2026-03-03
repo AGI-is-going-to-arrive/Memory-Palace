@@ -17,7 +17,7 @@ import time
 import httpx
 from pathlib import Path as FilePath
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Sequence, Mapping
 from contextlib import asynccontextmanager
 
 from sqlalchemy import (
@@ -458,6 +458,9 @@ class SQLiteClient:
             "extension_loaded": False,
             "extension_path_exists": False,
         }
+        self._sqlite_vec_knn_table = "memory_chunks_vec0"
+        self._sqlite_vec_knn_ready = False
+        self._sqlite_vec_knn_dim = max(16, int(self._embedding_dim))
         self._vector_engine_effective = "legacy"
 
     @staticmethod
@@ -525,6 +528,7 @@ class SQLiteClient:
         @event.listens_for(self.engine.sync_engine, "connect")
         def _on_connect(dbapi_connection, _connection_record) -> None:
             self._apply_runtime_write_pragmas(dbapi_connection)
+            self._load_sqlite_vec_extension_on_connect(dbapi_connection)
 
     def _apply_runtime_write_pragmas(self, dbapi_connection) -> None:
         status = "disabled"
@@ -643,6 +647,75 @@ class SQLiteClient:
             )
             self._runtime_write_pragma_status = status
             self._runtime_write_pragma_error = error
+
+    def _load_sqlite_vec_extension_on_connect(self, dbapi_connection) -> None:
+        """
+        Best-effort sqlite-vec extension loading for each SQLite connection.
+
+        This hook is intentionally fail-closed/safe: if loading is unavailable
+        or fails, retrieval will naturally fall back to legacy scoring.
+        """
+        if not self._sqlite_vec_enabled:
+            return
+
+        extension_input = str(self._sqlite_vec_extension_path or "").strip()
+        if not extension_input:
+            return
+
+        resolved_extension = self._resolve_sqlite_extension_file(extension_input)
+        if resolved_extension is None:
+            return
+        if not resolved_extension.is_file():
+            return
+        extension_path = str(resolved_extension)
+
+        enable_sync = getattr(dbapi_connection, "enable_load_extension", None)
+        load_sync = getattr(dbapi_connection, "load_extension", None)
+        if callable(enable_sync) and callable(load_sync):
+            try:
+                enable_sync(True)
+            except Exception:
+                return
+            try:
+                load_sync(extension_path)
+            except Exception:
+                # Keep safe degradation path to legacy vector scoring.
+                pass
+            finally:
+                try:
+                    enable_sync(False)
+                except Exception:
+                    pass
+            return
+
+        awaiter = getattr(dbapi_connection, "await_", None)
+        driver_connection = getattr(dbapi_connection, "driver_connection", None)
+        enable_async = (
+            getattr(driver_connection, "enable_load_extension", None)
+            if driver_connection is not None
+            else None
+        )
+        load_async = (
+            getattr(driver_connection, "load_extension", None)
+            if driver_connection is not None
+            else None
+        )
+        if not (callable(awaiter) and callable(enable_async) and callable(load_async)):
+            return
+
+        try:
+            awaiter(enable_async(True))
+        except Exception:
+            return
+        try:
+            awaiter(load_async(extension_path))
+        except Exception:
+            pass
+        finally:
+            try:
+                awaiter(enable_async(False))
+            except Exception:
+                pass
 
     def _resolve_embedding_api_base(self, backend: str) -> str:
         backend_value = (backend or "").strip().lower()
@@ -779,6 +852,9 @@ class SQLiteClient:
             capabilities = await conn.run_sync(self._setup_index_infra)
             self._fts_available = capabilities.get("fts_available", False)
             self._vector_available = capabilities.get("vector_available", True)
+            self._sqlite_vec_knn_ready = bool(
+                capabilities.get("sqlite_vec_knn_ready", False)
+            )
             self._sqlite_vec_capability = self._probe_sqlite_vec_capability()
             self._refresh_vector_engine_state()
             await conn.run_sync(self._sync_set_vector_engine_meta)
@@ -835,6 +911,8 @@ class SQLiteClient:
             # SQLite builds without FTS5 support should continue with LIKE fallback.
             fts_available = False
 
+        sqlite_vec_knn_ready = self._setup_sqlite_vec_knn_infra(connection)
+
         now = _utc_now_naive().isoformat()
         self._sync_set_index_meta(connection, "fts_available", "1" if fts_available else "0", now)
         self._sync_set_index_meta(
@@ -860,7 +938,71 @@ class SQLiteClient:
             self._resolve_chain_fallback_backend(),
             now,
         )
-        return {"fts_available": fts_available, "vector_available": self._vector_available}
+        self._sync_set_index_meta(
+            connection,
+            "sqlite_vec_knn_ready",
+            "1" if sqlite_vec_knn_ready else "0",
+            now,
+        )
+        return {
+            "fts_available": fts_available,
+            "vector_available": self._vector_available,
+            "sqlite_vec_knn_ready": sqlite_vec_knn_ready,
+        }
+
+    def _setup_sqlite_vec_knn_infra(self, connection) -> bool:
+        """
+        Best-effort setup for vec0 KNN virtual table.
+
+        Failures are intentionally non-fatal and keep legacy fallback path intact.
+        """
+        self._sqlite_vec_knn_ready = False
+        if not self._sqlite_vec_enabled:
+            return False
+
+        vector_dim = max(16, int(self._embedding_dim))
+        try:
+            dim_rows = connection.execute(
+                text(
+                    "SELECT DISTINCT dim "
+                    "FROM memory_chunks_vec "
+                    "WHERE dim IS NOT NULL AND dim > 0 "
+                    "LIMIT 2"
+                )
+            ).fetchall()
+            if len(dim_rows) == 1 and dim_rows[0][0] is not None:
+                vector_dim = max(16, int(dim_rows[0][0]))
+        except Exception:
+            # Keep configured dim when probing existing vectors fails.
+            vector_dim = max(16, int(self._embedding_dim))
+        self._sqlite_vec_knn_dim = vector_dim
+        table_name = self._sqlite_vec_knn_table
+        try:
+            connection.execute(
+                text(
+                    f"CREATE VIRTUAL TABLE IF NOT EXISTS {table_name} "
+                    f"USING vec0(vector float[{vector_dim}] distance_metric=cosine)"
+                )
+            )
+            connection.execute(
+                text(
+                    f"DELETE FROM {table_name}"
+                )
+            )
+            connection.execute(
+                text(
+                    f"INSERT INTO {table_name}(rowid, vector) "
+                    "SELECT chunk_id, vec_f32(vector) "
+                    "FROM memory_chunks_vec "
+                    "WHERE dim = :vector_dim"
+                ),
+                {"vector_dim": vector_dim},
+            )
+            self._sqlite_vec_knn_ready = True
+            return True
+        except Exception:
+            self._sqlite_vec_knn_ready = False
+            return False
 
     def _sync_set_vector_engine_meta(self, connection) -> None:
         now = _utc_now_naive().isoformat()
@@ -909,6 +1051,18 @@ class SQLiteClient:
             connection,
             "vector_engine_effective",
             self._vector_engine_effective,
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "sqlite_vec_knn_ready",
+            "1" if self._sqlite_vec_knn_ready else "0",
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "sqlite_vec_knn_dim",
+            str(int(self._sqlite_vec_knn_dim)),
             now,
         )
 
@@ -2243,9 +2397,64 @@ class SQLiteClient:
         await session.execute(
             delete(MemoryChunkVec).where(MemoryChunkVec.memory_id == memory_id)
         )
+        await self._delete_vec_knn_rows(session, memory_id=memory_id)
         await session.execute(
             delete(MemoryChunk).where(MemoryChunk.memory_id == memory_id)
         )
+
+    async def _delete_vec_knn_rows(
+        self, session: AsyncSession, *, memory_id: int
+    ) -> None:
+        try:
+            await session.execute(
+                text(
+                    f"DELETE FROM {self._sqlite_vec_knn_table} "
+                    "WHERE rowid IN ("
+                    "  SELECT id FROM memory_chunks WHERE memory_id = :memory_id"
+                    ")"
+                ),
+                {"memory_id": int(memory_id)},
+            )
+        except Exception:
+            # vec0 table is optional; keep clear-index path robust.
+            self._sqlite_vec_knn_ready = False
+
+    async def _upsert_vec_knn_rows(
+        self, session: AsyncSession, rows: Sequence[Mapping[str, Any]]
+    ) -> None:
+        if not rows:
+            return
+        try:
+            await session.execute(
+                text(
+                    f"DELETE FROM {self._sqlite_vec_knn_table} "
+                    "WHERE rowid = :chunk_id"
+                ),
+                [
+                    {"chunk_id": int(row.get("chunk_id") or 0)}
+                    for row in rows
+                    if int(row.get("chunk_id") or 0) > 0
+                ],
+            )
+            await session.execute(
+                text(
+                    f"INSERT INTO {self._sqlite_vec_knn_table}("
+                    "rowid, vector"
+                    ") VALUES (:chunk_id, vec_f32(:vector))"
+                ),
+                [
+                    {
+                        "chunk_id": int(row.get("chunk_id") or 0),
+                        "vector": str(row.get("vector") or "[]"),
+                    }
+                    for row in rows
+                    if int(row.get("chunk_id") or 0) > 0
+                ],
+            )
+            self._sqlite_vec_knn_ready = True
+        except Exception:
+            # vec0 table is optional; writes continue through legacy table.
+            self._sqlite_vec_knn_ready = False
 
     async def _reindex_memory(self, session: AsyncSession, memory_id: int) -> int:
         await self._clear_memory_index(session, memory_id)
@@ -2281,17 +2490,25 @@ class SQLiteClient:
         await session.flush()
 
         vec_rows: List[MemoryChunkVec] = []
+        vec_knn_rows: List[Dict[str, Any]] = []
         for chunk in chunk_rows:
             if self._vector_available:
                 embedding = await self._get_embedding(session, chunk.chunk_text)
+                vector_payload = json.dumps(embedding, separators=(",", ":"))
                 vec_rows.append(
                     MemoryChunkVec(
                         chunk_id=chunk.id,
                         memory_id=memory_id,
-                        vector=json.dumps(embedding, separators=(",", ":")),
+                        vector=vector_payload,
                         model=self._embedding_model,
                         dim=len(embedding),
                     )
+                )
+                vec_knn_rows.append(
+                    {
+                        "chunk_id": int(chunk.id),
+                        "vector": vector_payload,
+                    }
                 )
             if self._fts_available:
                 try:
@@ -2314,6 +2531,7 @@ class SQLiteClient:
 
         if vec_rows:
             session.add_all(vec_rows)
+            await self._upsert_vec_knn_rows(session, vec_knn_rows)
         await self._set_index_meta(session, "last_indexed_memory_id", str(memory_id))
         await self._set_index_meta(session, "last_indexed_at", _utc_now_naive().isoformat())
         return len(chunk_rows)
@@ -2326,6 +2544,140 @@ class SQLiteClient:
         if length == 0:
             return 0.0
         return float(sum(v1[i] * v2[i] for i in range(length)))
+
+    async def _fetch_semantic_rows_python_scoring(
+        self,
+        session: AsyncSession,
+        *,
+        where_clause: str,
+        where_params: Dict[str, Any],
+        query_embedding: List[float],
+        semantic_pool_limit: int,
+        candidate_limit: int,
+    ) -> List[Dict[str, Any]]:
+        semantic_result = await session.execute(
+            text(
+                "SELECT "
+                "mc.id AS chunk_id, mc.memory_id AS memory_id, "
+                "mc.chunk_text AS chunk_text, mc.char_start AS char_start, mc.char_end AS char_end, "
+                "mcv.vector AS vector_json, "
+                "p.domain AS domain, p.path AS path, p.priority AS priority, p.disclosure AS disclosure, "
+                "m.created_at AS created_at "
+                "FROM memory_chunks_vec mcv "
+                "JOIN memory_chunks mc ON mc.id = mcv.chunk_id "
+                "JOIN memories m ON m.id = mc.memory_id "
+                "JOIN paths p ON p.memory_id = mc.memory_id "
+                f"WHERE {where_clause} "
+                "LIMIT :semantic_pool_limit"
+            ),
+            {**where_params, "semantic_pool_limit": semantic_pool_limit},
+        )
+
+        semantic_scored: List[Tuple[float, Dict[str, Any]]] = []
+        for row in semantic_result.mappings().all():
+            vector_payload = row.get("vector_json")
+            if not vector_payload:
+                continue
+            try:
+                chunk_vec = [float(v) for v in json.loads(vector_payload)]
+            except (TypeError, ValueError):
+                continue
+            similarity = self._cosine_similarity(query_embedding, chunk_vec)
+            semantic_scored.append((similarity, dict(row)))
+
+        semantic_scored.sort(key=lambda item: item[0], reverse=True)
+        semantic_rows: List[Dict[str, Any]] = []
+        for similarity, row in semantic_scored[:candidate_limit]:
+            row["vector_similarity"] = similarity
+            semantic_rows.append(row)
+        return semantic_rows
+
+    async def _fetch_semantic_rows_vec_native_topk(
+        self,
+        session: AsyncSession,
+        *,
+        where_clause: str,
+        where_params: Dict[str, Any],
+        query_embedding: List[float],
+        semantic_pool_limit: int,
+        candidate_limit: int,
+    ) -> List[Dict[str, Any]]:
+        if not self._sqlite_vec_knn_ready:
+            raise RuntimeError("sqlite_vec_knn_not_ready")
+        if len(query_embedding) != int(self._sqlite_vec_knn_dim):
+            raise RuntimeError(
+                f"sqlite_vec_knn_dim_mismatch:{len(query_embedding)}!={self._sqlite_vec_knn_dim}"
+            )
+
+        query_vector_json = json.dumps(
+            [float(value) for value in query_embedding],
+            separators=(",", ":"),
+        )
+        base_vec_k = max(1, int(candidate_limit))
+
+        async def _query_with_k(vec_k: int) -> List[Dict[str, Any]]:
+            semantic_result = await session.execute(
+                text(
+                    "WITH knn AS ("
+                    "  SELECT "
+                    "    rowid AS chunk_id, "
+                    "    CAST(distance AS REAL) AS vector_distance "
+                    f"  FROM {self._sqlite_vec_knn_table} "
+                    "  WHERE vector MATCH vec_f32(:query_vector_json) "
+                    "    AND k = :vec_k "
+                    "  ORDER BY distance ASC "
+                    "), "
+                    "semantic_scored AS ("
+                    "  SELECT "
+                    "    mc.id AS chunk_id, mc.memory_id AS memory_id, "
+                    "    mc.chunk_text AS chunk_text, mc.char_start AS char_start, mc.char_end AS char_end, "
+                    "    p.domain AS domain, p.path AS path, p.priority AS priority, p.disclosure AS disclosure, "
+                    "    m.created_at AS created_at, "
+                    "    knn.vector_distance AS vector_distance "
+                    "  FROM knn "
+                    "  JOIN memory_chunks mc ON mc.id = knn.chunk_id "
+                    "  JOIN memories m ON m.id = mc.memory_id "
+                    "  JOIN paths p ON p.memory_id = mc.memory_id "
+                    f"  WHERE {where_clause} "
+                    ") "
+                    "SELECT "
+                    "  chunk_id, memory_id, chunk_text, char_start, char_end, "
+                    "  domain, path, priority, disclosure, created_at, "
+                    "  vector_distance, (1.0 - vector_distance) AS vector_similarity "
+                    "FROM semantic_scored "
+                    "WHERE vector_distance IS NOT NULL "
+                    "ORDER BY vector_distance ASC "
+                    "LIMIT :candidate_limit"
+                ),
+                {
+                    **where_params,
+                    "query_vector_json": query_vector_json,
+                    "vec_k": int(max(1, vec_k)),
+                    "candidate_limit": candidate_limit,
+                },
+            )
+            semantic_rows = [dict(row) for row in semantic_result.mappings().all()]
+            for row in semantic_rows:
+                try:
+                    similarity = float(row.get("vector_similarity") or 0.0)
+                    if not math.isfinite(similarity):
+                        similarity = 0.0
+                    row["vector_similarity"] = similarity
+                except (TypeError, ValueError):
+                    row["vector_similarity"] = 0.0
+            return semantic_rows
+
+        semantic_rows = await _query_with_k(base_vec_k)
+        if (
+            len(semantic_rows) < int(candidate_limit)
+            and int(base_vec_k) < int(semantic_pool_limit)
+        ):
+            fallback_vec_k = min(
+                int(semantic_pool_limit),
+                max(int(base_vec_k) * 2, int(base_vec_k) + 16),
+            )
+            semantic_rows = await _query_with_k(int(fallback_vec_k))
+        return semantic_rows
 
     @staticmethod
     def _normalize_positive_int_ids(raw_ids: Optional[List[Any]]) -> List[int]:
@@ -3643,6 +3995,10 @@ class SQLiteClient:
         Returns:
             Restored path info
         """
+        safe_path = (path or "").strip("/")
+        if not safe_path:
+            raise ValueError("Path cannot be empty")
+
         async with self.session() as session:
             # Check if memory exists
             memory_result = await session.execute(
@@ -3650,6 +4006,18 @@ class SQLiteClient:
             )
             if not memory_result.scalar_one_or_none():
                 raise ValueError(f"Memory ID {memory_id} not found")
+
+            if "/" in safe_path:
+                parent_path = safe_path.rsplit("/", 1)[0]
+                parent_result = await session.execute(
+                    select(Path.path)
+                    .where(Path.domain == domain)
+                    .where(Path.path == parent_path)
+                )
+                if parent_result.scalar_one_or_none() is None:
+                    raise ValueError(
+                        f"Parent path '{domain}://{parent_path}' not found"
+                    )
 
             # Ensure memory is not deprecated (un-deprecate if needed)
             # This is critical for rollback: if we restore a path to a memory that was
@@ -3660,22 +4028,22 @@ class SQLiteClient:
 
             # Check if path already exists (collision)
             existing = await session.execute(
-                select(Path).where(Path.domain == domain).where(Path.path == path)
+                select(Path).where(Path.domain == domain).where(Path.path == safe_path)
             )
             if existing.scalar_one_or_none():
-                raise ValueError(f"Path '{domain}://{path}' already exists")
+                raise ValueError(f"Path '{domain}://{safe_path}' already exists")
 
             # Create path
             path_obj = Path(
                 domain=domain,
-                path=path,
+                path=safe_path,
                 memory_id=memory_id,
                 priority=priority,
                 disclosure=disclosure,
             )
             session.add(path_obj)
 
-            return {"uri": f"{domain}://{path}", "memory_id": memory_id}
+            return {"uri": f"{domain}://{safe_path}", "memory_id": memory_id}
 
     # =========================================================================
     # Search Operations
@@ -4149,6 +4517,8 @@ class SQLiteClient:
 
         semantic_payload: Dict[str, Any]
         keyword_payload: Dict[str, Any]
+        semantic_unavailable = False
+        keyword_unavailable = False
         try:
             semantic_payload = await self.search_advanced(
                 query=query,
@@ -4158,6 +4528,7 @@ class SQLiteClient:
                 filters=filters,
             )
         except Exception as exc:
+            semantic_unavailable = True
             self._append_degrade_reason(
                 degrade_reasons, f"write_guard_semantic_failed:{type(exc).__name__}"
             )
@@ -4171,6 +4542,7 @@ class SQLiteClient:
                 filters=filters,
             )
         except Exception as exc:
+            keyword_unavailable = True
             self._append_degrade_reason(
                 degrade_reasons, f"write_guard_keyword_failed:{type(exc).__name__}"
             )
@@ -4192,6 +4564,15 @@ class SQLiteClient:
             keyword_payload,
             exclude_memory_id=exclude_memory_id,
         )
+
+        # If both retrieval signals are unavailable, fail closed instead of allowing ADD.
+        if semantic_unavailable and keyword_unavailable:
+            return self._build_guard_decision(
+                action="NOOP",
+                reason="write_guard_unavailable",
+                method="exception",
+                degrade_reasons=degrade_reasons,
+            )
 
         semantic_top = (
             max(
@@ -4461,6 +4842,9 @@ class SQLiteClient:
             "vector_engine_requested": self._vector_engine_requested,
             "vector_engine_effective": self._vector_engine_effective,
             "vector_engine_selected": "legacy",
+            "vector_engine_path": "not_applicable",
+            "sqlite_vec_knn_ready": bool(self._sqlite_vec_knn_ready),
+            "sqlite_vec_knn_dim": int(self._sqlite_vec_knn_dim),
             "sqlite_vec_enabled": self._sqlite_vec_enabled,
             "sqlite_vec_read_ratio": int(self._sqlite_vec_read_ratio),
             "sqlite_vec_status": str(self._sqlite_vec_capability.get("status", "disabled")),
@@ -4681,41 +5065,62 @@ class SQLiteClient:
                     degrade_reasons=degrade_reasons,
                 )
                 semantic_pool_limit = min(max(candidate_limit * 8, 64), 3000)
-                semantic_result = await session.execute(
-                    text(
-                        "SELECT "
-                        "mc.id AS chunk_id, mc.memory_id AS memory_id, "
-                        "mc.chunk_text AS chunk_text, mc.char_start AS char_start, mc.char_end AS char_end, "
-                        "mcv.vector AS vector_json, "
-                        "p.domain AS domain, p.path AS path, p.priority AS priority, p.disclosure AS disclosure, "
-                        "m.created_at AS created_at "
-                        "FROM memory_chunks_vec mcv "
-                        "JOIN memory_chunks mc ON mc.id = mcv.chunk_id "
-                        "JOIN memories m ON m.id = mc.memory_id "
-                        "JOIN paths p ON p.memory_id = mc.memory_id "
-                        f"WHERE {where_clause} "
-                        "LIMIT :semantic_pool_limit"
-                    ),
-                    {**where_params, "semantic_pool_limit": semantic_pool_limit},
-                )
-
-                semantic_scored: List[Tuple[float, Dict[str, Any]]] = []
-                for row in semantic_result.mappings().all():
-                    vector_payload = row.get("vector_json")
-                    if not vector_payload:
-                        continue
-                    try:
-                        chunk_vec = [float(v) for v in json.loads(vector_payload)]
-                    except (TypeError, ValueError):
-                        continue
-                    similarity = self._cosine_similarity(query_embedding, chunk_vec)
-                    semantic_scored.append((similarity, dict(row)))
-
-                semantic_scored.sort(key=lambda item: item[0], reverse=True)
-                semantic_rows = []
-                for similarity, row in semantic_scored[:candidate_limit]:
-                    row["vector_similarity"] = similarity
-                    semantic_rows.append(row)
+                if selected_vector_engine == "vec":
+                    if not self._sqlite_vec_knn_ready:
+                        self._append_degrade_reason(
+                            degrade_reasons, "sqlite_vec_knn_unavailable"
+                        )
+                        semantic_rows = await self._fetch_semantic_rows_python_scoring(
+                            session,
+                            where_clause=where_clause,
+                            where_params=where_params,
+                            query_embedding=query_embedding,
+                            semantic_pool_limit=semantic_pool_limit,
+                            candidate_limit=candidate_limit,
+                        )
+                        vector_engine_metadata["vector_engine_path"] = (
+                            "legacy_python_fallback"
+                        )
+                    else:
+                        try:
+                            semantic_rows = await self._fetch_semantic_rows_vec_native_topk(
+                                session,
+                                where_clause=where_clause,
+                                where_params=where_params,
+                                query_embedding=query_embedding,
+                                semantic_pool_limit=semantic_pool_limit,
+                                candidate_limit=candidate_limit,
+                            )
+                            vector_engine_metadata["vector_engine_path"] = (
+                                "vec_native_topk_sql"
+                            )
+                        except Exception:
+                            self._append_degrade_reason(
+                                degrade_reasons, "sqlite_vec_native_query_failed"
+                            )
+                            semantic_rows = await self._fetch_semantic_rows_python_scoring(
+                                session,
+                                where_clause=where_clause,
+                                where_params=where_params,
+                                query_embedding=query_embedding,
+                                semantic_pool_limit=semantic_pool_limit,
+                                candidate_limit=candidate_limit,
+                            )
+                            vector_engine_metadata["vector_engine_path"] = (
+                                "legacy_python_fallback"
+                            )
+                else:
+                    semantic_rows = await self._fetch_semantic_rows_python_scoring(
+                        session,
+                        where_clause=where_clause,
+                        where_params=where_params,
+                        query_embedding=query_embedding,
+                        semantic_pool_limit=semantic_pool_limit,
+                        candidate_limit=candidate_limit,
+                    )
+                    vector_engine_metadata["vector_engine_path"] = (
+                        "legacy_python_scoring"
+                    )
 
             candidates: Dict[Tuple[str, str, Any], Dict[str, Any]] = {}
 
@@ -5197,6 +5602,8 @@ class SQLiteClient:
                     "sqlite_vec_diag_code": str(
                         self._sqlite_vec_capability.get("diag_code", "")
                     ),
+                    "sqlite_vec_knn_ready": bool(self._sqlite_vec_knn_ready),
+                    "sqlite_vec_knn_dim": int(self._sqlite_vec_knn_dim),
                     "vector_engine_requested": self._vector_engine_requested,
                     "vector_engine_effective": self._vector_engine_effective,
                     "runtime_write_wal_enabled": self._runtime_write_wal_enabled,

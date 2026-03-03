@@ -733,6 +733,15 @@ async def test_observability_summary_includes_gist_stats(
                 "latest_created_at": "2026-02-17T00:00:00Z",
             }
 
+        async def get_vitality_stats(self) -> Dict[str, Any]:
+            return {
+                "degraded": False,
+                "total_paths": 0,
+                "low_vitality_paths": 0,
+                "deprecation_candidates": 0,
+                "total_memories": 0,
+            }
+
     async def _ensure_started(_factory) -> None:
         return None
 

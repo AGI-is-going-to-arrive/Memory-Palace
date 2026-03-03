@@ -317,6 +317,36 @@ async def test_index_job_cancel_returns_404_when_job_not_found(
 
 
 @pytest.mark.asyncio
+async def test_index_job_cancel_returns_404_when_job_not_found_case_insensitive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _CaseInsensitiveNotFoundWorker:
+        async def cancel_job(self, *, job_id: str, reason: str) -> Dict[str, Any]:
+            _ = job_id
+            _ = reason
+            return {"ok": False, "error": "Job Not Found"}
+
+    async def _ensure_started(_factory) -> None:
+        return None
+
+    monkeypatch.setattr(maintenance_api.runtime_state, "ensure_started", _ensure_started)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state,
+        "index_worker",
+        _CaseInsensitiveNotFoundWorker(),
+    )
+
+    with pytest.raises(maintenance_api.HTTPException) as exc_info:
+        await maintenance_api.cancel_index_job(
+            "idx-missing",
+            maintenance_api.IndexJobCancelRequest(reason="missing"),
+        )
+
+    assert exc_info.value.status_code == 404
+    assert str(exc_info.value.detail) == "Job Not Found"
+
+
+@pytest.mark.asyncio
 async def test_index_job_cancel_returns_409_when_job_already_finalized(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

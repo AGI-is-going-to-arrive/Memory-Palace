@@ -6,6 +6,8 @@ from sqlalchemy import func, select
 
 import main
 import mcp_server
+from api import browse as browse_api
+from api import review as review_api
 from db.sqlite_client import Memory, Path as PathModel, SQLiteClient
 
 
@@ -245,3 +247,123 @@ async def test_phase_d_hold_search_and_read_do_not_create_new_memory_records(
         flush_tracker._max_events = original_max_events
         await flush_tracker.mark_flushed(session_id=session_id)
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_phase_d_hold_browse_blocked_update_has_no_access_side_effect(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "phase-d-hold-browse-no-side-effect.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+    created = await client.create_memory(
+        parent_path="",
+        content="phase d hold browse side effect sample",
+        priority=1,
+        title="hold_browse_node",
+        domain="core",
+    )
+
+    before_access = await _memory_access_snapshot(client, int(created["id"]))
+
+    async def _guard_noop(**_: object) -> dict[str, object]:
+        return {"action": "NOOP", "reason": "duplicate", "method": "keyword"}
+
+    monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(client, "write_guard", _guard_noop)
+
+    payload = await browse_api.update_node(
+        path=str(created["path"]),
+        domain="core",
+        body=browse_api.NodeUpdate(content="replacement content"),
+    )
+    assert payload["success"] is True
+    assert payload["updated"] is False
+    assert str(payload.get("guard_action")) == "NOOP"
+
+    after_access = await _memory_access_snapshot(client, int(created["id"]))
+    assert after_access["access_count"] == before_access["access_count"]
+    assert after_access["vitality_score"] == before_access["vitality_score"]
+    assert after_access["last_accessed_at"] == before_access["last_accessed_at"]
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_phase_d_hold_review_no_change_rollback_has_no_access_side_effect(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "phase-d-hold-review-no-side-effect.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+    created = await client.create_memory(
+        parent_path="",
+        content="phase d hold review side effect sample",
+        priority=3,
+        title="hold_review_node",
+        domain="core",
+    )
+
+    before_access = await _memory_access_snapshot(client, int(created["id"]))
+    monkeypatch.setattr(review_api, "get_sqlite_client", lambda: client)
+
+    rollback_payload = await review_api._rollback_legacy_modify(
+        {
+            "memory_id": created["id"],
+            "path": created["path"],
+            "domain": created["domain"],
+            "uri": f"{created['domain']}://{created['path']}",
+            "priority": 3,
+            "disclosure": None,
+        }
+    )
+    assert rollback_payload.get("no_change") is True
+
+    after_access = await _memory_access_snapshot(client, int(created["id"]))
+    assert after_access["access_count"] == before_access["access_count"]
+    assert after_access["vitality_score"] == before_access["vitality_score"]
+    assert after_access["last_accessed_at"] == before_access["last_accessed_at"]
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_phase_d_hold_review_modify_meta_rollback_has_no_access_side_effect(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "phase-d-hold-review-modify-meta-no-side-effect.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+    created = await client.create_memory(
+        parent_path="",
+        content="phase d hold review modify_meta side effect sample",
+        priority=2,
+        title="hold_review_modify_meta_node",
+        domain="core",
+    )
+
+    before_access = await _memory_access_snapshot(client, int(created["id"]))
+    monkeypatch.setattr(review_api, "get_sqlite_client", lambda: client)
+
+    rollback_payload = await review_api._rollback_path(
+        {
+            "operation_type": "modify_meta",
+            "path": created["path"],
+            "domain": created["domain"],
+            "uri": f"{created['domain']}://{created['path']}",
+            "priority": 7,
+            "disclosure": "internal",
+        }
+    )
+    assert rollback_payload.get("metadata_restored") is True
+
+    after_access = await _memory_access_snapshot(client, int(created["id"]))
+    assert after_access["access_count"] == before_access["access_count"]
+    assert after_access["vitality_score"] == before_access["vitality_score"]
+    assert after_access["last_accessed_at"] == before_access["last_accessed_at"]
+
+    updated = await client.get_memory_by_path(
+        str(created["path"]), str(created["domain"]), reinforce_access=False
+    )
+    assert updated is not None
+    assert int(updated["priority"]) == 7
+    assert str(updated.get("disclosure") or "") == "internal"
+    await client.close()

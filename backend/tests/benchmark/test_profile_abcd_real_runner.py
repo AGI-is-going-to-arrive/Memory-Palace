@@ -11,6 +11,7 @@ from helpers.profile_abcd_real_runner import (  # noqa: E402
     build_phase6_gate,
     compute_percentile,
     compute_retrieval_metrics,
+    resolve_real_profile_workdir,
 )
 
 
@@ -53,3 +54,22 @@ def test_build_phase6_gate_marks_invalid_when_profile_d_has_invalid_reasons() ->
     assert gate["invalid_reasons"] == ["embedding_request_failed"]
     assert gate["rows"][0]["valid"] is True
     assert gate["rows"][1]["valid"] is False
+
+
+def test_resolve_real_profile_workdir_respects_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    expected = tmp_path / "custom-real-cache"
+    monkeypatch.setenv("BENCHMARK_REAL_PROFILE_WORKDIR", str(expected))
+    assert resolve_real_profile_workdir() == expected
+
+
+def test_resolve_real_profile_workdir_prefers_explicit_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(
+        "BENCHMARK_REAL_PROFILE_WORKDIR",
+        str(tmp_path / "env-cache"),
+    )
+    explicit = tmp_path / "explicit-cache"
+    assert resolve_real_profile_workdir(explicit) == explicit

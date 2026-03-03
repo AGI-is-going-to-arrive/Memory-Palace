@@ -1,17 +1,18 @@
 {
-  "generated_at_utc": "2026-03-02T05:27:49+00:00",
+  "generated_at_utc": "2026-03-03T09:29:39+00:00",
   "scope": {
     "phase": "D",
     "description": "Phase D spike for provider/sqlite-vec/write-lane feasibility",
     "wal_probe": {
       "load_profile": "business_write_peak",
-      "repeat": 2,
+      "repeat": 3,
       "workers": 12,
       "tx_per_worker": 220,
       "timeout_sec": 0.12,
       "regression_thresholds": {
         "min_throughput_ratio": 1.02,
         "max_failure_rate": 0.005,
+        "max_retry_rate": 0.01,
         "max_persistence_gap": 0
       }
     },
@@ -162,75 +163,78 @@
       "errors": []
     },
     "write_lane_wal": {
-      "status": "degraded",
+      "status": "ok",
       "load_profile": "business_write_peak",
-      "repeat": 2,
+      "repeat": 3,
       "workers": 12,
       "tx_per_worker": 220,
       "timeout_sec": 0.12,
       "regression_thresholds": {
         "min_throughput_ratio": 1.02,
         "max_failure_rate": 0.005,
+        "max_retry_rate": 0.01,
         "max_persistence_gap": 0
       },
       "results": {
         "delete": {
-          "status": "ok_with_failures",
+          "status": "ok",
           "requested_journal_mode": "delete",
           "effective_journal_mode": "delete",
           "workers": 12,
           "tx_per_worker": 220,
-          "planned_tx": 5280,
-          "successful_tx": 5252,
-          "failed_tx": 28,
-          "lock_retries": 71,
-          "rows_persisted": 5252,
-          "elapsed_sec": 3.705798,
-          "throughput_tps": 1417.239,
-          "failure_rate": 0.005303,
-          "retry_rate": 0.013447,
+          "planned_tx": 7920,
+          "successful_tx": 7920,
+          "failed_tx": 0,
+          "lock_retries": 29,
+          "rows_persisted": 7920,
+          "elapsed_sec": 3.000341,
+          "throughput_tps": 2639.7,
+          "failure_rate": 0.0,
+          "retry_rate": 0.003662,
           "persistence_gap": 0,
-          "sample_count": 2,
+          "sample_count": 3,
           "throughput_samples_tps": [
-            3835.239,
-            866.659
+            3658.57,
+            2252.718,
+            2385.19
           ]
         },
         "wal": {
-          "status": "ok_with_failures",
+          "status": "ok",
           "requested_journal_mode": "wal",
           "effective_journal_mode": "wal",
           "workers": 12,
           "tx_per_worker": 220,
-          "planned_tx": 5280,
-          "successful_tx": 5260,
-          "failed_tx": 20,
-          "lock_retries": 44,
-          "rows_persisted": 5260,
-          "elapsed_sec": 2.473889,
-          "throughput_tps": 2126.207,
-          "failure_rate": 0.003788,
-          "retry_rate": 0.008333,
+          "planned_tx": 7920,
+          "successful_tx": 7920,
+          "failed_tx": 0,
+          "lock_retries": 11,
+          "rows_persisted": 7920,
+          "elapsed_sec": 0.723876,
+          "throughput_tps": 10941.1,
+          "failure_rate": 0.0,
+          "retry_rate": 0.001389,
           "persistence_gap": 0,
-          "sample_count": 2,
+          "sample_count": 3,
           "throughput_samples_tps": [
-            4154.452,
-            1426.56
+            10420.4,
+            12033.738,
+            10511.91
           ]
         }
       },
       "summary": {
         "delete": {
-          "throughput_tps_p50": 2350.949,
-          "throughput_tps_p95": 3686.81,
-          "failure_rate_max": 0.009091,
-          "retry_rate_p95": 0.019413
+          "throughput_tps_p50": 2385.19,
+          "throughput_tps_p95": 3531.232,
+          "failure_rate_max": 0.0,
+          "retry_rate_p95": 0.004091
         },
         "wal": {
-          "throughput_tps_p50": 2790.506,
-          "throughput_tps_p95": 4018.057,
-          "failure_rate_max": 0.006061,
-          "retry_rate_p95": 0.012424
+          "throughput_tps_p50": 10511.91,
+          "throughput_tps_p95": 11881.555,
+          "failure_rate_max": 0.0,
+          "retry_rate_p95": 0.001818
         }
       },
       "regression_gate": {
@@ -242,34 +246,159 @@
         "profile_baseline": {
           "min_throughput_ratio": 1.02,
           "max_failure_rate": 0.005,
+          "max_retry_rate": 0.01,
           "max_persistence_gap": 0
         },
         "suggested_stable_thresholds": {
           "min_throughput_ratio": 1.02,
           "max_failure_rate": 0.005,
+          "max_retry_rate": 0.01,
           "max_persistence_gap": 0
         },
         "observed": {
-          "wal_vs_delete_throughput_ratio": 1.5,
-          "wal_failure_rate": 0.003788,
+          "wal_vs_delete_throughput_ratio": 4.145,
+          "wal_failure_rate": 0.0,
+          "wal_retry_rate": 0.001389,
           "wal_persistence_gap": 0,
           "delete_persistence_gap": 0
         },
         "note": "Thresholds are recommendations for future gate tuning; production default remains HOLD."
       },
-      "wal_vs_delete_throughput_ratio": 1.5
+      "wal_vs_delete_throughput_ratio": 4.145
+    }
+  },
+  "hold_gate": {
+    "generated_at_utc": "2026-03-03T09:29:39+00:00",
+    "source": {
+      "profile_metrics_json": "/Users/yangjunjie/Desktop/clawanti/Memory-Palace/backend/tests/benchmark/profile_ab_metrics.json",
+      "profile_metrics_status": "ok",
+      "sqlite_vec_probe_source": "phase_d_spike_runtime",
+      "wal_probe_source": "phase_d_spike_runtime"
+    },
+    "gate_11": {
+      "status": "ok",
+      "query_scope": "profile_cd",
+      "query_count": 300,
+      "degraded_queries": 0,
+      "embedding_request_failed_queries": 0,
+      "embedding_fallback_hash_queries": 0,
+      "embedding_success_rate": 1.0,
+      "embedding_fallback_hash_rate": 0.0,
+      "search_degraded_rate": 0.0,
+      "count_source": "estimated_from_degrade_union",
+      "thresholds": {
+        "embedding_success_rate_min": 0.995,
+        "embedding_fallback_hash_rate_max": 0.01,
+        "search_degraded_rate_max": 0.01
+      },
+      "checks": {
+        "embedding_success_rate": true,
+        "embedding_fallback_hash_rate": true,
+        "search_degraded_rate": true
+      },
+      "overall_pass": true
+    },
+    "gate_12": {
+      "status": "ok",
+      "legacy_profile": "profile_b",
+      "vec_candidate_profile": "profile_cd",
+      "thresholds": {
+        "latency_improvement_ratio_min": 0.2,
+        "ndcg_delta_min": 0.0,
+        "recall_delta_min": 0.0
+      },
+      "latency_improvement_ratio_mean": 0.0,
+      "invalid_reasons": [],
+      "rows": [
+        {
+          "dataset": "beir_nfcorpus",
+          "dataset_label": "BEIR NFCorpus",
+          "legacy_p95_ms": 4.7,
+          "vec_candidate_p95_ms": 4.7,
+          "latency_improvement_ratio": 0.0,
+          "latency_pass": false,
+          "legacy_ndcg_at_10": 0.85,
+          "vec_candidate_ndcg_at_10": 0.85,
+          "ndcg_delta": 0.0,
+          "legacy_recall_at_10": 0.975,
+          "vec_candidate_recall_at_10": 0.975,
+          "recall_delta": 0.0,
+          "quality_pass": true,
+          "invalid_reasons": []
+        },
+        {
+          "dataset": "msmarco_passages",
+          "dataset_label": "MS MARCO",
+          "legacy_p95_ms": 3.7,
+          "vec_candidate_p95_ms": 3.7,
+          "latency_improvement_ratio": 0.0,
+          "latency_pass": false,
+          "legacy_ndcg_at_10": 0.696,
+          "vec_candidate_ndcg_at_10": 0.696,
+          "ndcg_delta": 0.0,
+          "legacy_recall_at_10": 0.85,
+          "vec_candidate_recall_at_10": 0.85,
+          "recall_delta": 0.0,
+          "quality_pass": true,
+          "invalid_reasons": []
+        },
+        {
+          "dataset": "squad_v2_dev",
+          "dataset_label": "SQuAD v2 Dev",
+          "legacy_p95_ms": 3.9,
+          "vec_candidate_p95_ms": 3.9,
+          "latency_improvement_ratio": 0.0,
+          "latency_pass": false,
+          "legacy_ndcg_at_10": 0.822,
+          "vec_candidate_ndcg_at_10": 0.822,
+          "ndcg_delta": 0.0,
+          "legacy_recall_at_10": 1.0,
+          "vec_candidate_recall_at_10": 1.0,
+          "recall_delta": 0.0,
+          "quality_pass": true,
+          "invalid_reasons": []
+        }
+      ],
+      "checks": {
+        "extension_ready": true,
+        "no_new_500_proxy": true,
+        "latency_improvement_gate": false,
+        "quality_non_regression_gate": true,
+        "legacy_rollback_ready": true
+      },
+      "overall_pass": false
+    },
+    "gate_13": {
+      "status": "ok",
+      "thresholds": {
+        "wal_failed_tx_eq": 0,
+        "wal_failure_rate_max": 0.001,
+        "persistence_gap_eq": 0,
+        "retry_rate_p95_max": 0.01,
+        "throughput_ratio_min": 1.1
+      },
+      "wal_failed_tx": 0,
+      "wal_failure_rate": 0.0,
+      "persistence_gap": 0,
+      "retry_rate_p95": 0.001818,
+      "wal_vs_delete_tps_ratio": 4.145,
+      "checks": {
+        "wal_failed_tx": true,
+        "wal_failure_rate": true,
+        "persistence_gap": true,
+        "retry_rate_p95": true,
+        "throughput_ratio": true
+      },
+      "overall_pass": true
     }
   },
   "go_no_go": {
-    "decision": "NO_GO",
-    "blockers": [
-      "wal_failed_transactions"
-    ],
-    "summary": "Spike produced blockers; keep HOLD and do not promote to default path."
+    "decision": "GO",
+    "blockers": [],
+    "summary": "Spike baseline is executable. Continue with default-off feature flags."
   },
   "risks": [
-    "Write lane probe in DELETE mode observed failed transactions.",
-    "Write lane probe in WAL mode observed failed transactions."
+    "No blocker detected in current spike scope; keep feature flags default-off."
   ],
   "rollback_points": [
     "Keep RETRIEVAL_EMBEDDING_BACKEND at hash/none when provider probe is not ready.",

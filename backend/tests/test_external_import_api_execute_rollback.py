@@ -667,6 +667,75 @@ def test_import_job_not_evicted_by_learn_job_burst(
         assert import_status.json().get("job_type") == "import"
 
 
+def test_import_prepare_prefers_evicting_unprotected_jobs_when_pool_full(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    client_stub = _ImportClientStub()
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: client_stub)
+    monkeypatch.setenv("MCP_API_KEY", "import-secret")
+    monkeypatch.setenv("EXTERNAL_IMPORT_ENABLED", "true")
+    monkeypatch.setenv("EXTERNAL_IMPORT_ALLOWED_ROOTS", str(tmp_path))
+    monkeypatch.setattr(maintenance_api, "_IMPORT_JOB_MAX_PENDING", 2)
+    headers = {"X-MCP-API-Key": "import-secret"}
+
+    file_a = tmp_path / "import-a.md"
+    file_b = tmp_path / "import-b.md"
+    file_c = tmp_path / "import-c.md"
+    file_a.write_text("import A", encoding="utf-8")
+    file_b.write_text("import B", encoding="utf-8")
+    file_c.write_text("import C", encoding="utf-8")
+
+    with _build_client() as client:
+        prepare_a = client.post(
+            "/maintenance/import/prepare",
+            headers=headers,
+            json=_prepare_payload(file_a),
+        )
+        assert prepare_a.status_code == 200
+        import_job_a = str(prepare_a.json().get("job_id") or "")
+        assert import_job_a
+        maintenance_api._IMPORT_JOBS[import_job_a]["status"] = "executed"
+        maintenance_api._IMPORT_JOBS[import_job_a]["created_memories"] = [
+            {"memory_id": 101, "uri": "notes://imports/a", "path": "imports/a"}
+        ]
+
+        prepare_b = client.post(
+            "/maintenance/import/prepare",
+            headers=headers,
+            json=_prepare_payload(file_b),
+        )
+        assert prepare_b.status_code == 200
+        import_job_b = str(prepare_b.json().get("job_id") or "")
+        assert import_job_b
+
+        prepare_c = client.post(
+            "/maintenance/import/prepare",
+            headers=headers,
+            json=_prepare_payload(file_c),
+        )
+        assert prepare_c.status_code == 200
+        import_job_c = str(prepare_c.json().get("job_id") or "")
+        assert import_job_c
+
+        protected_status = client.get(
+            f"/maintenance/import/jobs/{import_job_a}",
+            headers=headers,
+        )
+        assert protected_status.status_code == 200
+
+        evicted_status = client.get(
+            f"/maintenance/import/jobs/{import_job_b}",
+            headers=headers,
+        )
+        assert evicted_status.status_code == 404
+
+        latest_status = client.get(
+            f"/maintenance/import/jobs/{import_job_c}",
+            headers=headers,
+        )
+        assert latest_status.status_code == 200
+
+
 def test_explicit_learn_failed_job_can_rollback_namespace_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
