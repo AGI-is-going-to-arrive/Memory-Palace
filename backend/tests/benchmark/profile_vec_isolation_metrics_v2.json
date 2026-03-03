@@ -1,0 +1,517 @@
+{
+  "generated_at_utc": "2026-03-03T11:36:56+00:00",
+  "mode": "vec_isolation_hash_backend_v2",
+  "threshold_gate": {
+    "target": ">=0.20",
+    "metric": "latency_improvement_ratio=(b_p95-c_p95)/b_p95"
+  },
+  "config": {
+    "dataset_keys": [
+      "squad_v2_dev",
+      "beir_nfcorpus"
+    ],
+    "sample_sizes": [
+      30,
+      60,
+      100,
+      120
+    ],
+    "repeats": 3,
+    "first_relevant_only": true,
+    "extra_distractors": 200,
+    "sqlite_vec_extension_path": "/Users/yangjunjie/Desktop/clawanti/Memory-Palace/backend/.venv/lib/python3.14/site-packages/sqlite_vec/vec0.dylib",
+    "profile_b": "hash + vec_off + legacy",
+    "profile_c": "hash + vec_on + vec"
+  },
+  "summary": {
+    "row_count": 24,
+    "mean_latency_improvement_ratio": 0.011539,
+    "median_latency_improvement_ratio": 0.015483,
+    "min_latency_improvement_ratio": -0.328325,
+    "max_latency_improvement_ratio": 0.160927,
+    "rows_ge_0_20": 0,
+    "all_rows_ge_0_20": false,
+    "quality_non_regression_all": true,
+    "fallback_legacy_rows": 0,
+    "fallback_legacy_present": false,
+    "all_c_rows_valid": true
+  },
+  "runs": [
+    {
+      "sample_size": 30,
+      "repeats": [
+        {
+          "repeat": 1,
+          "workdir": "/tmp/vec_iso_v2_s30_r1_20260303T113417Z",
+          "rows": [
+            {
+              "dataset": "squad_v2_dev",
+              "sample_size": 30,
+              "repeat": 1,
+              "workdir": "/tmp/vec_iso_v2_s30_r1_20260303T113417Z",
+              "b_p95_ms": 11.651456,
+              "c_p95_ms": 9.938954,
+              "latency_improvement_ratio": 0.146978,
+              "b_ndcg_at_10": 0.108444,
+              "c_ndcg_at_10": 0.108444,
+              "b_recall_at_10": 0.166667,
+              "c_recall_at_10": 0.166667,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            },
+            {
+              "dataset": "beir_nfcorpus",
+              "sample_size": 30,
+              "repeat": 1,
+              "workdir": "/tmp/vec_iso_v2_s30_r1_20260303T113417Z",
+              "b_p95_ms": 12.359511,
+              "c_p95_ms": 10.370536,
+              "latency_improvement_ratio": 0.160927,
+              "b_ndcg_at_10": 0.112895,
+              "c_ndcg_at_10": 0.112895,
+              "b_recall_at_10": 0.133333,
+              "c_recall_at_10": 0.133333,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            }
+          ]
+        },
+        {
+          "repeat": 2,
+          "workdir": "/tmp/vec_iso_v2_s30_r2_20260303T113426Z",
+          "rows": [
+            {
+              "dataset": "squad_v2_dev",
+              "sample_size": 30,
+              "repeat": 2,
+              "workdir": "/tmp/vec_iso_v2_s30_r2_20260303T113426Z",
+              "b_p95_ms": 11.088073,
+              "c_p95_ms": 12.947253,
+              "latency_improvement_ratio": -0.167674,
+              "b_ndcg_at_10": 0.108444,
+              "c_ndcg_at_10": 0.108444,
+              "b_recall_at_10": 0.166667,
+              "c_recall_at_10": 0.166667,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            },
+            {
+              "dataset": "beir_nfcorpus",
+              "sample_size": 30,
+              "repeat": 2,
+              "workdir": "/tmp/vec_iso_v2_s30_r2_20260303T113426Z",
+              "b_p95_ms": 11.834506,
+              "c_p95_ms": 13.50949,
+              "latency_improvement_ratio": -0.141534,
+              "b_ndcg_at_10": 0.112895,
+              "c_ndcg_at_10": 0.112895,
+              "b_recall_at_10": 0.133333,
+              "c_recall_at_10": 0.133333,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            }
+          ]
+        },
+        {
+          "repeat": 3,
+          "workdir": "/tmp/vec_iso_v2_s30_r3_20260303T113435Z",
+          "rows": [
+            {
+              "dataset": "squad_v2_dev",
+              "sample_size": 30,
+              "repeat": 3,
+              "workdir": "/tmp/vec_iso_v2_s30_r3_20260303T113435Z",
+              "b_p95_ms": 11.166994,
+              "c_p95_ms": 11.022421,
+              "latency_improvement_ratio": 0.012946,
+              "b_ndcg_at_10": 0.108444,
+              "c_ndcg_at_10": 0.108444,
+              "b_recall_at_10": 0.166667,
+              "c_recall_at_10": 0.166667,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            },
+            {
+              "dataset": "beir_nfcorpus",
+              "sample_size": 30,
+              "repeat": 3,
+              "workdir": "/tmp/vec_iso_v2_s30_r3_20260303T113435Z",
+              "b_p95_ms": 11.561294,
+              "c_p95_ms": 10.82545,
+              "latency_improvement_ratio": 0.063647,
+              "b_ndcg_at_10": 0.112895,
+              "c_ndcg_at_10": 0.112895,
+              "b_recall_at_10": 0.133333,
+              "c_recall_at_10": 0.133333,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sample_size": 60,
+      "repeats": [
+        {
+          "repeat": 1,
+          "workdir": "/tmp/vec_iso_v2_s60_r1_20260303T113444Z",
+          "rows": [
+            {
+              "dataset": "squad_v2_dev",
+              "sample_size": 60,
+              "repeat": 1,
+              "workdir": "/tmp/vec_iso_v2_s60_r1_20260303T113444Z",
+              "b_p95_ms": 10.73304,
+              "c_p95_ms": 14.256965,
+              "latency_improvement_ratio": -0.328325,
+              "b_ndcg_at_10": 0.105852,
+              "c_ndcg_at_10": 0.105852,
+              "b_recall_at_10": 0.166667,
+              "c_recall_at_10": 0.166667,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            },
+            {
+              "dataset": "beir_nfcorpus",
+              "sample_size": 60,
+              "repeat": 1,
+              "workdir": "/tmp/vec_iso_v2_s60_r1_20260303T113444Z",
+              "b_p95_ms": 11.741336,
+              "c_p95_ms": 11.874338,
+              "latency_improvement_ratio": -0.011328,
+              "b_ndcg_at_10": 0.067453,
+              "c_ndcg_at_10": 0.067453,
+              "b_recall_at_10": 0.1,
+              "c_recall_at_10": 0.1,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            }
+          ]
+        },
+        {
+          "repeat": 2,
+          "workdir": "/tmp/vec_iso_v2_s60_r2_20260303T113456Z",
+          "rows": [
+            {
+              "dataset": "squad_v2_dev",
+              "sample_size": 60,
+              "repeat": 2,
+              "workdir": "/tmp/vec_iso_v2_s60_r2_20260303T113456Z",
+              "b_p95_ms": 12.391017,
+              "c_p95_ms": 11.524373,
+              "latency_improvement_ratio": 0.069941,
+              "b_ndcg_at_10": 0.105852,
+              "c_ndcg_at_10": 0.105852,
+              "b_recall_at_10": 0.166667,
+              "c_recall_at_10": 0.166667,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            },
+            {
+              "dataset": "beir_nfcorpus",
+              "sample_size": 60,
+              "repeat": 2,
+              "workdir": "/tmp/vec_iso_v2_s60_r2_20260303T113456Z",
+              "b_p95_ms": 12.817942,
+              "c_p95_ms": 12.268939,
+              "latency_improvement_ratio": 0.042831,
+              "b_ndcg_at_10": 0.067453,
+              "c_ndcg_at_10": 0.067453,
+              "b_recall_at_10": 0.1,
+              "c_recall_at_10": 0.1,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            }
+          ]
+        },
+        {
+          "repeat": 3,
+          "workdir": "/tmp/vec_iso_v2_s60_r3_20260303T113508Z",
+          "rows": [
+            {
+              "dataset": "squad_v2_dev",
+              "sample_size": 60,
+              "repeat": 3,
+              "workdir": "/tmp/vec_iso_v2_s60_r3_20260303T113508Z",
+              "b_p95_ms": 11.570343,
+              "c_p95_ms": 10.057637,
+              "latency_improvement_ratio": 0.13074,
+              "b_ndcg_at_10": 0.105852,
+              "c_ndcg_at_10": 0.105852,
+              "b_recall_at_10": 0.166667,
+              "c_recall_at_10": 0.166667,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            },
+            {
+              "dataset": "beir_nfcorpus",
+              "sample_size": 60,
+              "repeat": 3,
+              "workdir": "/tmp/vec_iso_v2_s60_r3_20260303T113508Z",
+              "b_p95_ms": 10.781193,
+              "c_p95_ms": 10.684582,
+              "latency_improvement_ratio": 0.008961,
+              "b_ndcg_at_10": 0.067453,
+              "c_ndcg_at_10": 0.067453,
+              "b_recall_at_10": 0.1,
+              "c_recall_at_10": 0.1,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sample_size": 100,
+      "repeats": [
+        {
+          "repeat": 1,
+          "workdir": "/tmp/vec_iso_v2_s100_r1_20260303T113519Z",
+          "rows": [
+            {
+              "dataset": "squad_v2_dev",
+              "sample_size": 100,
+              "repeat": 1,
+              "workdir": "/tmp/vec_iso_v2_s100_r1_20260303T113519Z",
+              "b_p95_ms": 11.579014,
+              "c_p95_ms": 10.501634,
+              "latency_improvement_ratio": 0.093046,
+              "b_ndcg_at_10": 0.173901,
+              "c_ndcg_at_10": 0.173901,
+              "b_recall_at_10": 0.23,
+              "c_recall_at_10": 0.23,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            },
+            {
+              "dataset": "beir_nfcorpus",
+              "sample_size": 100,
+              "repeat": 1,
+              "workdir": "/tmp/vec_iso_v2_s100_r1_20260303T113519Z",
+              "b_p95_ms": 11.399804,
+              "c_p95_ms": 11.147586,
+              "latency_improvement_ratio": 0.022125,
+              "b_ndcg_at_10": 0.009464,
+              "c_ndcg_at_10": 0.009464,
+              "b_recall_at_10": 0.02,
+              "c_recall_at_10": 0.02,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            }
+          ]
+        },
+        {
+          "repeat": 2,
+          "workdir": "/tmp/vec_iso_v2_s100_r2_20260303T113534Z",
+          "rows": [
+            {
+              "dataset": "squad_v2_dev",
+              "sample_size": 100,
+              "repeat": 2,
+              "workdir": "/tmp/vec_iso_v2_s100_r2_20260303T113534Z",
+              "b_p95_ms": 11.154154,
+              "c_p95_ms": 11.649077,
+              "latency_improvement_ratio": -0.044371,
+              "b_ndcg_at_10": 0.173901,
+              "c_ndcg_at_10": 0.173901,
+              "b_recall_at_10": 0.23,
+              "c_recall_at_10": 0.23,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            },
+            {
+              "dataset": "beir_nfcorpus",
+              "sample_size": 100,
+              "repeat": 2,
+              "workdir": "/tmp/vec_iso_v2_s100_r2_20260303T113534Z",
+              "b_p95_ms": 11.429524,
+              "c_p95_ms": 11.223567,
+              "latency_improvement_ratio": 0.01802,
+              "b_ndcg_at_10": 0.009464,
+              "c_ndcg_at_10": 0.009464,
+              "b_recall_at_10": 0.02,
+              "c_recall_at_10": 0.02,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            }
+          ]
+        },
+        {
+          "repeat": 3,
+          "workdir": "/tmp/vec_iso_v2_s100_r3_20260303T113549Z",
+          "rows": [
+            {
+              "dataset": "squad_v2_dev",
+              "sample_size": 100,
+              "repeat": 3,
+              "workdir": "/tmp/vec_iso_v2_s100_r3_20260303T113549Z",
+              "b_p95_ms": 12.284219,
+              "c_p95_ms": 10.861359,
+              "latency_improvement_ratio": 0.115828,
+              "b_ndcg_at_10": 0.173901,
+              "c_ndcg_at_10": 0.173901,
+              "b_recall_at_10": 0.23,
+              "c_recall_at_10": 0.23,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            },
+            {
+              "dataset": "beir_nfcorpus",
+              "sample_size": 100,
+              "repeat": 3,
+              "workdir": "/tmp/vec_iso_v2_s100_r3_20260303T113549Z",
+              "b_p95_ms": 11.439937,
+              "c_p95_ms": 11.294481,
+              "latency_improvement_ratio": 0.012715,
+              "b_ndcg_at_10": 0.009464,
+              "c_ndcg_at_10": 0.009464,
+              "b_recall_at_10": 0.02,
+              "c_recall_at_10": 0.02,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sample_size": 120,
+      "repeats": [
+        {
+          "repeat": 1,
+          "workdir": "/tmp/vec_iso_v2_s120_r1_20260303T113604Z",
+          "rows": [
+            {
+              "dataset": "squad_v2_dev",
+              "sample_size": 120,
+              "repeat": 1,
+              "workdir": "/tmp/vec_iso_v2_s120_r1_20260303T113604Z",
+              "b_p95_ms": 11.616275,
+              "c_p95_ms": 10.429229,
+              "latency_improvement_ratio": 0.102188,
+              "b_ndcg_at_10": 0.139955,
+              "c_ndcg_at_10": 0.139955,
+              "b_recall_at_10": 0.2,
+              "c_recall_at_10": 0.2,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            },
+            {
+              "dataset": "beir_nfcorpus",
+              "sample_size": 120,
+              "repeat": 1,
+              "workdir": "/tmp/vec_iso_v2_s120_r1_20260303T113604Z",
+              "b_p95_ms": 11.609514,
+              "c_p95_ms": 11.790185,
+              "latency_improvement_ratio": -0.015562,
+              "b_ndcg_at_10": 0.033226,
+              "c_ndcg_at_10": 0.033226,
+              "b_recall_at_10": 0.041667,
+              "c_recall_at_10": 0.041667,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            }
+          ]
+        },
+        {
+          "repeat": 2,
+          "workdir": "/tmp/vec_iso_v2_s120_r2_20260303T113621Z",
+          "rows": [
+            {
+              "dataset": "squad_v2_dev",
+              "sample_size": 120,
+              "repeat": 2,
+              "workdir": "/tmp/vec_iso_v2_s120_r2_20260303T113621Z",
+              "b_p95_ms": 10.364052,
+              "c_p95_ms": 10.404127,
+              "latency_improvement_ratio": -0.003867,
+              "b_ndcg_at_10": 0.139955,
+              "c_ndcg_at_10": 0.139955,
+              "b_recall_at_10": 0.2,
+              "c_recall_at_10": 0.2,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            },
+            {
+              "dataset": "beir_nfcorpus",
+              "sample_size": 120,
+              "repeat": 2,
+              "workdir": "/tmp/vec_iso_v2_s120_r2_20260303T113621Z",
+              "b_p95_ms": 11.623329,
+              "c_p95_ms": 11.655471,
+              "latency_improvement_ratio": -0.002765,
+              "b_ndcg_at_10": 0.033226,
+              "c_ndcg_at_10": 0.033226,
+              "b_recall_at_10": 0.041667,
+              "c_recall_at_10": 0.041667,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            }
+          ]
+        },
+        {
+          "repeat": 3,
+          "workdir": "/tmp/vec_iso_v2_s120_r3_20260303T113638Z",
+          "rows": [
+            {
+              "dataset": "squad_v2_dev",
+              "sample_size": 120,
+              "repeat": 3,
+              "workdir": "/tmp/vec_iso_v2_s120_r3_20260303T113638Z",
+              "b_p95_ms": 11.989704,
+              "c_p95_ms": 12.495648,
+              "latency_improvement_ratio": -0.042198,
+              "b_ndcg_at_10": 0.139955,
+              "c_ndcg_at_10": 0.139955,
+              "b_recall_at_10": 0.2,
+              "c_recall_at_10": 0.2,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            },
+            {
+              "dataset": "beir_nfcorpus",
+              "sample_size": 120,
+              "repeat": 3,
+              "workdir": "/tmp/vec_iso_v2_s120_r3_20260303T113638Z",
+              "b_p95_ms": 13.484102,
+              "c_p95_ms": 13.030088,
+              "latency_improvement_ratio": 0.03367,
+              "b_ndcg_at_10": 0.033226,
+              "c_ndcg_at_10": 0.033226,
+              "b_recall_at_10": 0.041667,
+              "c_recall_at_10": 0.041667,
+              "quality_non_regression": true,
+              "c_degrade_reasons": [],
+              "c_valid": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

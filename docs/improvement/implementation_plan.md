@@ -210,15 +210,17 @@
 2. **#4 层级继承**：`read_memory` 增 `include_ancestors` 可选参数，默认 `false`。
 3. **#14 意图 LLM（实验）**：加入 `INTENT_LLM_ENABLED` 实验开关，失败回退关键词规则。
 4. **`SM-2/SM-3`**：补齐短期记忆晋升元数据与 session-first 可观测指标。
-5. **C/D 联调口径（临时）**：开发测试阶段，`profile_c/profile_d` 的 benchmark 可临时走 `RETRIEVAL_EMBEDDING_BACKEND=api`（不走 `router`），并显式配置 `RETRIEVAL_EMBEDDING_*` 与 `RETRIEVAL_RERANKER_*`；该约定仅用于本地联调，最终交付前需按部署模板口径回切并复验。
-6. **本地联调覆盖来源（记录）**：`new/run_post_change_checks.sh` 对 `--docker-profile c|d` 默认为 `--runtime-env-mode none`（不加载本地 runtime 覆盖）；仅在显式传入 `--runtime-env-mode auto`（自动探测本地 `.env`）或 `--runtime-env-mode file --runtime-env-file <path>` 时才注入 runtime 覆盖。该行为仅用于开发验证，不改变 `deploy/profiles/*` 的默认模板。
+5. **C/D 联调口径（临时）**：本地开发若 router 侧暂未提供 embedding/reranker/llm，可在保持模板 `router` 路径不变的前提下，使用 `--runtime-env-mode none --allow-runtime-env-injection --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env` 注入 API 地址/密钥/模型字段；其中 embedding/reranker 与 LLM（`gpt-5.2`）均按该文件口径执行。该约定仅用于本地联调，不改变模板策略键。
+6. **本地联调覆盖来源（记录）**：`new/run_post_change_checks.sh` 对 `--docker-profile c|d` 默认为 `--runtime-env-mode none`（不自动加载本地 runtime 覆盖）；仅在显式传入 `--runtime-env-mode auto|file`，或显式开启 `--allow-runtime-env-injection`（可选叠加 `--runtime-env-file`）时才注入覆盖。注入范围仅限 API/密钥/模型字段，不覆盖 `RETRIEVAL_EMBEDDING_BACKEND` 等模板策略键。
+7. **上线与降级口径**：客户环境默认仍走 `router`；若 router 侧缺失 embedding/reranker/llm，系统应走既有 fallback 链路避免直接报错。客户环境建议执行一次默认模板链路复验；当前本地联调阶段不作为阻断项。
 
 验收：
 1. 默认配置下行为与当前版本一致。
 2. 开启实验开关后，有明确 A/B 指标和 degrade reason。
 3. 不改变“长期层是唯一权威存储”的架构边界。
 4. 若本轮使用过 C/D `api` 联调口径，发布前必须执行一次“回切检查”：确认 `deploy/profiles/*/profile-c.env` 与 `profile-d.env` 仍保持 `router` 默认，并重新执行 `--docker-profile c|d` 烟测。
-5. 上线前复验必须在“未加载本地 runtime 覆盖”的环境执行，避免把开发机私有 API 配置带入交付判定。
+5. 上线前复验建议在“未加载本地 runtime 覆盖”的环境执行，避免把开发机私有 API 配置带入交付判定。
+6. 对于 C/D，本地联调可使用 `clawmemo/nocturne_memory/.env` 注入；release 结论以客户环境 router 配置复验为准，`runtime-env-mode none` 纯模板复验为建议项，当前本地联调阶段不作为阻断。
 
 ---
 
@@ -234,6 +236,15 @@
 Go/No-Go 标准：
 1. 无法证明收益显著且回滚简单时，保持 `HOLD`。
 2. 不满足安全基线时，不进入开发阶段。
+
+### Phase D 量化证据更新（2026-03-03）
+
+1. `#11`：`query_count=300`、`embedding_success_rate=1.0`、`embedding_fallback_hash_rate=0.0`、`search_degraded_rate=0.0`（`backend/tests/benchmark/phase_d_spike_metrics.json -> hold_gate.gate_11`）。
+2. `#11`：`profile c/d` 在 `runtime-env-mode none + allow-runtime-env-injection + runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env` 下 smoke gate 通过（`Run 20260303T084919Z-pid86255-r6189`、`Run 20260303T084940Z-pid87262-r24303`）。
+3. `#12`：`extension_ready=true`、`no_new_500_proxy=true`、`quality_non_regression_gate=true`、`latency_improvement_gate=false`（`latency_improvement_ratio_mean=0.0`，阈值 `>=0.20`），`overall_pass=false`（`backend/tests/benchmark/phase_d_spike_metrics.json -> hold_gate.gate_12`）。
+4. `#13`：`wal_failed_tx=0`、`wal_failure_rate=0.0`、`persistence_gap=0`、`retry_rate_p95=0.001818`、`wal_vs_delete_tps_ratio=4.145`（`backend/tests/benchmark/phase_d_spike_metrics.json -> hold_gate.gate_13`）。
+5. 当前判定：`#11/#13` 本地量化证据已补齐且达标；`#12` 已补齐专用门禁证据，但 `latency_improvement_gate` 未达阈值，继续保持 `HOLD`（default-off）。
+6. `#12` 后续改造与复验口径统一参考：`docs/improvement/sqlite_vec_native_topk_test_guidance.md`（vec-native topK 设计边界、测试口径与判定标准）。
 
 ---
 

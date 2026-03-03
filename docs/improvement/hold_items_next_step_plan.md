@@ -176,6 +176,7 @@
 1. 先 capability 探测，再双写，再按比例灰度读切换。
 2. 默认仍走 legacy 引擎；vec 仅受控开启。
 3. 必须具备一键回切 legacy 的路径。
+4. 后续实现与测试口径统一参考：`docs/improvement/sqlite_vec_native_topk_test_guidance.md`（vec-native topK 路径、非偏离边界、复验指标与命令）。
 
 建议新增配置（默认关闭）：
 
@@ -248,6 +249,15 @@ bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse -
 bash new/run_post_change_checks.sh --with-docker --docker-profile d --skip-sse --runtime-env-mode none
 ```
 
+本地 C/D 联调（router 未提供 embedding/reranker/llm）：
+
+```bash
+bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse --runtime-env-mode none --allow-runtime-env-injection --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env
+bash new/run_post_change_checks.sh --with-docker --docker-profile d --skip-sse --runtime-env-mode none --allow-runtime-env-injection --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env
+```
+
+说明：上述本地联调口径使用该 `.env` 中的 embedding/reranker 与 LLM（`gpt-5.2`）字段；注入仅覆盖 API/密钥/模型键，不覆盖 `RETRIEVAL_EMBEDDING_BACKEND=router` 等模板策略键。
+
 ## 5.3 Full Gate（发布前）
 
 ```bash
@@ -267,7 +277,11 @@ cd Memory-Palace/backend && .venv/bin/pytest tests/benchmark -q -k "profile_a or
 
 1. 任一阻断项失败必须先修复再继续。
 2. `C/D` 发布前必须回切模板默认（`router`）并复验。
-3. 本地联调若需显式注入 runtime 覆盖，使用 `--runtime-env-mode auto` 或 `--runtime-env-mode file --runtime-env-file <abs_path>`，不得用于发布判定。
+3. 本地联调若 router 缺模型，优先使用 `--runtime-env-mode none --allow-runtime-env-injection --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env`；`auto/file` 仅用于排障验证。
+4. 线上发布判定仍以客户环境 router 配置复验为准，不使用开发机私有覆盖文件；若 router 侧缺 embedding/reranker/llm，系统按既有 fallback 链路降级，避免直接报错。
+5. 本地 C/D 当前使用 `/Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env` 提供 embedding/reranker 与 LLM（`gpt-5.2`）注入口径；该口径仅用于开发环境对齐，不改变发布模板。
+6. 若 `tests/benchmark/run_profile_abcd_real.py` 在默认缓存目录触发 `sqlite disk I/O error`，使用 `--workdir /tmp/<run-id>` 规避文件系统限制（已在 runner 支持）。
+7. `--runtime-env-mode none` 且不附加注入参数的 pure-template 复验在客户环境仍建议执行；当前本地联调阶段不作为阻断项。
 
 ---
 
@@ -295,6 +309,31 @@ cd Memory-Palace/backend && .venv/bin/pytest tests/benchmark -q -k "profile_a or
 3. `persistence_gap == 0`
 4. `retry_rate_p95 <= 0.01`
 5. `wal_vs_delete_tps_ratio >= 1.10`（peak）
+
+## 6.4 最新量化证据（2026-03-03，补齐 #11/#12 专项字段）
+
+1. `#11`（来源：`backend/tests/benchmark/phase_d_spike_metrics.json -> hold_gate.gate_11`）  
+   - `query_count=300`  
+   - `embedding_success_rate=1.0`  
+   - `embedding_fallback_hash_rate=0.0`  
+   - `search_degraded_rate=0.0`  
+   - `overall_pass=true`
+2. `#12`（来源：`backend/tests/benchmark/phase_d_spike_metrics.json -> hold_gate.gate_12`）  
+   - `extension_ready=true`  
+   - `no_new_500_proxy=true`  
+   - `quality_non_regression_gate=true`  
+   - `latency_improvement_gate=false`（`latency_improvement_ratio_mean=0.0`，阈值 `>=0.20`）  
+   - `overall_pass=false`（专用门禁已补齐，当前结果未达性能阈值）
+3. `#13`（来源：`backend/tests/benchmark/phase_d_spike_metrics.json`）  
+   - `wal_failed_tx=0`  
+   - `wal_failure_rate=0.0`  
+   - `persistence_gap=0`  
+   - `retry_rate_p95=0.001818`  
+   - `wal_vs_delete_tps_ratio=4.145`
+4. 阈值结论  
+   - `#11`：`embedding_success_rate`、`embedding_fallback_hash_rate`、`degraded_rate` 均已量化且达标。  
+   - `#12`：vec 专用性能/质量门禁已补齐；当前 `latency_improvement_gate` 未达标，继续保持 `HOLD`。  
+   - `#13`：当前量化门槛全部达标。
 
 ---
 

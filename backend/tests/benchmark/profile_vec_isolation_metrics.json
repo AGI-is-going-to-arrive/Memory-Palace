@@ -1,0 +1,99 @@
+{
+  "generated_at_utc": "2026-03-03T11:22:08+00:00",
+  "mode": "vec_isolation_hash_backend",
+  "runs": [
+    {
+      "sample_size": 10,
+      "rows": [
+        {
+          "dataset": "squad_v2_dev",
+          "sample_size": 10,
+          "legacy_profile": "profile_b(hash,vec_off)",
+          "vec_profile": "profile_c(hash,vec_on)",
+          "b_p95_ms": 7.843341,
+          "c_p95_ms": 8.584289,
+          "latency_improvement_ratio": -0.094468,
+          "b_ndcg_at_10": 0.181753,
+          "c_ndcg_at_10": 0.181753,
+          "b_recall_at_10": 0.3,
+          "c_recall_at_10": 0.3
+        },
+        {
+          "dataset": "beir_nfcorpus",
+          "sample_size": 10,
+          "legacy_profile": "profile_b(hash,vec_off)",
+          "vec_profile": "profile_c(hash,vec_on)",
+          "b_p95_ms": 9.957264,
+          "c_p95_ms": 10.936744,
+          "latency_improvement_ratio": -0.098368,
+          "b_ndcg_at_10": 0.4,
+          "c_ndcg_at_10": 0.4,
+          "b_recall_at_10": 0.5,
+          "c_recall_at_10": 0.5
+        }
+      ]
+    },
+    {
+      "sample_size": 30,
+      "rows": [
+        {
+          "dataset": "squad_v2_dev",
+          "sample_size": 30,
+          "legacy_profile": "profile_b(hash,vec_off)",
+          "vec_profile": "profile_c(hash,vec_on)",
+          "b_p95_ms": 9.333869,
+          "c_p95_ms": 9.069239,
+          "latency_improvement_ratio": 0.028352,
+          "b_ndcg_at_10": 0.25851,
+          "c_ndcg_at_10": 0.25851,
+          "b_recall_at_10": 0.4,
+          "c_recall_at_10": 0.4
+        },
+        {
+          "dataset": "beir_nfcorpus",
+          "sample_size": 30,
+          "legacy_profile": "profile_b(hash,vec_off)",
+          "vec_profile": "profile_c(hash,vec_on)",
+          "b_p95_ms": 10.389402,
+          "c_p95_ms": 10.521525,
+          "latency_improvement_ratio": -0.012717,
+          "b_ndcg_at_10": 0.111874,
+          "c_ndcg_at_10": 0.111874,
+          "b_recall_at_10": 0.133333,
+          "c_recall_at_10": 0.133333
+        }
+      ]
+    },
+    {
+      "sample_size": 60,
+      "rows": [
+        {
+          "dataset": "squad_v2_dev",
+          "sample_size": 60,
+          "legacy_profile": "profile_b(hash,vec_off)",
+          "vec_profile": "profile_c(hash,vec_on)",
+          "b_p95_ms": 10.34704,
+          "c_p95_ms": 10.870289,
+          "latency_improvement_ratio": -0.05057,
+          "b_ndcg_at_10": 0.332466,
+          "c_ndcg_at_10": 0.332466,
+          "b_recall_at_10": 0.5,
+          "c_recall_at_10": 0.5
+        },
+        {
+          "dataset": "beir_nfcorpus",
+          "sample_size": 60,
+          "legacy_profile": "profile_b(hash,vec_off)",
+          "vec_profile": "profile_c(hash,vec_on)",
+          "b_p95_ms": 11.836998,
+          "c_p95_ms": 11.522215,
+          "latency_improvement_ratio": 0.026593,
+          "b_ndcg_at_10": 0.105396,
+          "c_ndcg_at_10": 0.105396,
+          "b_recall_at_10": 0.166667,
+          "c_recall_at_10": 0.166667
+        }
+      ]
+    }
+  ]
+}
