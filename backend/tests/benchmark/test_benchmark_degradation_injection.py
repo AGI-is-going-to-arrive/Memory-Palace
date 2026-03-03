@@ -111,6 +111,9 @@ class _FailingCompactContextClient(_FailingGistClient):
         _ = domain
         return None
 
+    async def write_guard(self, **_: Any) -> Dict[str, Any]:
+        return {"action": "ADD", "method": "keyword", "reason": "ok"}
+
     async def create_memory(self, **kwargs: Any) -> Dict[str, Any]:
         self.created_payload = dict(kwargs)
         return {

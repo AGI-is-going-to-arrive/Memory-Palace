@@ -158,13 +158,20 @@ bash scripts/docker_one_click.sh --profile b
 
 # Windows PowerShell
 .\scripts\docker_one_click.ps1 -Profile b
+
+# 若需把当前进程中的运行时 API 密钥/地址注入 .env.docker（例如 profile c/d）
+# 需显式开启注入开关（默认关闭）：
+bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
+# 或
+.\scripts\docker_one_click.ps1 -Profile c -AllowRuntimeEnvInjection
 ```
 
 > 脚本会自动执行以下步骤：
 >
 > 1. 调用 Profile 脚本生成 `.env.docker` 配置文件（macOS/Linux: `apply_profile.sh`；Windows: `apply_profile.ps1`）
-> 2. 检测端口占用并自动寻找可用端口
-> 3. 通过 `docker compose` 构建并启动容器
+> 2. 默认不读取当前进程环境变量覆盖模板策略键（避免隐式改档）；仅在显式开启注入开关时注入 API 地址/密钥/模型字段
+> 3. 检测端口占用并自动寻找可用端口
+> 4. 通过 `docker compose` 构建并启动容器
 
 默认访问地址：
 

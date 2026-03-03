@@ -82,7 +82,7 @@ Write Guard 的决策方法可能包括 `llm`、`embedding`、`keyword`、`fallb
 **功能：** 按 URI 读取记忆内容。
 
 **函数签名：**
-<!-- 源码位置: backend/mcp_server.py:1564-1832 -->
+<!-- 源码位置: backend/mcp_server.py -->
 ```python
 read_memory(
     uri: str,                       # 必填，记忆 URI
@@ -136,7 +136,7 @@ read_memory("core://agent", range="0:500")
 **功能：** 在父 URI 下创建一条新记忆。
 
 **函数签名：**
-<!-- 源码位置: backend/mcp_server.py:1835-2015 -->
+<!-- 源码位置: backend/mcp_server.py -->
 ```python
 create_memory(
     parent_uri: str,              # 必填，父 URI（如 "core://agent"）
@@ -185,7 +185,7 @@ create_memory(
 **功能：** 更新已有记忆的内容或元数据。
 
 **函数签名：**
-<!-- 源码位置: backend/mcp_server.py:2017-2383 -->
+<!-- 源码位置: backend/mcp_server.py -->
 ```python
 update_memory(
     uri: str,                          # 必填，目标 URI
@@ -234,7 +234,7 @@ update_memory("core://agent/my_user", priority=5)
 **功能：** 删除指定 URI 路径。
 
 **函数签名：**
-<!-- 源码位置: backend/mcp_server.py:2385-2446 -->
+<!-- 源码位置: backend/mcp_server.py -->
 ```python
 delete_memory(
     uri: str  # 必填，要删除的 URI
@@ -262,7 +262,7 @@ delete_memory("core://agent/old_note")
 **功能：** 为同一条记忆添加别名 URI，提升可达性。
 
 **函数签名：**
-<!-- 源码位置: backend/mcp_server.py:2448-2516 -->
+<!-- 源码位置: backend/mcp_server.py -->
 ```python
 add_alias(
     new_uri: str,                       # 必填，新的别名 URI
@@ -294,7 +294,7 @@ add_alias(
 **功能：** 通过关键词、语义或混合模式检索记忆。
 
 **函数签名：**
-<!-- 源码位置: backend/mcp_server.py:2518-2845 -->
+<!-- 源码位置: backend/mcp_server.py -->
 ```python
 search_memory(
     query: str,                                  # 必填，搜索关键词
@@ -360,7 +360,7 @@ search_memory(
 **功能：** 将当前会话上下文压缩为持久化记忆摘要。
 
 **函数签名：**
-<!-- 源码位置: backend/mcp_server.py:2847-2901 -->
+<!-- 源码位置: backend/mcp_server.py -->
 ```python
 compact_context(
     reason: str = "manual",  # 可选，压缩原因标签
@@ -410,7 +410,7 @@ compact_context(reason="long_session", force=True, max_lines=8)
 **功能：** 触发检索索引重建或 sleep-time 整合任务。
 
 **函数签名：**
-<!-- 源码位置: backend/mcp_server.py:2903-3047 -->
+<!-- 源码位置: backend/mcp_server.py -->
 ```python
 rebuild_index(
     memory_id: Optional[int] = None,     # 可选，目标记忆 ID（省略则重建全量）
@@ -464,7 +464,7 @@ rebuild_index(sleep_consolidation=True, wait=True)
 **功能：** 查询检索索引可用性、统计信息和运行时状态。
 
 **函数签名：**
-<!-- 源码位置: backend/mcp_server.py:3049-3087 -->
+<!-- 源码位置: backend/mcp_server.py -->
 ```python
 index_status()  # 无参数
 ```

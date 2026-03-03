@@ -160,7 +160,24 @@ def test_external_import_execute_and_rollback_restores_snapshot(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     client_stub = _ImportClientStub()
+    write_lane_calls: list[Dict[str, str]] = []
+
+    async def _run_write_lane_stub(*, session_id, operation, task):
+        write_lane_calls.append(
+            {
+                "session_id": str(session_id or ""),
+                "operation": str(operation or ""),
+            }
+        )
+        return await task()
+
     monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: client_stub)
+    monkeypatch.setattr(maintenance_api, "ENABLE_WRITE_LANE_QUEUE", True)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.write_lanes,
+        "run_write",
+        _run_write_lane_stub,
+    )
     monkeypatch.setenv("MCP_API_KEY", "import-secret")
     monkeypatch.setenv("EXTERNAL_IMPORT_ENABLED", "true")
     monkeypatch.setenv("EXTERNAL_IMPORT_ALLOWED_ROOTS", str(tmp_path))
@@ -208,6 +225,11 @@ def test_external_import_execute_and_rollback_restores_snapshot(
 
     after_rollback_counts = client_stub.counts()
     assert after_rollback_counts == before_counts
+    assert [item["operation"] for item in write_lane_calls] == [
+        "maintenance.import.execute.create_memory",
+        "maintenance.import.rollback.delete_memory",
+    ]
+    assert all(item["session_id"] == "session-1" for item in write_lane_calls)
 
 
 def test_external_import_job_status_recovers_from_runtime_meta_after_memory_reset(
@@ -649,6 +671,17 @@ def test_explicit_learn_failed_job_can_rollback_namespace_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client_stub = _ImportClientStub()
+    write_lane_calls: list[Dict[str, str]] = []
+
+    async def _run_write_lane_stub(*, session_id, operation, task):
+        write_lane_calls.append(
+            {
+                "session_id": str(session_id or ""),
+                "operation": str(operation or ""),
+            }
+        )
+        return await task()
+
     # Seed namespace nodes that simulate a failed execute after namespace creation.
     client_stub.memories[1] = {"content": "ns-root", "domain": "notes", "path": "corrections"}
     client_stub.paths[("notes", "corrections")] = 1
@@ -661,6 +694,12 @@ def test_explicit_learn_failed_job_can_rollback_namespace_only(
     client_stub._next_id = 3
 
     monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: client_stub)
+    monkeypatch.setattr(maintenance_api, "ENABLE_WRITE_LANE_QUEUE", True)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.write_lanes,
+        "run_write",
+        _run_write_lane_stub,
+    )
     monkeypatch.setenv("MCP_API_KEY", "import-secret")
     headers = {"X-MCP-API-Key": "import-secret"}
 
@@ -722,6 +761,13 @@ def test_explicit_learn_failed_job_can_rollback_namespace_only(
     assert ("notes", "corrections/failed-session") not in client_stub.paths
     assert 1 not in client_stub.memories
     assert 2 not in client_stub.memories
+    assert [item["operation"] for item in write_lane_calls] == [
+        "maintenance.learn.rollback.remove_path",
+        "maintenance.learn.rollback.delete_memory",
+        "maintenance.learn.rollback.remove_path",
+        "maintenance.learn.rollback.delete_memory",
+    ]
+    assert all(item["session_id"] == "failed-session" for item in write_lane_calls)
 
 
 def test_learn_trigger_does_not_evict_import_jobs_after_pool_split(

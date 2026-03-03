@@ -111,6 +111,25 @@ def test_rollback_endpoint_returns_5xx_when_internal_error_occurs(
     assert "Rollback failed: boom" in str(response.json().get("detail"))
 
 
+def test_diff_endpoint_rejects_invalid_session_id_with_400(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MCP_API_KEY", "review-test-secret")
+    monkeypatch.delenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", raising=False)
+
+    app = FastAPI()
+    app.include_router(review_api.router)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/review/sessions/abc%5Cdef/diff/core%3A%2F%2Fmemory-palace",
+            headers={"X-MCP-API-Key": "review-test-secret"},
+        )
+
+    assert response.status_code == 400
+    assert "Invalid session_id" in str(response.json().get("detail"))
+
+
 def test_snapshot_manager_rejects_traversal_session_id(tmp_path: Path) -> None:
     manager = SnapshotManager(str(tmp_path / "snapshots"))
     with pytest.raises(ValueError):

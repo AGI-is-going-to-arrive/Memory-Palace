@@ -60,6 +60,7 @@ function ReviewPage() {
   const loadSessions = async () => {
     try {
       const list = await getSessions();
+      setDiffError(null);
       setSessions(list);
       // Logic to auto-select or maintain selection
       if (currentSessionId && !list.find(s => s.session_id === currentSessionId)) {
@@ -70,7 +71,7 @@ function ReviewPage() {
         setCurrentSessionId(list[0].session_id);
       }
     } catch (err) {
-      setDiffError("Disconnected from Neural Core (Backend offline).");
+      setDiffError(extractApiError(err, 'Failed to load review sessions.'));
     }
   };
 
@@ -84,6 +85,7 @@ function ReviewPage() {
   const loadSnapshots = async (sessionId) => {
     const requestId = ++snapshotsRequestRef.current;
     setLoading(true);
+    setDiffError(null);
     try {
       const list = await getSnapshots(sessionId);
       if (requestId !== snapshotsRequestRef.current) return;
@@ -99,6 +101,7 @@ function ReviewPage() {
         setSnapshots([]);
         setSelectedSnapshot(null);
         setDiffData(null);
+        setDiffError(null);
         return;
       }
       setSnapshots([]);
@@ -145,10 +148,21 @@ function ReviewPage() {
       if (!rollbackResult?.success) {
         throw new Error(rollbackResult?.message || 'Rollback failed.');
       }
-      // Approving after rollback to clear it from the queue, logically "Processing" the rejection
-      await approveSnapshot(currentSessionId, selectedSnapshot.resource_id); 
+      // Rollback and snapshot cleanup are split calls; surface partial success explicitly.
+      let cleanupError = null;
+      try {
+        await approveSnapshot(currentSessionId, selectedSnapshot.resource_id);
+      } catch (err) {
+        cleanupError = err;
+      }
       await loadSnapshots(currentSessionId);
       await loadSessions();
+      if (cleanupError) {
+        alert(
+          "Rollback succeeded but snapshot cleanup failed: "
+            + extractApiError(cleanupError, cleanupError?.message || 'Approve request failed.')
+        );
+      }
     } catch (err) {
       alert("Rejection failed: " + extractApiError(err, err?.message || 'Rollback request failed.'));
     } finally {
@@ -480,6 +494,7 @@ function ReviewPage() {
            <div className="flex-1 flex flex-col items-center justify-center text-rose-500 gap-4">
              <Activity size={48} className="opacity-20" />
              <p className="text-sm font-medium opacity-50">Connection Lost</p>
+             <p className="max-w-md px-6 text-center text-xs text-rose-400/80">{diffError}</p>
            </div>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-stone-700 gap-6 select-none">

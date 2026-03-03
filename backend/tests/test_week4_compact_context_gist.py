@@ -41,6 +41,9 @@ class _FakeCompactClient:
         self.gist_payload: Dict[str, Any] = {}
         self.memory_id = 41
 
+    async def write_guard(self, **_: Any) -> Dict[str, Any]:
+        return {"action": "ADD", "method": "keyword", "reason": "ok"}
+
     async def create_memory(self, **kwargs: Any) -> Dict[str, Any]:
         self.created_payload = dict(kwargs)
         return {
@@ -205,6 +208,73 @@ async def test_compact_context_falls_back_with_degrade_reasons_when_llm_errors(
     assert payload["gist_method"] == "extractive_bullets"
     assert "degrade_reasons" in payload
     assert "compact_gist_llm_exception:RuntimeError" in payload["degrade_reasons"]
+
+
+@pytest.mark.asyncio
+async def test_compact_context_write_guard_exception_is_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _GuardFailClient(_FakeCompactClient):
+        async def write_guard(self, **_: Any) -> Dict[str, Any]:
+            raise RuntimeError("guard unavailable")
+
+    fake_client = _GuardFailClient()
+    fake_tracker = _FakeFlushTracker(
+        "Session compaction notes:\n- keep pending until guard recovers"
+    )
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(mcp_server.runtime_state, "flush_tracker", fake_tracker)
+    monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
+    monkeypatch.setattr(mcp_server, "_should_defer_index_on_write", _false_async)
+    monkeypatch.setattr(mcp_server, "_run_write_lane", _run_write_inline)
+    mcp_server._AUTO_FLUSH_IN_PROGRESS.clear()
+
+    raw = await mcp_server.compact_context(reason="unit_test", force=True, max_lines=5)
+    payload = json.loads(raw)
+
+    assert payload["ok"] is True
+    assert payload["flushed"] is False
+    assert payload["reason"] == "write_guard_blocked"
+    assert payload["guard_action"] == "NOOP"
+    assert payload["guard_method"] == "exception"
+    assert fake_client.created_payload == {}
+    assert fake_tracker.marked is False
+
+
+@pytest.mark.asyncio
+async def test_compact_context_write_guard_noop_marks_pending_flushed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _GuardNoopClient(_FakeCompactClient):
+        async def write_guard(self, **_: Any) -> Dict[str, Any]:
+            return {
+                "action": "NOOP",
+                "method": "embedding",
+                "reason": "duplicate_flush_summary",
+                "target_uri": "notes://agent/auto_flush_existing",
+            }
+
+    fake_client = _GuardNoopClient()
+    fake_tracker = _FakeFlushTracker(
+        "Session compaction notes:\n- summary already exists and should dedupe"
+    )
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(mcp_server.runtime_state, "flush_tracker", fake_tracker)
+    monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
+    monkeypatch.setattr(mcp_server, "_should_defer_index_on_write", _false_async)
+    monkeypatch.setattr(mcp_server, "_run_write_lane", _run_write_inline)
+    mcp_server._AUTO_FLUSH_IN_PROGRESS.clear()
+
+    raw = await mcp_server.compact_context(reason="unit_test", force=True, max_lines=5)
+    payload = json.loads(raw)
+
+    assert payload["ok"] is True
+    assert payload["flushed"] is True
+    assert payload["reason"] == "write_guard_deduped"
+    assert payload["guard_action"] == "NOOP"
+    assert payload["uri"] == "notes://agent/auto_flush_existing"
+    assert fake_client.created_payload == {}
+    assert fake_tracker.marked is True
 
 
 @pytest.mark.asyncio

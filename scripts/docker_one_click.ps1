@@ -8,7 +8,9 @@ param(
 
     [switch]$NoAutoPort,
 
-    [switch]$NoBuild
+    [switch]$NoBuild,
+
+    [switch]$AllowRuntimeEnvInjection
 )
 
 $ErrorActionPreference = 'Stop'
@@ -164,11 +166,9 @@ function Apply-ProfileRuntimeOverrides {
         'ROUTER_API_BASE',
         'ROUTER_API_KEY',
         'ROUTER_EMBEDDING_MODEL',
-        'RETRIEVAL_EMBEDDING_BACKEND',
         'RETRIEVAL_EMBEDDING_API_BASE',
         'RETRIEVAL_EMBEDDING_API_KEY',
         'RETRIEVAL_EMBEDDING_MODEL',
-        'RETRIEVAL_RERANKER_ENABLED',
         'RETRIEVAL_RERANKER_API_BASE',
         'RETRIEVAL_RERANKER_API_KEY',
         'RETRIEVAL_RERANKER_MODEL',
@@ -342,7 +342,12 @@ $envFile = Join-Path $projectRoot '.env.docker'
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
-Apply-ProfileRuntimeOverrides -EnvFile $envFile
+if ($AllowRuntimeEnvInjection.IsPresent) {
+    Apply-ProfileRuntimeOverrides -EnvFile $envFile
+}
+else {
+    Write-Host "[override] runtime env injection disabled by default; pass -AllowRuntimeEnvInjection to opt in."
+}
 Assert-ProfileExternalSettingsReady -EnvFile $envFile -SelectedProfile $profileLower
 
 Push-Location $projectRoot

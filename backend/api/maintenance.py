@@ -23,7 +23,7 @@ from security.import_guard import ExternalImportGuard, ExternalImportGuardConfig
 _MCP_API_KEY_ENV = "MCP_API_KEY"
 _MCP_API_KEY_HEADER = "X-MCP-API-Key"
 _MCP_API_KEY_ALLOW_INSECURE_LOCAL_ENV = "MCP_API_KEY_ALLOW_INSECURE_LOCAL"
-_TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
+_TRUTHY_ENV_VALUES = {"1", "true", "yes", "on", "enabled"}
 _LOOPBACK_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
@@ -122,10 +122,18 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in _TRUTHY_ENV_VALUES
+
+
 _CLEANUP_QUERY_SLOW_MS = max(
     1.0, _env_float("OBSERVABILITY_CLEANUP_QUERY_SLOW_MS", 250.0)
 )
 _INTENT_LLM_ENABLED = str(os.getenv("INTENT_LLM_ENABLED") or "").strip().lower() in _TRUTHY_ENV_VALUES
+ENABLE_WRITE_LANE_QUEUE = _env_bool("RUNTIME_WRITE_LANE_QUEUE", True)
 
 
 class SearchConsoleRequest(BaseModel):
@@ -250,6 +258,21 @@ def _safe_non_negative_int(value: Any) -> int:
         return max(0, int(value))
     except (TypeError, ValueError):
         return 0
+
+
+async def _run_write_lane(
+    operation: str,
+    task: Callable[[], Awaitable[Any]],
+    *,
+    session_id: Optional[str] = None,
+) -> Any:
+    if not ENABLE_WRITE_LANE_QUEUE:
+        return await task()
+    return await runtime_state.write_lanes.run_write(
+        session_id=session_id,
+        operation=operation,
+        task=task,
+    )
 
 
 class _LazySQLiteClientProxy:
@@ -1097,7 +1120,13 @@ async def _rollback_import_created_memories(
     client: Any,
     created_memories: List[Dict[str, Any]],
     created_namespace_memories: Optional[List[Dict[str, Any]]] = None,
+    session_id: Optional[str] = None,
+    job_id: Optional[str] = None,
 ) -> Dict[str, Any]:
+    write_lane_session_id = (
+        str(session_id or "").strip()
+        or (f"maintenance.rollback:{job_id}" if job_id else "maintenance.rollback")
+    )
     attempted_memory_ids: List[int] = []
     rolled_back: List[int] = []
     errors: List[Dict[str, Any]] = []
@@ -1109,9 +1138,16 @@ async def _rollback_import_created_memories(
             continue
         attempted_memory_ids.append(memory_id)
         try:
-            await client.permanently_delete_memory(
-                memory_id,
-                require_orphan=False,
+            async def _write_task(_memory_id: int = memory_id) -> Dict[str, Any]:
+                return await client.permanently_delete_memory(
+                    _memory_id,
+                    require_orphan=False,
+                )
+
+            await _run_write_lane(
+                "maintenance.import.rollback.delete_memory",
+                _write_task,
+                session_id=write_lane_session_id,
             )
             rolled_back.append(memory_id)
         except Exception as exc:
@@ -1125,6 +1161,8 @@ async def _rollback_import_created_memories(
     namespace_cleanup = await _best_effort_cleanup_learn_namespace(
         client=client,
         created_namespace_memories=created_namespace_memories or [],
+        session_id=write_lane_session_id,
+        job_id=job_id,
     )
     namespace_attempted = bool(namespace_cleanup.get("attempted_paths"))
     namespace_has_skipped = bool(namespace_cleanup.get("skipped"))
@@ -1153,7 +1191,13 @@ async def _best_effort_cleanup_learn_namespace(
     *,
     client: Any,
     created_namespace_memories: List[Dict[str, Any]],
+    session_id: Optional[str] = None,
+    job_id: Optional[str] = None,
 ) -> Dict[str, Any]:
+    write_lane_session_id = (
+        str(session_id or "").strip()
+        or (f"maintenance.learn.rollback:{job_id}" if job_id else "maintenance.learn.rollback")
+    )
     normalized_entries = _normalize_created_namespace_memories(created_namespace_memories)
     if not normalized_entries:
         return {
@@ -1195,7 +1239,17 @@ async def _best_effort_cleanup_learn_namespace(
             continue
         attempted_paths.append(uri)
         try:
-            remove_result = await remove_path(path, domain=domain)
+            async def _write_task_remove(
+                _path: str = path,
+                _domain: str = domain,
+            ) -> Dict[str, Any]:
+                return await remove_path(_path, domain=_domain)
+
+            remove_result = await _run_write_lane(
+                "maintenance.learn.rollback.remove_path",
+                _write_task_remove,
+                session_id=write_lane_session_id,
+            )
             removed_paths.append(uri)
         except Exception as exc:
             skipped.append({"uri": uri, "reason": str(exc) or type(exc).__name__})
@@ -1208,7 +1262,14 @@ async def _best_effort_cleanup_learn_namespace(
         if target_memory_id <= 0:
             continue
         try:
-            await permanently_delete_memory(target_memory_id, require_orphan=True)
+            async def _write_task_delete(_memory_id: int = target_memory_id) -> Dict[str, Any]:
+                return await permanently_delete_memory(_memory_id, require_orphan=True)
+
+            await _run_write_lane(
+                "maintenance.learn.rollback.delete_memory",
+                _write_task_delete,
+                session_id=write_lane_session_id,
+            )
             deleted_memory_ids.append(target_memory_id)
         except Exception as exc:
             skipped.append(
@@ -2083,6 +2144,9 @@ async def execute_external_import(payload: ImportExecuteRequest):
     actor_id = str(job.get("actor_id") or "").strip() or None
     session_id = str(job.get("session_id") or "").strip() or None
     source = str(job.get("source") or "external_import").strip() or "external_import"
+    write_lane_session_id = (
+        str(session_id or "").strip() or f"maintenance.import:{job_id}"
+    )
 
     validated_entries: List[Dict[str, Any]] = []
     source_mismatch: List[Dict[str, Any]] = []
@@ -2210,17 +2274,28 @@ async def execute_external_import(payload: ImportExecuteRequest):
     created_memories: List[Dict[str, Any]] = []
     for entry in validated_entries:
         try:
-            created = await client.create_memory(
-                parent_path=parent_path,
-                content=str(entry.get("content") or ""),
-                priority=priority,
-                title=str(entry.get("title") or ""),
-                domain=domain,
+            async def _write_task_create(
+                _entry: Dict[str, Any] = entry,
+            ) -> Dict[str, Any]:
+                return await client.create_memory(
+                    parent_path=parent_path,
+                    content=str(_entry.get("content") or ""),
+                    priority=priority,
+                    title=str(_entry.get("title") or ""),
+                    domain=domain,
+                )
+
+            created = await _run_write_lane(
+                "maintenance.import.execute.create_memory",
+                _write_task_create,
+                session_id=write_lane_session_id,
             )
         except Exception as exc:
             rollback_summary = await _rollback_import_created_memories(
                 client=client,
                 created_memories=created_memories,
+                session_id=write_lane_session_id,
+                job_id=job_id,
             )
             job["status"] = "failed"
             job["created_memories"] = created_memories
@@ -2428,6 +2503,8 @@ async def _rollback_job(
         client=client,
         created_memories=created_memories,
         created_namespace_memories=created_namespace_memories,
+        session_id=str(transitioned_job.get("session_id") or "").strip(),
+        job_id=str(transitioned_job.get("job_id") or job_id),
     )
     has_errors = bool(rollback_summary.get("error_count"))
     final_status = "rollback_failed" if has_errors else "rolled_back"
@@ -2689,8 +2766,13 @@ async def delete_orphan(memory_id: int):
     """
     client = get_sqlite_client()
     try:
-        result = await client.permanently_delete_memory(
-            memory_id, require_orphan=True
+        async def _write_task() -> Dict[str, Any]:
+            return await client.permanently_delete_memory(memory_id, require_orphan=True)
+
+        result = await _run_write_lane(
+            "maintenance.delete_orphan",
+            _write_task,
+            session_id=f"maintenance.orphan:{memory_id}",
         )
         return result
     except ValueError as e:
@@ -2890,6 +2972,7 @@ async def confirm_vitality_cleanup(payload: VitalityCleanupConfirmRequest):
         for item in latest_items
         if isinstance(item, dict) and item.get("memory_id") is not None
     }
+    write_lane_session_id = f"maintenance.cleanup:{str(review.get('review_id') or 'default')}"
 
     deleted: List[int] = []
     kept: List[int] = []
@@ -2915,10 +2998,20 @@ async def confirm_vitality_cleanup(payload: VitalityCleanupConfirmRequest):
             continue
 
         try:
-            await client.permanently_delete_memory(
-                memory_id,
-                require_orphan=True,
-                expected_state_hash=expected_hash,
+            async def _write_task(
+                _memory_id: int = memory_id,
+                _expected_hash: str = expected_hash,
+            ) -> Dict[str, Any]:
+                return await client.permanently_delete_memory(
+                    _memory_id,
+                    require_orphan=True,
+                    expected_state_hash=_expected_hash,
+                )
+
+            await _run_write_lane(
+                "maintenance.vitality.cleanup.confirm.delete",
+                _write_task,
+                session_id=write_lane_session_id,
             )
             deleted.append(memory_id)
         except RuntimeError as exc:

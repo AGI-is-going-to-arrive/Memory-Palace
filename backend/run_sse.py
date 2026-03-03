@@ -1,6 +1,7 @@
 import os
 import sys
 import hmac
+import asyncio
 import uvicorn
 from typing import Optional, Callable, Awaitable
 
@@ -11,7 +12,7 @@ from starlette.types import ASGIApp
 # Ensure we can import from backend dir
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from mcp_server import mcp
+from mcp_server import mcp, startup as mcp_startup
 
 _MCP_API_KEY_ENV = "MCP_API_KEY"
 _MCP_API_KEY_HEADER = "X-MCP-API-Key"
@@ -98,6 +99,7 @@ def main():
     This is required for clients that don't support stdio (like some web-based tools).
     """
     print("Initializing Memory Palace SSE Server...")
+    asyncio.run(mcp_startup())
     
     # Create the Starlette app for SSE with optional API key guard.
     app = create_sse_app()

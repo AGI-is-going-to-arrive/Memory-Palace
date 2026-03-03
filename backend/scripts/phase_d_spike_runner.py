@@ -30,6 +30,7 @@ _WAL_PROFILE_DEFAULTS: Dict[str, Dict[str, Union[int, float]]] = {
         "timeout_sec": 0.05,
         "min_throughput_ratio": 1.0,
         "max_failure_rate": 0.0,
+        "max_retry_rate": 0.01,
         "max_persistence_gap": 0,
     },
     "medium": {
@@ -38,6 +39,7 @@ _WAL_PROFILE_DEFAULTS: Dict[str, Dict[str, Union[int, float]]] = {
         "timeout_sec": 0.08,
         "min_throughput_ratio": 1.0,
         "max_failure_rate": 0.001,
+        "max_retry_rate": 0.01,
         "max_persistence_gap": 0,
     },
     "stress": {
@@ -46,6 +48,7 @@ _WAL_PROFILE_DEFAULTS: Dict[str, Dict[str, Union[int, float]]] = {
         "timeout_sec": 0.1,
         "min_throughput_ratio": 1.0,
         "max_failure_rate": 0.003,
+        "max_retry_rate": 0.02,
         "max_persistence_gap": 0,
     },
     "business_write_burst": {
@@ -54,6 +57,7 @@ _WAL_PROFILE_DEFAULTS: Dict[str, Dict[str, Union[int, float]]] = {
         "timeout_sec": 0.08,
         "min_throughput_ratio": 1.05,
         "max_failure_rate": 0.002,
+        "max_retry_rate": 0.01,
         "max_persistence_gap": 0,
     },
     "business_write_peak": {
@@ -62,9 +66,13 @@ _WAL_PROFILE_DEFAULTS: Dict[str, Dict[str, Union[int, float]]] = {
         "timeout_sec": 0.12,
         "min_throughput_ratio": 1.02,
         "max_failure_rate": 0.005,
+        "max_retry_rate": 0.01,
         "max_persistence_gap": 0,
     },
 }
+_LOCK_RETRY_MAX_ATTEMPTS = 12
+_LOCK_RETRY_BASE_DELAY_SEC = 0.001
+_LOCK_RETRY_MAX_DELAY_SEC = 0.02
 
 
 def _utc_now_iso() -> str:
@@ -340,6 +348,7 @@ def _default_wal_thresholds(load_profile: str) -> Dict[str, Union[int, float]]:
     return {
         "min_throughput_ratio": float(defaults["min_throughput_ratio"]),
         "max_failure_rate": float(defaults["max_failure_rate"]),
+        "max_retry_rate": float(defaults["max_retry_rate"]),
         "max_persistence_gap": int(defaults["max_persistence_gap"]),
     }
 
@@ -367,6 +376,16 @@ def _resolve_sqlite_extension_file(path_input: str) -> Optional[Path]:
     return None
 
 
+def _lock_retry_delay_sec(worker_id: int, seq: int, attempt: int) -> float:
+    """Deterministic capped exponential backoff with light jitter."""
+    base_delay = min(
+        _LOCK_RETRY_MAX_DELAY_SEC,
+        _LOCK_RETRY_BASE_DELAY_SEC * (2 ** max(0, int(attempt))),
+    )
+    jitter = 1.0 + ((int(worker_id) + int(seq) + int(attempt)) % 4) * 0.25
+    return max(0.0, float(base_delay) * float(jitter))
+
+
 def _write_probe_worker(
     db_path: Path,
     worker_id: int,
@@ -387,7 +406,8 @@ def _write_probe_worker(
     lock_retries = 0
     try:
         for seq in range(int(tx_per_worker)):
-            for attempt in range(3):
+            retried_in_current_tx = False
+            for attempt in range(_LOCK_RETRY_MAX_ATTEMPTS):
                 try:
                     connection.execute("BEGIN IMMEDIATE")
                     connection.execute(
@@ -401,9 +421,11 @@ def _write_probe_worker(
                     if connection.in_transaction:
                         connection.execute("ROLLBACK")
                     message = str(exc).lower()
-                    if "locked" in message and attempt < 2:
-                        lock_retries += 1
-                        time.sleep(0.001 * (attempt + 1))
+                    if "locked" in message and attempt < (_LOCK_RETRY_MAX_ATTEMPTS - 1):
+                        if not retried_in_current_tx:
+                            lock_retries += 1
+                            retried_in_current_tx = True
+                        time.sleep(_lock_retry_delay_sec(worker_id, seq, attempt))
                         continue
                     failed += 1
                     break
@@ -556,10 +578,12 @@ def _build_wal_regression_gate(
     wal_gain: Optional[float],
     min_throughput_ratio: float,
     max_failure_rate: float,
+    max_retry_rate: float,
     max_persistence_gap: int,
 ) -> Dict[str, Any]:
     reasons: List[str] = []
     wal_failure_rate = float(wal_metrics.get("failure_rate", 0.0) or 0.0)
+    wal_retry_rate = float(wal_metrics.get("retry_rate", 0.0) or 0.0)
     wal_persistence_gap = int(wal_metrics.get("persistence_gap", 0) or 0)
     delete_persistence_gap = int(delete_metrics.get("persistence_gap", 0) or 0)
 
@@ -568,6 +592,13 @@ def _build_wal_regression_gate(
             "wal_failure_rate_exceeded:{actual:.6f}>{expected:.6f}".format(
                 actual=wal_failure_rate,
                 expected=max_failure_rate,
+            )
+        )
+    if wal_retry_rate > max_retry_rate:
+        reasons.append(
+            "wal_retry_rate_exceeded:{actual:.6f}>{expected:.6f}".format(
+                actual=wal_retry_rate,
+                expected=max_retry_rate,
             )
         )
     if wal_persistence_gap > max_persistence_gap:
@@ -604,8 +635,10 @@ def _build_wal_threshold_suggestion(
 ) -> Dict[str, Any]:
     profile_min_ratio = float(profile_thresholds.get("min_throughput_ratio", 1.0))
     profile_max_failure = float(profile_thresholds.get("max_failure_rate", 0.0))
+    profile_max_retry = float(profile_thresholds.get("max_retry_rate", 0.01))
     profile_max_gap = int(profile_thresholds.get("max_persistence_gap", 0))
     observed_failure = float(wal_metrics.get("failure_rate", 0.0) or 0.0)
+    observed_retry = float(wal_metrics.get("retry_rate", 0.0) or 0.0)
     observed_delete_gap = int(delete_metrics.get("persistence_gap", 0) or 0)
     observed_wal_gap = int(wal_metrics.get("persistence_gap", 0) or 0)
     observed_max_gap = max(0, observed_delete_gap, observed_wal_gap)
@@ -620,16 +653,19 @@ def _build_wal_threshold_suggestion(
         "profile_baseline": {
             "min_throughput_ratio": round(profile_min_ratio, 3),
             "max_failure_rate": round(profile_max_failure, 6),
+            "max_retry_rate": round(profile_max_retry, 6),
             "max_persistence_gap": profile_max_gap,
         },
         "suggested_stable_thresholds": {
             "min_throughput_ratio": round(ratio_suggestion, 3),
             "max_failure_rate": round(max(profile_max_failure, observed_failure + 0.001), 6),
+            "max_retry_rate": round(max(profile_max_retry, observed_retry + 0.001), 6),
             "max_persistence_gap": max(profile_max_gap, observed_max_gap),
         },
         "observed": {
             "wal_vs_delete_throughput_ratio": wal_gain,
             "wal_failure_rate": round(observed_failure, 6),
+            "wal_retry_rate": round(observed_retry, 6),
             "wal_persistence_gap": observed_wal_gap,
             "delete_persistence_gap": observed_delete_gap,
         },
@@ -645,6 +681,7 @@ def run_write_lane_wal_probe(
     repeat: int = 1,
     min_throughput_ratio: Optional[float] = None,
     max_failure_rate: Optional[float] = None,
+    max_retry_rate: Optional[float] = None,
     max_persistence_gap: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Run write-lane spike under DELETE and WAL modes with optional profiles."""
@@ -672,6 +709,14 @@ def run_write_lane_wal_probe(
             profile_thresholds["max_failure_rate"]
             if max_failure_rate is None
             else max_failure_rate
+        ),
+    )
+    effective_max_retry_rate = max(
+        0.0,
+        float(
+            profile_thresholds["max_retry_rate"]
+            if max_retry_rate is None
+            else max_retry_rate
         ),
     )
     effective_max_persistence_gap = max(
@@ -802,6 +847,7 @@ def run_write_lane_wal_probe(
         wal_gain=wal_gain,
         min_throughput_ratio=effective_min_ratio,
         max_failure_rate=effective_max_failure_rate,
+        max_retry_rate=effective_max_retry_rate,
         max_persistence_gap=effective_max_persistence_gap,
     )
     threshold_suggestion = _build_wal_threshold_suggestion(
@@ -829,6 +875,7 @@ def run_write_lane_wal_probe(
         "regression_thresholds": {
             "min_throughput_ratio": round(effective_min_ratio, 3),
             "max_failure_rate": round(effective_max_failure_rate, 6),
+            "max_retry_rate": round(effective_max_retry_rate, 6),
             "max_persistence_gap": effective_max_persistence_gap,
         },
         "results": {
@@ -944,15 +991,28 @@ def _build_go_no_go(
     if sqlite_status in {"sqlite_runtime_error"}:
         blockers.append("sqlite_runtime_error")
 
-    wal_status = str(wal_probe.get("status", ""))
-    if wal_status == "degraded":
-        wal_results = wal_probe.get("results", {})
-        if isinstance(wal_results, Mapping):
-            wal_failed = int(
-                (wal_results.get("wal", {}) or {}).get("failed_tx", 0)
-            )
-            if wal_failed > 0:
-                blockers.append("wal_failed_transactions")
+    wal_results = wal_probe.get("results", {})
+    wal_failed = 0
+    wal_effective_mode = ""
+    if isinstance(wal_results, Mapping):
+        wal_failed = int((wal_results.get("wal", {}) or {}).get("failed_tx", 0))
+        wal_effective_mode = str(
+            (wal_results.get("wal", {}) or {}).get("effective_journal_mode", "")
+        ).strip().lower()
+    if wal_effective_mode != "wal":
+        blockers.append("wal_not_effective")
+
+    wal_gate_present = False
+    wal_gate_pass = True
+    wal_gate = wal_probe.get("regression_gate", {})
+    if isinstance(wal_gate, Mapping) and "pass" in wal_gate:
+        wal_gate_present = True
+        wal_gate_pass = bool(wal_gate.get("pass", True))
+    if wal_gate_present and not wal_gate_pass:
+        blockers.append("wal_regression_gate_failed")
+    if wal_failed > 0:
+        # Hold contract: WAL probe must not report failed transactions.
+        blockers.append("wal_failed_transactions")
 
     if blockers:
         return {
@@ -1030,22 +1090,24 @@ def _render_phase_d_markdown(report: Mapping[str, Any]) -> str:
             "",
             "## Write Lane Throughput",
             "",
-            "| Mode | Throughput (tx/s) | Success/Planned | Failed | Failure Rate | Persistence Gap |",
-            "|---|---:|---:|---:|---:|---:|",
-            "| DELETE | {delete_tp} | {delete_success}/{delete_plan} | {delete_failed} | {delete_failure_rate} | {delete_gap} |".format(
+            "| Mode | Throughput (tx/s) | Success/Planned | Failed | Failure Rate | Retry Rate | Persistence Gap |",
+            "|---|---:|---:|---:|---:|---:|---:|",
+            "| DELETE | {delete_tp} | {delete_success}/{delete_plan} | {delete_failed} | {delete_failure_rate} | {delete_retry_rate} | {delete_gap} |".format(
                 delete_tp=delete_metrics.get("throughput_tps", 0.0),
                 delete_success=delete_metrics.get("successful_tx", 0),
                 delete_plan=delete_metrics.get("planned_tx", 0),
                 delete_failed=delete_metrics.get("failed_tx", 0),
                 delete_failure_rate=delete_metrics.get("failure_rate", 0.0),
+                delete_retry_rate=delete_metrics.get("retry_rate", 0.0),
                 delete_gap=delete_metrics.get("persistence_gap", 0),
             ),
-            "| WAL | {wal_tp} | {wal_success}/{wal_plan} | {wal_failed} | {wal_failure_rate} | {wal_gap} |".format(
+            "| WAL | {wal_tp} | {wal_success}/{wal_plan} | {wal_failed} | {wal_failure_rate} | {wal_retry_rate} | {wal_gap} |".format(
                 wal_tp=wal_metrics.get("throughput_tps", 0.0),
                 wal_success=wal_metrics.get("successful_tx", 0),
                 wal_plan=wal_metrics.get("planned_tx", 0),
                 wal_failed=wal_metrics.get("failed_tx", 0),
                 wal_failure_rate=wal_metrics.get("failure_rate", 0.0),
+                wal_retry_rate=wal_metrics.get("retry_rate", 0.0),
                 wal_gap=wal_metrics.get("persistence_gap", 0),
             ),
             f"- wal_vs_delete_throughput_ratio: {wal_probe.get('wal_vs_delete_throughput_ratio', 'n/a')}",
@@ -1111,6 +1173,7 @@ def build_phase_d_report(
     wal_repeat: int = 1,
     wal_min_throughput_ratio: Optional[float] = None,
     wal_max_failure_rate: Optional[float] = None,
+    wal_max_retry_rate: Optional[float] = None,
     wal_max_persistence_gap: Optional[int] = None,
     output_json_path: Union[str, Path] = DEFAULT_JSON_OUTPUT,
     output_markdown_path: Union[str, Path] = DEFAULT_MARKDOWN_OUTPUT,
@@ -1127,6 +1190,7 @@ def build_phase_d_report(
         repeat=wal_repeat,
         min_throughput_ratio=wal_min_throughput_ratio,
         max_failure_rate=wal_max_failure_rate,
+        max_retry_rate=wal_max_retry_rate,
         max_persistence_gap=wal_max_persistence_gap,
     )
 
@@ -1230,6 +1294,12 @@ def _parse_args() -> argparse.Namespace:
         help="Maximum allowed failed_tx/planned_tx for WAL regression gate. Default from profile.",
     )
     parser.add_argument(
+        "--wal-max-retry-rate",
+        type=float,
+        default=None,
+        help="Maximum allowed lock_retries/planned_tx for WAL regression gate. Default from profile.",
+    )
+    parser.add_argument(
         "--wal-max-persistence-gap",
         type=int,
         default=None,
@@ -1266,6 +1336,7 @@ def main() -> int:
         wal_repeat=args.wal_repeat,
         wal_min_throughput_ratio=args.wal_min_throughput_ratio,
         wal_max_failure_rate=args.wal_max_failure_rate,
+        wal_max_retry_rate=args.wal_max_retry_rate,
         wal_max_persistence_gap=args.wal_max_persistence_gap,
         output_json_path=args.output_json,
         output_markdown_path=args.output_md,

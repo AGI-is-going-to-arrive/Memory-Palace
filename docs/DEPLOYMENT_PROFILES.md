@@ -51,7 +51,7 @@
 >
 > **本地开发临时策略（重要）**：为降低本地联调复杂度，可临时将 `RETRIEVAL_EMBEDDING_BACKEND=api`，并显式配置 `RETRIEVAL_EMBEDDING_*` 与 `RETRIEVAL_RERANKER_*`。该策略仅用于本地开发；面向客户交付前，应根据客户环境回切到目标部署口径（通常为 C/D 模板的 `router` 路线）。
 >
-> **本仓本地联调补充（记录）**：`new/run_post_change_checks.sh` 在 `--docker-profile c|d` 时会尝试加载 runtime 覆盖文件（优先 `Memory-Palace/.env`，其次 `~/Desktop/clawmemo/nocturne_memory/.env`），用于本地 API 链路联调。该机制仅用于开发机验证，不会改写 `deploy/profiles/*` 模板默认值。
+> **本仓本地联调补充（记录）**：`new/run_post_change_checks.sh` 在 `--docker-profile c|d` 下默认 `--runtime-env-mode none`（不加载本地 runtime 覆盖）；仅在显式传入 `--runtime-env-mode auto|file` 且附加 `--allow-runtime-env-debug` 时，才会加载覆盖文件（优先 `Memory-Palace/.env`，其次 `~/Desktop/clawmemo/nocturne_memory/.env`）。若保持 `--runtime-env-mode none`，可通过 `--allow-runtime-env-injection` 把当前进程环境变量注入 `.env.docker`（适配 CI secrets 注入）；若同时显式传入 `--runtime-env-file`，会先加载该文件再注入（不做自动探测）。注入范围仅限 API 地址/密钥/模型字段，不会覆盖模板中的路由策略键（如 `RETRIEVAL_EMBEDDING_BACKEND`）。
 >
 > **配置优先级说明（避免误配）**：
 > - `RETRIEVAL_EMBEDDING_BACKEND` 只影响 Embedding 链路，不影响 Reranker。
@@ -206,6 +206,8 @@ COMPACT_GIST_LLM_MODEL=
 ```bash
 cd <project-root>
 bash scripts/docker_one_click.sh --profile b
+# 如需把当前 shell 的 API 地址/密钥/模型注入 .env.docker（默认关闭）：
+bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 ```
 
 ### Windows PowerShell
@@ -213,6 +215,8 @@ bash scripts/docker_one_click.sh --profile b
 ```powershell
 cd <project-root>
 .\scripts\docker_one_click.ps1 -Profile b
+# 如需把当前 PowerShell 进程环境注入 .env.docker（默认关闭）：
+.\scripts\docker_one_click.ps1 -Profile c -AllowRuntimeEnvInjection
 ```
 
 ### 部署完成后的访问地址
@@ -226,9 +230,10 @@ cd <project-root>
 ### 一键脚本做了什么
 
 1. 调用 profile 脚本从模板生成 `.env.docker`（macOS/Linux 使用 `apply_profile.sh`，Windows 使用 `apply_profile.ps1`）
-2. 自动检测端口占用，若默认端口被占用则自动递增寻找空闲端口
-3. 检测是否存在历史数据卷（`memory_palace_data` 或 `nocturne_*` 系列），自动复用以保留历史数据
-4. 使用 `docker compose` 构建并启动前后端容器
+2. 默认禁用运行时环境注入，避免隐式覆盖模板策略键（仅显式开关注入 API 地址/密钥/模型字段）
+3. 自动检测端口占用，若默认端口被占用则自动递增寻找空闲端口
+4. 检测是否存在历史数据卷（`memory_palace_data` 或 `nocturne_*` 系列），自动复用以保留历史数据
+5. 使用 `docker compose` 构建并启动前后端容器
 
 ### 安全说明
 

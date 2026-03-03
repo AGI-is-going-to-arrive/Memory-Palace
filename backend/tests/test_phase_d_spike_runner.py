@@ -1,6 +1,9 @@
 from pathlib import Path
 
 from scripts.phase_d_spike_runner import (
+    _lock_retry_delay_sec,
+    _build_wal_regression_gate,
+    _build_go_no_go,
     build_phase_d_report,
     run_embedding_provider_probe,
     run_sqlite_vec_probe,
@@ -156,6 +159,7 @@ def test_write_lane_wal_probe_business_write_profile_exposes_threshold_suggestio
     assert isinstance(thresholds, dict)
     assert float(thresholds.get("min_throughput_ratio", 0.0)) >= 1.0
     assert float(thresholds.get("max_failure_rate", -1.0)) >= 0.0
+    assert float(thresholds.get("max_retry_rate", -1.0)) >= 0.0
 
     suggestion = payload.get("threshold_suggestion", {})
     assert isinstance(suggestion, dict)
@@ -163,6 +167,7 @@ def test_write_lane_wal_probe_business_write_profile_exposes_threshold_suggestio
     assert isinstance(suggested, dict)
     assert "min_throughput_ratio" in suggested
     assert "max_failure_rate" in suggested
+    assert "max_retry_rate" in suggested
     assert "max_persistence_gap" in suggested
 
 
@@ -183,3 +188,155 @@ def test_phase_d_report_marks_sqlite_vec_not_verified_as_hold() -> None:
     risks = report.get("risks", [])
     assert isinstance(risks, list)
     assert any("sqlite-vec" in str(item) for item in risks)
+
+
+def test_go_no_go_blocks_when_wal_regression_gate_fails() -> None:
+    decision = _build_go_no_go(
+        embedding_probe={
+            "configured_backend": "hash",
+            "cases": [{"backend": "hash", "status": "ok"}],
+        },
+        sqlite_vec_probe={"status": "ok"},
+        wal_probe={
+            "status": "degraded",
+            "results": {"wal": {"failed_tx": 0}},
+            "regression_gate": {
+                "pass": False,
+                "reasons": ["wal_throughput_ratio_below_threshold:0.900<1.020"],
+            },
+        },
+    )
+
+    assert decision["decision"] == "NO_GO"
+    assert "wal_regression_gate_failed" in decision["blockers"]
+
+
+def test_go_no_go_allows_when_gate_passes_and_no_wal_failed_transactions() -> None:
+    decision = _build_go_no_go(
+        embedding_probe={
+            "configured_backend": "hash",
+            "cases": [{"backend": "hash", "status": "ok"}],
+        },
+        sqlite_vec_probe={"status": "ok"},
+        wal_probe={
+            "status": "degraded",
+            "results": {
+                "delete": {"failed_tx": 0},
+                "wal": {"failed_tx": 0, "effective_journal_mode": "wal"},
+            },
+            "regression_gate": {"pass": True, "reasons": []},
+        },
+    )
+
+    assert decision["decision"] == "GO"
+    assert decision["blockers"] == []
+
+
+def test_go_no_go_blocks_when_wal_mode_is_not_effective() -> None:
+    decision = _build_go_no_go(
+        embedding_probe={
+            "configured_backend": "hash",
+            "cases": [{"backend": "hash", "status": "ok"}],
+        },
+        sqlite_vec_probe={"status": "ok"},
+        wal_probe={
+            "status": "degraded",
+            "results": {
+                "delete": {"failed_tx": 0},
+                "wal": {"failed_tx": 0, "effective_journal_mode": "delete"},
+            },
+            "regression_gate": {"pass": True, "reasons": []},
+        },
+    )
+
+    assert decision["decision"] == "NO_GO"
+    assert "wal_not_effective" in decision["blockers"]
+
+
+def test_go_no_go_allows_when_only_delete_has_failed_transactions() -> None:
+    decision = _build_go_no_go(
+        embedding_probe={
+            "configured_backend": "hash",
+            "cases": [{"backend": "hash", "status": "ok"}],
+        },
+        sqlite_vec_probe={"status": "ok"},
+        wal_probe={
+            "status": "degraded",
+            "results": {
+                "delete": {"failed_tx": 3},
+                "wal": {"failed_tx": 0, "effective_journal_mode": "wal"},
+            },
+            "regression_gate": {"pass": True, "reasons": []},
+        },
+    )
+
+    assert decision["decision"] == "GO"
+    assert decision["blockers"] == []
+
+
+def test_go_no_go_blocks_when_wal_has_failures_even_if_gate_passes() -> None:
+    decision = _build_go_no_go(
+        embedding_probe={
+            "configured_backend": "hash",
+            "cases": [{"backend": "hash", "status": "ok"}],
+        },
+        sqlite_vec_probe={"status": "ok"},
+        wal_probe={
+            "status": "degraded",
+            "results": {
+                "delete": {"failed_tx": 4},
+                "wal": {"failed_tx": 2, "effective_journal_mode": "wal"},
+            },
+            "regression_gate": {"pass": True, "reasons": []},
+        },
+    )
+
+    assert decision["decision"] == "NO_GO"
+    assert "wal_failed_transactions" in decision["blockers"]
+
+
+def test_go_no_go_blocks_when_wal_fails_and_gate_payload_missing() -> None:
+    decision = _build_go_no_go(
+        embedding_probe={
+            "configured_backend": "hash",
+            "cases": [{"backend": "hash", "status": "ok"}],
+        },
+        sqlite_vec_probe={"status": "ok"},
+        wal_probe={
+            "status": "degraded",
+            "results": {
+                "delete": {"failed_tx": 0},
+                "wal": {"failed_tx": 1, "effective_journal_mode": "wal"},
+            },
+        },
+    )
+
+    assert decision["decision"] == "NO_GO"
+    assert "wal_failed_transactions" in decision["blockers"]
+
+
+def test_wal_regression_gate_blocks_when_retry_rate_exceeds_threshold() -> None:
+    gate = _build_wal_regression_gate(
+        delete_metrics={"persistence_gap": 0},
+        wal_metrics={"failure_rate": 0.0, "retry_rate": 0.02, "persistence_gap": 0},
+        wal_gain=1.2,
+        min_throughput_ratio=1.0,
+        max_failure_rate=0.001,
+        max_retry_rate=0.01,
+        max_persistence_gap=0,
+    )
+
+    assert gate["pass"] is False
+    assert any("wal_retry_rate_exceeded" in reason for reason in gate["reasons"])
+
+
+def test_lock_retry_delay_is_deterministic_and_capped() -> None:
+    first = _lock_retry_delay_sec(worker_id=2, seq=5, attempt=3)
+    second = _lock_retry_delay_sec(worker_id=2, seq=5, attempt=3)
+    assert first == second
+    assert first >= 0.0
+    assert first <= 0.035
+
+    early = _lock_retry_delay_sec(worker_id=0, seq=0, attempt=0)
+    later = _lock_retry_delay_sec(worker_id=0, seq=0, attempt=2)
+    assert later >= early

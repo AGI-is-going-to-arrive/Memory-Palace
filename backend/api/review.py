@@ -407,6 +407,7 @@ async def get_resource_diff(session_id: str, resource_id: str):
 
     Handles both new split snapshots (path/memory) and legacy snapshots.
     """
+    session_id = _validate_session_id_or_400(session_id)
     resource_id = unquote(resource_id)
     
     manager = get_snapshot_manager()

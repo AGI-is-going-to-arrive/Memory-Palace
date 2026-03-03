@@ -43,14 +43,22 @@ def _env_bool(name: str, default: bool) -> bool:
 ENABLE_WRITE_LANE_QUEUE = _env_bool("RUNTIME_WRITE_LANE_QUEUE", True)
 
 
-def _normalize_guard_decision(payload: Any) -> dict[str, Any]:
+def _normalize_guard_decision(payload: Any, *, allow_bypass: bool = False) -> dict[str, Any]:
     if not isinstance(payload, dict):
         payload = {}
-    action = str(payload.get("action") or "ADD").strip().upper()
-    if action not in {"ADD", "UPDATE", "NOOP", "DELETE", "BYPASS"}:
-        action = "ADD"
-    method = str(payload.get("method") or "none").strip().lower() or "none"
     reason = str(payload.get("reason") or "").strip()
+    has_action = "action" in payload
+    raw_action = str(payload.get("action") or "").strip().upper() if has_action else ""
+    action = raw_action
+    valid_actions = {"ADD", "UPDATE", "NOOP", "DELETE"}
+    if allow_bypass:
+        valid_actions.add("BYPASS")
+    if action not in valid_actions:
+        action = "NOOP"
+        marker_value = raw_action or ("EMPTY" if has_action else "MISSING")
+        marker = f"invalid_guard_action:{marker_value}"
+        reason = marker if not reason else f"{marker}; {reason}"
+    method = str(payload.get("method") or "none").strip().lower() or "none"
     target_id = payload.get("target_id")
     if not isinstance(target_id, int) or target_id <= 0:
         target_id = None
@@ -229,8 +237,8 @@ async def create_node(
             }
         )
 
-    guard_action = str(guard_decision.get("action") or "ADD").upper()
-    blocked = guard_action in {"NOOP", "UPDATE", "DELETE"}
+    guard_action = str(guard_decision.get("action") or "NOOP").upper()
+    blocked = guard_action != "ADD"
     await _record_guard_event("browse.create_node", guard_decision, blocked=blocked)
     if blocked:
         return {
@@ -303,18 +311,26 @@ async def update_node(
             )
     else:
         guard_decision = _normalize_guard_decision(
-            {"action": "BYPASS", "reason": "metadata_only_update", "method": "none"}
+            {"action": "BYPASS", "reason": "metadata_only_update", "method": "none"},
+            allow_bypass=True,
         )
 
-    guard_action = str(guard_decision.get("action") or "BYPASS").upper()
+    guard_action = str(guard_decision.get("action") or "NOOP").upper()
     blocked = False
     if body.content is not None:
-        if guard_action in {"NOOP", "DELETE"}:
-            blocked = True
+        if guard_action == "ADD":
+            blocked = False
         elif guard_action == "UPDATE":
             target_id = guard_decision.get("target_id")
-            if isinstance(target_id, int) and target_id != memory.get("id"):
+            current_memory_id = memory.get("id")
+            if (
+                not isinstance(target_id, int)
+                or not isinstance(current_memory_id, int)
+                or target_id != current_memory_id
+            ):
                 blocked = True
+        else:
+            blocked = True
     await _record_guard_event("browse.update_node", guard_decision, blocked=blocked)
     if blocked:
         return {

@@ -147,16 +147,28 @@ class WriteLaneCoordinator:
                 self._session_waiting[lane] = max(
                     0, self._session_waiting.get(lane, 1) - 1
                 )
+
+            waited_global_ms = 0
+            global_wait_start = time.monotonic()
+            global_waiting_counted = True
+            global_acquired = False
+            global_active_counted = False
+
+            async with self._guard:
                 self._global_waiting += 1
 
-            global_wait_start = time.monotonic()
-            await self._global_sem.acquire()
-            waited_global_ms = int((time.monotonic() - global_wait_start) * 1000)
-            async with self._guard:
-                self._global_waiting = max(0, self._global_waiting - 1)
-                self._global_active += 1
-
             try:
+                await self._global_sem.acquire()
+                global_acquired = True
+                waited_global_ms = int((time.monotonic() - global_wait_start) * 1000)
+
+                async with self._guard:
+                    if global_waiting_counted:
+                        self._global_waiting = max(0, self._global_waiting - 1)
+                        global_waiting_counted = False
+                    self._global_active += 1
+                    global_active_counted = True
+
                 # Keep this as a metric hook, even when no logger is attached yet.
                 _ = operation
                 _ = waited_session_ms
@@ -170,6 +182,18 @@ class WriteLaneCoordinator:
                     duration_ms=duration_ms,
                 )
                 return result
+            except asyncio.CancelledError:
+                if waited_global_ms <= 0:
+                    waited_global_ms = int((time.monotonic() - global_wait_start) * 1000)
+                duration_ms = int((time.monotonic() - write_start) * 1000)
+                await self._record_write_metrics(
+                    success=False,
+                    session_wait_ms=waited_session_ms,
+                    global_wait_ms=waited_global_ms,
+                    duration_ms=duration_ms,
+                    error="cancelled",
+                )
+                raise
             except Exception as exc:
                 duration_ms = int((time.monotonic() - write_start) * 1000)
                 await self._record_write_metrics(
@@ -181,9 +205,16 @@ class WriteLaneCoordinator:
                 )
                 raise
             finally:
-                async with self._guard:
-                    self._global_active = max(0, self._global_active - 1)
-                self._global_sem.release()
+                if global_waiting_counted:
+                    async with self._guard:
+                        self._global_waiting = max(0, self._global_waiting - 1)
+
+                if global_active_counted:
+                    async with self._guard:
+                        self._global_active = max(0, self._global_active - 1)
+
+                if global_acquired:
+                    self._global_sem.release()
 
     async def status(self) -> Dict[str, Any]:
         async with self._guard:
@@ -621,6 +652,7 @@ class ImportLearnAuditTracker:
                 "session_id": item.session_id,
                 "actor_id": item.actor_id,
                 "batch_id": item.batch_id,
+                "metadata": dict(item.metadata),
             }
             for item in snapshot[-5:]
         ]

@@ -431,6 +431,25 @@ async def test_vitality_cleanup_prepare_and_confirm_delete_flow(
     monkeypatch.setattr(
         maintenance_api.runtime_state, "vitality_decay", VitalityDecayCoordinator()
     )
+    write_lane_calls: list[Dict[str, Any]] = []
+
+    async def _run_write_lane_stub(
+        *, session_id: str | None, operation: str, task
+    ) -> Any:
+        write_lane_calls.append(
+            {
+                "session_id": session_id,
+                "operation": operation,
+            }
+        )
+        return await task()
+
+    monkeypatch.setattr(maintenance_api, "ENABLE_WRITE_LANE_QUEUE", True)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.write_lanes,
+        "run_write",
+        _run_write_lane_stub,
+    )
 
     query_payload = await client.get_vitality_cleanup_candidates(
         threshold=0.2,
@@ -469,6 +488,63 @@ async def test_vitality_cleanup_prepare_and_confirm_delete_flow(
     assert prepare_result["status"] == "pending_confirmation"
     assert confirm_result["ok"] is True
     assert confirm_result["deleted_count"] == 1
+    assert len(write_lane_calls) == 1
+    assert write_lane_calls[0]["operation"] == "maintenance.vitality.cleanup.confirm.delete"
+    assert str(write_lane_calls[0]["session_id"] or "").startswith("maintenance.cleanup:")
+
+
+@pytest.mark.asyncio
+async def test_delete_orphan_uses_write_lane(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "week6-delete-orphan-write-lane.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    created = await client.create_memory(
+        parent_path="",
+        content="Delete orphan write lane",
+        priority=1,
+        title="delete_orphan_lane",
+        domain="core",
+    )
+    await client.remove_path(path="delete_orphan_lane", domain="core")
+
+    write_lane_calls: list[Dict[str, Any]] = []
+
+    async def _run_write_lane_stub(
+        *, session_id: str | None, operation: str, task
+    ) -> Any:
+        write_lane_calls.append(
+            {
+                "session_id": session_id,
+                "operation": operation,
+            }
+        )
+        return await task()
+
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(maintenance_api, "ENABLE_WRITE_LANE_QUEUE", True)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.write_lanes,
+        "run_write",
+        _run_write_lane_stub,
+    )
+
+    result = await maintenance_api.delete_orphan(created["id"])
+
+    async with client.session() as session:
+        still_exists = await session.execute(
+            select(Memory.id).where(Memory.id == created["id"])
+        )
+        assert still_exists.scalar_one_or_none() is None
+
+    await client.close()
+    assert result["deleted_memory_id"] == created["id"]
+    assert len(write_lane_calls) == 1
+    assert write_lane_calls[0]["operation"] == "maintenance.delete_orphan"
+    assert write_lane_calls[0]["session_id"] == f"maintenance.orphan:{created['id']}"
 
 
 @pytest.mark.asyncio

@@ -503,14 +503,24 @@ async def _record_flush_event(message: str) -> None:
     )
 
 
-def _normalize_guard_decision(decision: Any) -> Dict[str, Any]:
+def _normalize_guard_decision(
+    decision: Any, *, allow_bypass: bool = False
+) -> Dict[str, Any]:
     if not isinstance(decision, dict):
         decision = {}
-    action = str(decision.get("action") or "ADD").strip().upper()
-    if action not in {"ADD", "UPDATE", "NOOP", "DELETE", "BYPASS"}:
-        action = "ADD"
-    method = str(decision.get("method") or "none").strip().lower() or "none"
     reason = str(decision.get("reason") or "").strip()
+    has_action = "action" in decision
+    raw_action = str(decision.get("action") or "").strip().upper() if has_action else ""
+    action = raw_action
+    valid_actions = {"ADD", "UPDATE", "NOOP", "DELETE"}
+    if allow_bypass:
+        valid_actions.add("BYPASS")
+    if action not in valid_actions:
+        action = "NOOP"
+        marker_value = raw_action or ("EMPTY" if has_action else "MISSING")
+        marker = f"invalid_guard_action:{marker_value}"
+        reason = marker if not reason else f"{marker}; {reason}"
+    method = str(decision.get("method") or "none").strip().lower() or "none"
     target_id = decision.get("target_id")
     if not isinstance(target_id, int) or target_id <= 0:
         target_id = None
@@ -1274,6 +1284,70 @@ async def _flush_session_summary_to_memory(
         f"## Trace\n"
         f"{summary}"
     )
+    guard_decision = _normalize_guard_decision(
+        {"action": "ADD", "method": "none", "reason": "guard_not_evaluated"}
+    )
+    try:
+        guard_decision = _normalize_guard_decision(
+            await client.write_guard(
+                content=content,
+                domain=domain,
+                path_prefix=parent_path if parent_path else None,
+            )
+        )
+    except Exception as guard_exc:
+        guard_decision = _normalize_guard_decision(
+            {
+                "action": "NOOP",
+                "method": "exception",
+                "reason": f"write_guard_unavailable: {guard_exc}",
+                "degraded": True,
+                "degrade_reasons": ["write_guard_exception"],
+            }
+        )
+    guard_action = str(guard_decision.get("action") or "NOOP").upper()
+    guard_blocked = guard_action != "ADD"
+    try:
+        await _record_guard_event(
+            operation="compact_context",
+            decision=guard_decision,
+            blocked=guard_blocked,
+        )
+    except Exception:
+        pass
+    if guard_blocked:
+        guard_is_degraded = bool(guard_decision.get("degraded"))
+        guard_reason = str(guard_decision.get("reason") or "")
+        guard_is_invalid = guard_reason.startswith("invalid_guard_action:")
+        if (
+            guard_action in {"NOOP", "UPDATE"}
+            and not guard_is_degraded
+            and not guard_is_invalid
+        ):
+            # Dedup/merge decisions mean this summary is already represented;
+            # clear pending events to avoid infinite flush retries.
+            await runtime_state.flush_tracker.mark_flushed(session_id=session_id)
+            payload: Dict[str, Any] = {
+                "flushed": True,
+                "reason": "write_guard_deduped",
+                **_guard_fields(guard_decision),
+            }
+            guard_target_uri = guard_decision.get("target_uri")
+            if isinstance(guard_target_uri, str) and guard_target_uri.strip():
+                payload["uri"] = guard_target_uri
+            return payload
+
+        payload: Dict[str, Any] = {
+            "flushed": False,
+            "reason": "write_guard_blocked",
+            **_guard_fields(guard_decision),
+        }
+        if bool(guard_decision.get("degraded")):
+            payload["degraded"] = True
+            degrade_reasons = guard_decision.get("degrade_reasons")
+            if isinstance(degrade_reasons, list) and degrade_reasons:
+                payload["degrade_reasons"] = list(dict.fromkeys(degrade_reasons))
+        return payload
     defer_index = await _should_defer_index_on_write()
     result = await client.create_memory(
         parent_path=parent_path,
@@ -1317,6 +1391,7 @@ async def _flush_session_summary_to_memory(
     payload: Dict[str, Any] = {
         "flushed": True,
         "uri": created_uri,
+        **_guard_fields(guard_decision),
         "gist_method": gist_method,
         "quality": round(gist_quality, 3),
         "source_hash": source_hash,
@@ -2750,7 +2825,15 @@ async def read_memory(
             )
             try:
                 domain, path = parse_uri(uri)
-                memory = await client.get_memory_by_path(path, domain)
+                try:
+                    memory = await client.get_memory_by_path(
+                        path,
+                        domain,
+                        reinforce_access=False,
+                    )
+                except TypeError:
+                    # Backward compatibility for test doubles/clients without reinforce_access.
+                    memory = await client.get_memory_by_path(path, domain)
                 if memory:
                     full_uri = make_uri(domain, path)
                     await _record_session_hit(
@@ -3055,8 +3138,8 @@ async def create_memory(
                 }
             )
 
-        guard_action = str(guard_decision.get("action") or "ADD").upper()
-        blocked = guard_action in {"NOOP", "UPDATE", "DELETE"}
+        guard_action = str(guard_decision.get("action") or "NOOP").upper()
+        blocked = guard_action != "ADD"
         try:
             await _record_guard_event(
                 operation="create_memory",
@@ -3212,7 +3295,8 @@ async def update_memory(
         update_memory("writer://chapter_1", priority=5)
     """
     guard_decision = _normalize_guard_decision(
-        {"action": "BYPASS", "method": "none", "reason": "guard_not_evaluated"}
+        {"action": "BYPASS", "method": "none", "reason": "guard_not_evaluated"},
+        allow_bypass=True,
     )
 
     try:
@@ -3410,22 +3494,25 @@ async def update_memory(
                     "action": "BYPASS",
                     "method": "none",
                     "reason": "metadata_only_update",
-                }
+                },
+                allow_bypass=True,
             )
 
-        guard_action = str(guard_decision.get("action") or "BYPASS").upper()
+        guard_action = str(guard_decision.get("action") or "NOOP").upper()
         blocked = False
         if content is not None:
-            if guard_action in {"NOOP", "DELETE"}:
-                blocked = True
+            if guard_action == "ADD":
+                blocked = False
             elif guard_action == "UPDATE":
                 target_id = guard_decision.get("target_id")
                 if (
-                    isinstance(target_id, int)
-                    and isinstance(current_memory_id, int)
-                    and target_id != current_memory_id
+                    not isinstance(target_id, int)
+                    or not isinstance(current_memory_id, int)
+                    or target_id != current_memory_id
                 ):
                     blocked = True
+            else:
+                blocked = True
         try:
             await _record_guard_event(
                 operation="update_memory",

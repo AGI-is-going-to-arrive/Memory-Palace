@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import run_sse
 from run_sse import apply_mcp_api_key_middleware
 
 
@@ -72,3 +73,31 @@ def test_sse_auth_accepts_bearer_token(monkeypatch) -> None:
         response = client.get("/ping", headers=headers)
     assert response.status_code == 200
     assert response.json().get("ok") is True
+
+
+def test_sse_main_runs_mcp_startup_before_uvicorn(monkeypatch) -> None:
+    call_order = []
+
+    async def _fake_startup() -> None:
+        call_order.append("startup")
+
+    def _fake_create_sse_app():
+        call_order.append("create_sse_app")
+        return {"app": "fake"}
+
+    def _fake_uvicorn_run(app, host, port):
+        call_order.append(("uvicorn", host, port, app))
+
+    monkeypatch.setattr(run_sse, "mcp_startup", _fake_startup)
+    monkeypatch.setattr(run_sse, "create_sse_app", _fake_create_sse_app)
+    monkeypatch.setattr(run_sse.uvicorn, "run", _fake_uvicorn_run)
+    monkeypatch.setenv("HOST", "127.0.0.1")
+    monkeypatch.setenv("PORT", "8010")
+
+    run_sse.main()
+
+    assert call_order[0] == "startup"
+    assert call_order[1] == "create_sse_app"
+    assert call_order[2][0] == "uvicorn"
+    assert call_order[2][1] == "127.0.0.1"
+    assert call_order[2][2] == 8010

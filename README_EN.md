@@ -371,6 +371,11 @@ bash scripts/docker_one_click.sh --profile b
 
 # Windows PowerShell
 .\scripts\docker_one_click.ps1 -Profile b
+
+# Explicitly opt in when runtime env injection is required (disabled by default)
+bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
+# or
+.\scripts\docker_one_click.ps1 -Profile c -AllowRuntimeEnvInjection
 ```
 
 | Service | URL |
@@ -472,7 +477,7 @@ Memory Palace exposes **9 standardized tools** via the MCP protocol:
 |---|---|
 | `system://boot` | Loads core memories from `CORE_MEMORY_URIS` when `system://boot` is read |
 | `system://index` | Index status overview |
-| `system://recent` | Recently accessed memories |
+| `system://recent` | Recently modified memories |
 | `system://recent/N` | Last N memories |
 
 ### Starting the MCP Server

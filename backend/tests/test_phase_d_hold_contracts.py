@@ -228,9 +228,9 @@ async def test_phase_d_hold_search_and_read_do_not_create_new_memory_records(
         assert "hold_boundary_node" in read_raw
 
         after_read_access = await _memory_access_snapshot(client, int(created["id"]))
-        assert after_read_access["access_count"] > int(
+        assert after_read_access["access_count"] == int(
             after_search_access["access_count"]
-        )
+        ) + 1
         assert float(after_read_access["vitality_score"]) >= float(
             after_search_access["vitality_score"]
         )

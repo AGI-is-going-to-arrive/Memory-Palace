@@ -9,11 +9,12 @@ no_build=0
 frontend_port="${MEMORY_PALACE_FRONTEND_PORT:-${NOCTURNE_FRONTEND_PORT:-3000}}"
 backend_port="${MEMORY_PALACE_BACKEND_PORT:-${NOCTURNE_BACKEND_PORT:-18000}}"
 auto_port=1
+allow_runtime_env_injection=0
 
 usage() {
   cat <<'USAGE'
 Usage:
-  bash scripts/docker_one_click.sh [--profile a|b|c|d] [--frontend-port <port>] [--backend-port <port>] [--no-auto-port] [--no-build]
+  bash scripts/docker_one_click.sh [--profile a|b|c|d] [--frontend-port <port>] [--backend-port <port>] [--no-auto-port] [--no-build] [--allow-runtime-env-injection]
 USAGE
 }
 
@@ -141,11 +142,9 @@ apply_profile_runtime_overrides() {
     "ROUTER_API_BASE"
     "ROUTER_API_KEY"
     "ROUTER_EMBEDDING_MODEL"
-    "RETRIEVAL_EMBEDDING_BACKEND"
     "RETRIEVAL_EMBEDDING_API_BASE"
     "RETRIEVAL_EMBEDDING_API_KEY"
     "RETRIEVAL_EMBEDDING_MODEL"
-    "RETRIEVAL_RERANKER_ENABLED"
     "RETRIEVAL_RERANKER_API_BASE"
     "RETRIEVAL_RERANKER_API_KEY"
     "RETRIEVAL_RERANKER_MODEL"
@@ -267,6 +266,9 @@ while [[ $# -gt 0 ]]; do
     --no-build)
       no_build=1
       ;;
+    --allow-runtime-env-injection)
+      allow_runtime_env_injection=1
+      ;;
     -h|--help)
       usage
       exit 0
@@ -314,7 +316,11 @@ fi
 
 env_file="${PROJECT_ROOT}/.env.docker"
 bash "${SCRIPT_DIR}/apply_profile.sh" docker "${profile}" "${env_file}"
-apply_profile_runtime_overrides "${env_file}"
+if [[ "${allow_runtime_env_injection}" -eq 1 ]]; then
+  apply_profile_runtime_overrides "${env_file}"
+else
+  echo "[override] runtime env injection disabled by default; pass --allow-runtime-env-injection to opt in."
+fi
 assert_profile_external_settings_ready "${env_file}" "${profile}"
 
 cd "${PROJECT_ROOT}"

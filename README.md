@@ -371,6 +371,11 @@ bash scripts/docker_one_click.sh --profile b
 
 # Windows PowerShell
 .\scripts\docker_one_click.ps1 -Profile b
+
+# 仅在需要时显式注入当前进程环境（默认关闭）
+bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
+# 或
+.\scripts\docker_one_click.ps1 -Profile c -AllowRuntimeEnvInjection
 ```
 
 | 服务 | 地址 |
@@ -472,7 +477,7 @@ Memory Palace 通过 MCP 协议暴露 **9 个标准化工具**：
 |---|---|
 | `system://boot` | 读取该 URI 时按 `CORE_MEMORY_URIS` 加载核心记忆 |
 | `system://index` | 索引状态概览 |
-| `system://recent` | 最近访问的记忆 |
+| `system://recent` | 最近修改的记忆 |
 | `system://recent/N` | 最近 N 条记忆 |
 
 ### 启动 MCP 服务器

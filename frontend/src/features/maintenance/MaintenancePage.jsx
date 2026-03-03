@@ -37,6 +37,8 @@ export default function MaintenancePage() {
   const [vitalityThreshold, setVitalityThreshold] = useState(0.35);
   const [vitalityInactiveDays, setVitalityInactiveDays] = useState(14);
   const [vitalityLimit, setVitalityLimit] = useState(80);
+  const [vitalityDomain, setVitalityDomain] = useState('');
+  const [vitalityPathPrefix, setVitalityPathPrefix] = useState('');
   const [vitalityReviewer, setVitalityReviewer] = useState('maintenance_dashboard');
   const [vitalityProcessing, setVitalityProcessing] = useState(false);
   const [vitalityPreparedReview, setVitalityPreparedReview] = useState(null);
@@ -91,6 +93,8 @@ export default function MaintenancePage() {
       const parsedThreshold = Number(thresholdRaw);
       const parsedInactiveDays = Number(inactiveDaysRaw);
       const parsedLimit = Number(limitRaw);
+      const domainRaw = String(vitalityDomain ?? '').trim();
+      const pathPrefixRaw = String(vitalityPathPrefix ?? '').trim();
       if (!Number.isFinite(parsedThreshold) || parsedThreshold < 0) {
         throw new Error('threshold must be a non-negative number');
       }
@@ -108,11 +112,18 @@ export default function MaintenancePage() {
       if (forceDecay) {
         await triggerVitalityDecay({ force: true, reason: 'maintenance.manual_refresh' });
       }
-      const res = await queryVitalityCleanupCandidates({
+      const payload = {
         threshold: parsedThreshold,
         inactive_days: parsedInactiveDays,
         limit: parsedLimit,
-      });
+      };
+      if (domainRaw) {
+        payload.domain = domainRaw;
+      }
+      if (pathPrefixRaw) {
+        payload.path_prefix = pathPrefixRaw;
+      }
+      const res = await queryVitalityCleanupCandidates(payload);
       if (requestSeq !== vitalityRequestSeqRef.current) return;
       setVitalityCandidates(Array.isArray(res.items) ? res.items : []);
       setVitalityQueryMeta({
@@ -306,8 +317,8 @@ export default function MaintenancePage() {
     } catch (err) {
       const detailText = extractApiError(err, 'Failed to confirm cleanup');
       setVitalityError(detailText);
-      invalidatePreparedReview();
       if (detailText !== 'confirmation_phrase_mismatch') {
+        invalidatePreparedReview();
         await loadVitalityCandidates();
       }
     } finally {
@@ -682,6 +693,36 @@ export default function MaintenancePage() {
                     }}
                     disabled={vitalityProcessing}
                     className="w-20 rounded border border-stone-700 bg-stone-900 px-2 py-1 text-stone-200"
+                  />
+                </label>
+                <label className="flex items-center gap-1 text-stone-400">
+                  domain
+                  <input
+                    type="text"
+                    value={vitalityDomain}
+                    onChange={(e) => {
+                      setVitalityDomain(e.target.value);
+                      invalidatePreparedReview();
+                    }}
+                    disabled={vitalityProcessing}
+                    className="w-24 rounded border border-stone-700 bg-stone-900 px-2 py-1 text-stone-200"
+                    placeholder="(optional)"
+                    aria-label="vitality domain"
+                  />
+                </label>
+                <label className="flex items-center gap-1 text-stone-400">
+                  path_prefix
+                  <input
+                    type="text"
+                    value={vitalityPathPrefix}
+                    onChange={(e) => {
+                      setVitalityPathPrefix(e.target.value);
+                      invalidatePreparedReview();
+                    }}
+                    disabled={vitalityProcessing}
+                    className="w-32 rounded border border-stone-700 bg-stone-900 px-2 py-1 text-stone-200"
+                    placeholder="(optional)"
+                    aria-label="vitality path prefix"
                   />
                 </label>
                 <label className="flex items-center gap-1 text-stone-400">
