@@ -49,12 +49,18 @@ mcp = FastMCP("Memory Palace Interface")
 # =============================================================================
 # Valid domains (protocol prefixes)
 # =============================================================================
-VALID_DOMAINS = [
-    d.strip()
-    for d in os.getenv("VALID_DOMAINS", "core,writer,game,notes,system").split(",")
-]
-DEFAULT_DOMAIN = "core"
 READ_ONLY_DOMAINS = {"system"}
+VALID_DOMAINS = list(
+    dict.fromkeys(
+        [
+            d.strip().lower()
+            for d in os.getenv("VALID_DOMAINS", "core,writer,game,notes,system").split(",")
+            if d.strip()
+        ]
+        + sorted(READ_ONLY_DOMAINS)
+    )
+)
+DEFAULT_DOMAIN = "core"
 
 # =============================================================================
 # Core Memories Configuration

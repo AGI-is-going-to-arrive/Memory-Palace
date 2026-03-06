@@ -210,9 +210,9 @@
 2. **#4 层级继承**：`read_memory` 增 `include_ancestors` 可选参数，默认 `false`。
 3. **#14 意图 LLM（实验）**：加入 `INTENT_LLM_ENABLED` 实验开关，失败回退关键词规则。
 4. **`SM-2/SM-3`**：补齐短期记忆晋升元数据与 session-first 可观测指标。
-5. **C/D 联调口径（临时）**：本地开发若 router 侧暂未提供 embedding/reranker/llm，可在保持模板 `router` 路径不变的前提下，使用 `--runtime-env-mode none --allow-runtime-env-injection --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env` 注入 API 地址/密钥/模型字段；其中 embedding/reranker 与 LLM（`gpt-5.2`）均按该文件口径执行。该约定仅用于本地联调，不改变模板策略键。
+5. **C/D 联调口径（临时）**：本地开发若 router 侧暂未提供 embedding/reranker/llm，可优先采用“分别直配”的联调思路：通过 `--runtime-env-mode none --allow-runtime-env-injection --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env`（或等价 `file` 模式）注入 API 地址/密钥/模型字段；其中 embedding/reranker 与 LLM（`gpt-5.2`）均按该文件口径执行。这样做的原因是三条链路的模型与故障模式不同，分别直配更利于快速定位问题。该约定仅用于本地联调，不改变发布模板的默认策略键。
 6. **本地联调覆盖来源（记录）**：`new/run_post_change_checks.sh` 对 `--docker-profile c|d` 默认为 `--runtime-env-mode none`（不自动加载本地 runtime 覆盖）；仅在显式传入 `--runtime-env-mode auto|file`，或显式开启 `--allow-runtime-env-injection`（可选叠加 `--runtime-env-file`）时才注入覆盖。注入范围仅限 API/密钥/模型字段，不覆盖 `RETRIEVAL_EMBEDDING_BACKEND` 等模板策略键。前置条件：若 profile c/d 模板仍是占位值（`<your-router-host>` / `replace-with-your-key`），`runtime-env-mode none` 的 pure-template smoke 失败属于预期；要通过需真实 router 配置或显式注入联调。
-7. **上线与降级口径**：客户环境默认仍走 `router`；若 router 侧缺失 embedding/reranker/llm，系统应走既有 fallback 链路避免直接报错。客户环境建议执行一次默认模板链路复验；当前本地联调阶段不作为阻断项。
+7. **上线与降级口径**：客户环境默认仍走 `router`；保留 `router` 的原因是统一入口、统一鉴权/限流、审计与模型切换都更容易运维。若 router 侧缺失 embedding/reranker/llm，系统应走既有 fallback 链路避免直接报错。客户环境建议执行一次默认模板链路复验；当前本地联调阶段不作为阻断项。
 
 验收：
 1. 默认配置下行为与当前版本一致。

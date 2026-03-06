@@ -93,17 +93,24 @@ bash scripts/apply_profile.sh macos b
 | `DATABASE_URL` | SQLite 数据库路径（**必须使用绝对路径**） | `sqlite+aiosqlite:////absolute/path/to/memory_palace/memory_palace.db` |
 | `SEARCH_DEFAULT_MODE` | 检索模式：`keyword` / `semantic` / `hybrid` | `keyword` |
 | `RETRIEVAL_EMBEDDING_BACKEND` | 嵌入后端：`none` / `hash` / `router` / `api` / `openai` | `none` |
+| `RETRIEVAL_EMBEDDING_MODEL` | Embedding 模型名 | `Qwen3-Embedding-8B` |
 | `RETRIEVAL_RERANKER_ENABLED` | 是否启用 Reranker | `false` |
 | `RETRIEVAL_RERANKER_API_BASE` | Reranker API 地址 | 空 |
 | `RETRIEVAL_RERANKER_API_KEY` | Reranker API 密钥 | 空 |
-| `RETRIEVAL_RERANKER_MODEL` | Reranker 模型名 | 空 |
+| `RETRIEVAL_RERANKER_MODEL` | Reranker 模型名 | `Qwen3-Reranker-8B` |
+| `INTENT_LLM_ENABLED` | 实验性意图 LLM 开关 | `false` |
 | `MCP_API_KEY` | HTTP/SSE 接口鉴权密钥 | 空（见下方鉴权说明） |
 | `MCP_API_KEY_ALLOW_INSECURE_LOCAL` | 本地调试时允许无 Key 访问（仅对 `127.0.0.1` 生效） | `false` |
-| `VALID_DOMAINS` | 允许的记忆 URI 域 | `core,writer,game,notes` |
+| `CORS_ALLOW_ORIGINS` | 允许跨域访问的来源列表（留空使用本地默认） | 空 |
+| `VALID_DOMAINS` | 允许的可写记忆 URI 域（`system://` 为内建只读域） | `core,writer,game,notes` |
 
 > B 档位默认使用本地 hash Embedding 且不启用 Reranker；C/D 档位需要配置外部 Embedding 与 Reranker，详见 [DEPLOYMENT_PROFILES.md](DEPLOYMENT_PROFILES.md)。
 >
 > 配置语义说明：`RETRIEVAL_EMBEDDING_BACKEND` 只作用于 Embedding。Reranker 不存在 `RETRIEVAL_RERANKER_BACKEND` 开关，优先读取 `RETRIEVAL_RERANKER_*`，缺失时才回退 `ROUTER_*`（最后回退 `OPENAI_*` 的 base/key）。
+>
+> 更多高级选项（如 `INTENT_LLM_*`、`RETRIEVAL_MMR_*`、`CORS_ALLOW_*`、运行时观测/睡眠整合开关）已写在 `.env.example`，默认保持保守值，不影响最小启动路径。
+>
+> 当前推荐模型：Embedding 使用 `Qwen3-Embedding-8B`，Reranker 使用 `Qwen3-Reranker-8B`；如需启用可选 LLM，推荐使用 `Qwen3.5-35B-A3B`。
 
 ### Step 2：启动后端
 
@@ -175,6 +182,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > **C/D 本地联调固定口径（避免重复踩坑）**：
 >
 > - 当本机 `router` 暂时没有 embedding/reranker/llm 时，使用 `/Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env` 作为注入源。
+> - 当前这份本地 `.env` 会同时提供 `embedding` / `reranker` 模型配置，以及 LLM 配置（当前测试口径为 `gpt-5.2`）。
 > - 当前推荐的本地联调命令（`profile c/d` 二选一）：
 >
 > ```bash
@@ -182,8 +190,14 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > bash new/run_post_change_checks.sh --skip-frontend --skip-sse --with-docker --docker-profile d --runtime-env-mode file --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env --allow-runtime-env-debug
 > ```
 >
-> - LLM 口径沿用该文件中的配置（当前为 `gpt-5.2`）。
-> - 该口径仅用于本地验证。上线/交付前必须回到 `router` 默认链路复验（`runtime-env-mode none` 且不注入本地 `.env`）；若客户环境 `router` 缺模型，系统仍按既有 fallback 链路降级，避免直接报错。
+> - 该口径仅用于本地验证：当前 checkout 的 `profile c/d` 测试允许直接复用这份 `.env` 中的 embedding / reranker / LLM 配置，以避免本机 `router` 缺模型时重复排障。
+> - 上线/交付前必须回到 `router` 默认链路复验（`runtime-env-mode none` 且不注入本地 `.env`）；真实客户环境应由 `router` 提供 llm / embedding / reranker，即使暂时缺项，系统也会按既有 fallback 链路降级，避免直接报错。
+>
+> **为什么当前本地建议这样配**：
+>
+> - 本地最常见的问题不是后端主流程，而是 `router` 本身没有同步部署 embedding / reranker / llm 模型。
+> - 将 `embedding` / `reranker` / `llm` 分别直配到可用的 OpenAI-compatible 端点，更容易判断到底是哪条链路不可达。
+> - 这种口径只解决“本地联调效率”问题，不改变生产设计：上线时仍应优先由 `router` 作为统一入口承接模型编排与 fallback。
 
 > 脚本会自动执行以下步骤：
 >
@@ -214,6 +228,43 @@ docker compose -f docker-compose.yml down
 ```
 
 > 若当前机器是 `arm64` 且没有原生 Windows / native `pwsh`，`deployment.windows_equivalent_pwsh_docker` 会以 `pwsh-in-docker` 等效 smoke 为准；该检查在不适合当前宿主机时可能记为 `SKIP`，而不是 `FAIL`。
+
+### 4.1 备份当前数据库
+
+在做批量测试、迁移验证或大范围配置切换前，建议先做一次 SQLite 一致性备份：
+
+```bash
+# macOS / Linux
+bash scripts/backup_memory.sh
+
+# 指定 env / 输出目录
+bash scripts/backup_memory.sh --env-file .env --output-dir backups
+```
+
+```powershell
+# Windows PowerShell
+.\scripts\backup_memory.ps1
+```
+
+> 备份文件默认写入 `backups/`，该目录已加入仓库级 `.gitignore`，不会上传到 GitHub。
+
+### 4.2 哪些本地文件不会上传 GitHub
+
+当前仓库已经把以下典型本地产物放入 `Memory-Palace/.gitignore`：
+
+- 运行期数据库：`*.db`、`*.sqlite`、`*.sqlite3`
+- 本地缓存与临时目录：`.tmp/`、`backend/.pytest_cache/`
+- 前端本地产物：`frontend/node_modules/`、`frontend/dist/`
+- 日志与快照：`*.log`、`snapshots/`、`backups/`
+- 临时测试草稿：`frontend/src/*.tmp.test.jsx`
+
+上传前建议执行：
+
+```bash
+bash scripts/pre_publish_check.sh
+```
+
+它会检查本地敏感产物、数据库、日志、个人路径和 `.env.example` 占位项，帮助你确认哪些文件不该进入 GitHub。
 
 ---
 

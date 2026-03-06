@@ -33,6 +33,7 @@ check_local_artifacts() {
     ".env.docker"
     ".venv"
     ".claude"
+    ".tmp"
     "demo.db"
     "snapshots"
     "backend/backend.log"
@@ -41,6 +42,11 @@ check_local_artifacts() {
     "backend/tests/benchmark/.real_profile_cache"
     "frontend/node_modules"
     "frontend/dist"
+  )
+  local -a glob_paths=(
+    "backend/*.db"
+    "backend/*.sqlite"
+    "backend/*.sqlite3"
   )
 
   local found_any=0
@@ -52,17 +58,27 @@ check_local_artifacts() {
     fi
   done
 
+  local pattern match
+  for pattern in "${glob_paths[@]}"; do
+    while IFS= read -r match; do
+      [[ -n "${match}" ]] || continue
+      warn "本地文件存在（上传前建议移除或确认未纳入提交）: ${match}"
+      found_any=1
+    done < <(compgen -G "${pattern}" || true)
+  done
+
   if [[ "${found_any}" -eq 0 ]]; then
     pass "未发现高风险本地产物目录"
   fi
 }
 
 check_tracked_forbidden_paths() {
-  local -a paths=(
+  local -a pathspecs=(
     ".env"
     ".env.docker"
     ".venv"
     ".claude"
+    ".tmp"
     "demo.db"
     "snapshots"
     "backend/backend.log"
@@ -71,17 +87,18 @@ check_tracked_forbidden_paths() {
     "backend/tests/benchmark/.real_profile_cache"
     "frontend/node_modules"
     "frontend/dist"
+    "backend/*.db"
+    "backend/*.sqlite"
+    "backend/*.sqlite3"
   )
 
   local hit=0
-  local path tracked
-  for path in "${paths[@]}"; do
-    tracked="$(git ls-files -- "${path}" || true)"
-    if [[ -n "${tracked}" ]]; then
-      fail "以下敏感/本地产物已被跟踪，请先移出版本库: ${path}"
-      hit=1
-    fi
-  done
+  local tracked
+  while IFS= read -r tracked; do
+    [[ -n "${tracked}" ]] || continue
+    fail "以下敏感/本地产物已被跟踪，请先移出版本库: ${tracked}"
+    hit=1
+  done < <(git ls-files -- "${pathspecs[@]}" || true)
 
   if [[ "${hit}" -eq 0 ]]; then
     pass "敏感本地产物未被跟踪"

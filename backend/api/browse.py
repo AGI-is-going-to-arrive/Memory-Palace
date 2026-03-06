@@ -16,12 +16,17 @@ from .maintenance import require_maintenance_api_key
 from sqlalchemy import select
 
 router = APIRouter(prefix="/browse", tags=["browse"])
-_VALID_DOMAINS = [
-    d.strip().lower()
-    for d in str(os.getenv("VALID_DOMAINS", "core,writer,game,notes,system")).split(",")
-    if d.strip()
-]
 _READ_ONLY_DOMAINS = {"system"}
+_VALID_DOMAINS = list(
+    dict.fromkeys(
+        [
+            d.strip().lower()
+            for d in str(os.getenv("VALID_DOMAINS", "core,writer,game,notes,system")).split(",")
+            if d.strip()
+        ]
+        + sorted(_READ_ONLY_DOMAINS)
+    )
+)
 
 
 class NodeUpdate(BaseModel):

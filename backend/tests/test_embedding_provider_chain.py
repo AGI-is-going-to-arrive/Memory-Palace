@@ -9,15 +9,31 @@ def _sqlite_url(db_path: Path) -> str:
     return f"sqlite+aiosqlite:///{db_path}"
 
 
+def _clear_embedding_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "RETRIEVAL_EMBEDDING_API_BASE",
+        "RETRIEVAL_EMBEDDING_BASE",
+        "ROUTER_API_BASE",
+        "OPENAI_BASE_URL",
+        "OPENAI_API_BASE",
+        "RETRIEVAL_EMBEDDING_API_KEY",
+        "RETRIEVAL_EMBEDDING_KEY",
+        "ROUTER_API_KEY",
+        "OPENAI_API_KEY",
+        "RETRIEVAL_EMBEDDING_MODEL",
+        "ROUTER_EMBEDDING_MODEL",
+        "OPENAI_EMBEDDING_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.mark.asyncio
 async def test_embedding_provider_chain_disabled_keeps_legacy_fallback(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    _clear_embedding_env(monkeypatch)
     monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "api")
     monkeypatch.setenv("EMBEDDING_PROVIDER_CHAIN_ENABLED", "false")
-    monkeypatch.delenv("RETRIEVAL_EMBEDDING_API_BASE", raising=False)
-    monkeypatch.delenv("ROUTER_API_BASE", raising=False)
-    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
 
     client = SQLiteClient(_sqlite_url(tmp_path / "provider-chain-disabled.db"))
     await client.init_db()
@@ -40,11 +56,11 @@ async def test_embedding_provider_chain_disabled_keeps_legacy_fallback(
 async def test_embedding_provider_chain_uses_configured_fallback_provider(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    _clear_embedding_env(monkeypatch)
     monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "router")
     monkeypatch.setenv("EMBEDDING_PROVIDER_CHAIN_ENABLED", "true")
     monkeypatch.setenv("EMBEDDING_PROVIDER_FAIL_OPEN", "false")
     monkeypatch.setenv("EMBEDDING_PROVIDER_FALLBACK", "api")
-    monkeypatch.delenv("ROUTER_API_BASE", raising=False)
     monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_BASE", "https://embedding.example/v1")
     monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_KEY", "test-key")
     monkeypatch.setenv("RETRIEVAL_EMBEDDING_MODEL", "chain-model")

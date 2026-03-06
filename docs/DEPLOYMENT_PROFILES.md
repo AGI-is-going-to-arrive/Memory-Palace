@@ -53,11 +53,17 @@
 >
 > **本仓本地联调补充（记录）**：`new/run_post_change_checks.sh` 在 `--docker-profile c|d` 下默认 `--runtime-env-mode none`（不加载本地 runtime 覆盖）；仅在显式传入 `--runtime-env-mode auto|file` 且附加 `--allow-runtime-env-debug` 时，才会加载覆盖文件（优先 `Memory-Palace/.env`，其次 `~/Desktop/clawmemo/nocturne_memory/.env`）。若保持 `--runtime-env-mode none`，注入模式必须同时提供 `--allow-runtime-env-injection` 与 `--runtime-env-file /abs/path/.env`；脚本会先加载该文件，再把允许的环境变量注入 `.env.docker`（不做自动探测，适配 CI secrets 注入）。在 `profile c/d` 的注入模式下，脚本会强制 `RETRIEVAL_EMBEDDING_BACKEND=api`，避免本机 router 缺 embedding/reranker 时误判失败；其余仍注入 API 地址/密钥/模型字段及 `WRITE_GUARD_LLM_ENABLED`、`COMPACT_GIST_LLM_ENABLED`。
 >
-> **当前本地开发约定（避免重复踩坑）**：当本机 router 未部署 embedding/reranker 时，C/D 本地联调使用 `/Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env` 提供 embedding/reranker 配置；LLM 相关字段统一使用该文件中的 `gpt-5.2` 口径。推荐命令：`bash new/run_post_change_checks.sh --with-docker --docker-profile c --runtime-env-mode file --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env --allow-runtime-env-debug`（`profile d` 同理）。
+> **当前本地开发约定（避免重复踩坑）**：当本机 router 未部署 embedding/reranker/llm 时，C/D 本地联调统一使用 `/Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env` 作为测试注入源；其中 embedding、reranker 与 LLM（当前为 `gpt-5.2`）都直接沿用该文件。推荐命令：`bash new/run_post_change_checks.sh --with-docker --docker-profile c --runtime-env-mode file --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env --allow-runtime-env-debug`（`profile d` 同理）。
+>
+> **上线口径提醒**：上述 `.env` 注入只用于当前本地开发/验证。真实交付时仍应优先回到 C/D 模板的 `router` 主链路，由客户环境提供 llm / embedding / reranker；若 router 侧暂时缺项，系统也会按既有 fallback 机制降级，而不是直接报错。
 >
 > `runtime-env-mode none + --allow-runtime-env-injection + --runtime-env-file` 适用于本地 C/D API 联调（脚本会强制 `RETRIEVAL_EMBEDDING_BACKEND=api`）；若要验证“保持 router 策略不变”的发布场景，请使用 `runtime-env-mode none` 且**不要**附加注入参数。
 >
-> **上线口径不变**：面向客户环境时仍以 C/D 模板中的 `router` 作为默认入口；若 router 侧未提供 embedding/reranker/llm，系统按既有降级链路 fallback，不因缺失而直接中断。
+> **为什么本地不强制一切都走 router**：
+> - `embedding`、`reranker`、`llm` 三条链路的模型、地址、密钥和故障模式不同，分开配置更便于定位和替换。
+> - 当前仓库已经支持分别直配：`RETRIEVAL_EMBEDDING_*`、`RETRIEVAL_RERANKER_*`、`WRITE_GUARD_LLM_* / COMPACT_GIST_LLM_*` 均可独立工作。
+> - `router` 的主要价值在生产侧：统一入口、模型编排、鉴权、限流、审计和后续 provider 切换；它适合作为**交付默认口径**，但不必成为**本地排障的唯一入口**。
+>
 >
 > **配置优先级说明（避免误配）**：
 > - `RETRIEVAL_EMBEDDING_BACKEND` 只影响 Embedding 链路，不影响 Reranker。
@@ -109,8 +115,8 @@ RETRIEVAL_EMBEDDING_BACKEND=router
 # Embedding 配置
 ROUTER_API_BASE=http://127.0.0.1:PORT/v1          # ← 替换 PORT 为实际端口
 ROUTER_API_KEY=replace-with-your-key
-ROUTER_EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B
-RETRIEVAL_EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B
+ROUTER_EMBEDDING_MODEL=Qwen3-Embedding-8B
+RETRIEVAL_EMBEDDING_MODEL=Qwen3-Embedding-8B
 RETRIEVAL_EMBEDDING_API_BASE=http://127.0.0.1:PORT/v1
 RETRIEVAL_EMBEDDING_API_KEY=replace-with-your-key
 RETRIEVAL_EMBEDDING_DIM=4096
@@ -119,7 +125,7 @@ RETRIEVAL_EMBEDDING_DIM=4096
 RETRIEVAL_RERANKER_ENABLED=true
 RETRIEVAL_RERANKER_API_BASE=http://127.0.0.1:PORT/v1
 RETRIEVAL_RERANKER_API_KEY=replace-with-your-key
-RETRIEVAL_RERANKER_MODEL=Qwen/Qwen3-Reranker-8B
+RETRIEVAL_RERANKER_MODEL=Qwen3-Reranker-8B
 RETRIEVAL_RERANKER_WEIGHT=0.30                     # 推荐 0.20 ~ 0.40
 ```
 
@@ -132,8 +138,8 @@ RETRIEVAL_RERANKER_ENABLED=true
 RETRIEVAL_RERANKER_API_BASE=http://127.0.0.1:PORT/v1
 RETRIEVAL_RERANKER_API_KEY=replace-with-your-key
 # 保持以下模型配置不变
-RETRIEVAL_EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B
-RETRIEVAL_RERANKER_MODEL=Qwen/Qwen3-Reranker-8B
+RETRIEVAL_EMBEDDING_MODEL=Qwen3-Embedding-8B
+RETRIEVAL_RERANKER_MODEL=Qwen3-Reranker-8B
 # 注意：不存在 RETRIEVAL_RERANKER_BACKEND 配置项
 ```
 
@@ -182,14 +188,14 @@ bash new/run_post_change_checks.sh --with-docker --docker-profile d --skip-sse -
 
 | 用途 | 默认模型 | 维度 | 说明 |
 |---|---|---|---|
-| Embedding | `Qwen/Qwen3-Embedding-8B` | 4096 | 多语言，支持中英文，精度高 |
-| Reranker | `Qwen/Qwen3-Reranker-8B` | — | 高精度重排序，支持中英文 |
+| Embedding | `Qwen3-Embedding-8B` | 4096 | 多语言，支持中英文，精度高 |
+| Reranker | `Qwen3-Reranker-8B` | — | 高精度重排序，支持中英文 |
 
 你也可以替换为其他 OpenAI-compatible 模型，例如 `bge-m3`、`text-embedding-3-small` 等，只需修改对应的 `*_MODEL` 和 `*_DIM` 参数。
 
 ---
 
-## 4. 可选 LLM 参数（write_guard / compact_context）
+## 4. 可选 LLM 参数（write_guard / compact_context / intent）
 
 这些参数控制两个可选的 LLM 功能：**写入守卫**（质量过滤）和**上下文压缩**（摘要生成）。
 
@@ -200,16 +206,28 @@ bash new/run_post_change_checks.sh --with-docker --docker-profile d --skip-sse -
 WRITE_GUARD_LLM_ENABLED=false
 WRITE_GUARD_LLM_API_BASE=             # OpenAI-compatible /chat/completions 端点
 WRITE_GUARD_LLM_API_KEY=
-WRITE_GUARD_LLM_MODEL=
+WRITE_GUARD_LLM_MODEL=Qwen3.5-35B-A3B
 
 # Compact Context Gist LLM（上下文压缩，生成摘要）
 COMPACT_GIST_LLM_ENABLED=false
 COMPACT_GIST_LLM_API_BASE=
 COMPACT_GIST_LLM_API_KEY=
-COMPACT_GIST_LLM_MODEL=
+COMPACT_GIST_LLM_MODEL=Qwen3.5-35B-A3B
+
+# Intent LLM（实验性意图分类增强）
+INTENT_LLM_ENABLED=false
+INTENT_LLM_API_BASE=
+INTENT_LLM_API_KEY=
+INTENT_LLM_MODEL=Qwen3.5-35B-A3B
 ```
 
 > **回退机制**：当 `COMPACT_GIST_LLM_*` 未配置时，`compact_context` 会自动回退使用 `WRITE_GUARD_LLM_*` 的配置。两条链路均使用 OpenAI-compatible chat 接口（`/chat/completions`）。
+>
+> **推荐模型**：Embedding 使用 `Qwen3-Embedding-8B`，Reranker 使用 `Qwen3-Reranker-8B`，可选 LLM（write_guard / compact_context / intent）使用 `Qwen3.5-35B-A3B`。
+>
+> **补充说明**：`INTENT_LLM_*` 为实验性能力，关闭或不可用时会直接回退关键词规则，不影响默认检索路径。
+>
+> **完整高级配置**：`CORS_ALLOW_*`、`RETRIEVAL_MMR_*`、`INDEX_LITE_ENABLED`、`AUDIT_VERBOSE`、运行时观测/睡眠整合上限等不在本节逐项展开，统一以 `.env.example` 为准。
 
 ---
 

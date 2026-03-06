@@ -218,8 +218,11 @@ memory-palace/
 ├── scripts/
 │   ├── apply_profile.sh        # macOS/Linux 档位应用脚本
 │   ├── apply_profile.ps1       # Windows 档位应用脚本
+│   ├── backup_memory.sh        # macOS/Linux SQLite 一致性备份
+│   ├── backup_memory.ps1       # Windows SQLite 一致性备份
 │   ├── docker_one_click.sh     # macOS/Linux 一键 Docker 部署
-│   └── docker_one_click.ps1    # Windows 一键 Docker 部署
+│   ├── docker_one_click.ps1    # Windows 一键 Docker 部署
+│   └── pre_publish_check.sh    # 上传前本地产物 / 泄露扫描
 ├── docs/                       # 完整文档集
 ├── .env.example                # 配置模板（140 行，含详细注释）
 ├── docker-compose.yml          # Docker Compose 定义
@@ -416,13 +419,13 @@ Memory Palace 提供四种部署档位以匹配你的硬件和需求：
 RETRIEVAL_EMBEDDING_BACKEND=api
 RETRIEVAL_EMBEDDING_API_BASE=http://localhost:11434/v1   # 例如 Ollama
 RETRIEVAL_EMBEDDING_API_KEY=your-api-key
-RETRIEVAL_EMBEDDING_MODEL=bge-m3
+RETRIEVAL_EMBEDDING_MODEL=Qwen3-Embedding-8B
 
 # ── Reranker 模型 ───────────────────────────────────────────
 RETRIEVAL_RERANKER_ENABLED=true
 RETRIEVAL_RERANKER_API_BASE=http://localhost:11434/v1
 RETRIEVAL_RERANKER_API_KEY=your-api-key
-RETRIEVAL_RERANKER_MODEL=bge-reranker-v2-m3
+RETRIEVAL_RERANKER_MODEL=Qwen3-Reranker-8B
 
 # ── 调参旋钮（推荐 0.20 ~ 0.40）────────────────────────────
 RETRIEVAL_RERANKER_WEIGHT=0.25
@@ -432,6 +435,12 @@ RETRIEVAL_RERANKER_WEIGHT=0.25
 > - `RETRIEVAL_EMBEDDING_BACKEND` 只控制 Embedding 链路。
 > - Reranker 没有 `RETRIEVAL_RERANKER_BACKEND` 开关，启用与否由 `RETRIEVAL_RERANKER_ENABLED` 控制。
 > - Reranker 连接参数优先读取 `RETRIEVAL_RERANKER_API_BASE/API_KEY/MODEL`；缺失时才回退 `ROUTER_*`（其中 base/key 还可继续回退 `OPENAI_*`）。
+>
+> **推荐口径（重要）**：
+> - **本地开发 / 调试**：优先直接分别配置 `RETRIEVAL_EMBEDDING_*`、`RETRIEVAL_RERANKER_*`、`WRITE_GUARD_LLM_*` / `COMPACT_GIST_LLM_*`。
+> - **为什么这样配**：因为三条链路的可达性、模型名、性能瓶颈往往不同，分别直配更容易定位问题，也不会把“本机 router 没有某个模型”的问题误判成整个系统故障。
+> - **生产 / 客户环境**：若已有统一模型网关，再回到 `router` 主链路；它更适合承接统一鉴权、限流、审计和模型切换，但不是本地调试的硬性前提。
+> - **更多高级配置**：例如 `INTENT_LLM_*`、`CORS_ALLOW_*`、`RETRIEVAL_MMR_*` 与运行时观测/睡眠整合开关，统一以 `.env.example` 和 `docs/DEPLOYMENT_PROFILES.md` 为准。
 
 ### 可选：LLM 驱动的 Write Guard 与 Gist
 
@@ -440,14 +449,16 @@ RETRIEVAL_RERANKER_WEIGHT=0.25
 WRITE_GUARD_LLM_ENABLED=true
 WRITE_GUARD_LLM_API_BASE=http://localhost:11434/v1
 WRITE_GUARD_LLM_API_KEY=your-api-key
-WRITE_GUARD_LLM_MODEL=qwen3
+WRITE_GUARD_LLM_MODEL=Qwen3.5-35B-A3B
 
 # ── Compact Gist LLM（留空则回退至 Write Guard 配置）───────
 COMPACT_GIST_LLM_ENABLED=true
 COMPACT_GIST_LLM_API_BASE=
 COMPACT_GIST_LLM_API_KEY=
-COMPACT_GIST_LLM_MODEL=
+COMPACT_GIST_LLM_MODEL=Qwen3.5-35B-A3B
 ```
+
+> 当前推荐模型：Embedding 使用 `Qwen3-Embedding-8B`，Reranker 使用 `Qwen3-Reranker-8B`，LLM 使用 `Qwen3.5-35B-A3B`。如需启用实验性的 Intent LLM、CORS、自定义 MMR 或运行时审计上限，请直接参考 `.env.example`；README 只保留最常用主配置。
 
 档位模板位于：`deploy/profiles/{macos,windows,docker}/profile-{a,b,c,d}.env`
 

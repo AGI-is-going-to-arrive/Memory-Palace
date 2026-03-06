@@ -210,6 +210,11 @@ frontend/src/
 5. 返回 `results` 与 `degrade_reasons`。
 
 > 意图分类使用 `keyword_scoring_v2` 方法实现（`db/sqlite_client.py` `classify_intent` 方法），通过关键词匹配评分与排名进行意图推断，无需外部模型调用。
+>
+> **配置策略说明**：
+> - 本项目支持两种思路：`1)` 分别直配 embedding / reranker / llm；`2)` 通过 `router` 统一代理这些能力。
+> - 本地开发默认更推荐前者，因为三条链路的故障通常彼此独立，分别配置更容易确认是哪一个模型、哪个端点或哪组密钥出了问题。
+> - `router` 更适合作为生产 / 客户环境的统一入口：便于集中做鉴权、限流、审计、模型切换与 fallback 编排。
 
 ![记忆写入与审查时序图](images/记忆写入与审查时序图.png)
 
@@ -233,6 +238,8 @@ Docker 端口环境变量：
 - 镜像定义：`deploy/docker/Dockerfile.backend`（基于 `python:3.11-slim`）、`deploy/docker/Dockerfile.frontend`（构建阶段 `node:22-alpine`，运行阶段 `nginxinc/nginx-unprivileged:1.27-alpine`）
 - Nginx 配置：`deploy/docker/nginx.conf`
 - 入口脚本：`deploy/docker/backend-entrypoint.sh`
+- 备份脚本：`scripts/backup_memory.sh`、`scripts/backup_memory.ps1`
+- 上传前检查：`scripts/pre_publish_check.sh`
 
 ---
 

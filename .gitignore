@@ -5,6 +5,7 @@
 
 # Local tooling metadata
 .claude/
+.tmp/
 
 # OS artifacts
 .DS_Store
@@ -34,11 +35,11 @@ backend/.pytest_cache/
 frontend/node_modules/
 frontend/dist/
 frontend/.venv/
+frontend/src/*.tmp.test.jsx
 
 # Known local-only files
 nocturne_memory.db
 migration_log.json
-scripts/backup_memory.ps1
 backend/backend.log
 frontend/frontend.log
 backend/tests/benchmark/.real_profile_cache/

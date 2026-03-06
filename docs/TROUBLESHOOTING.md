@@ -184,6 +184,11 @@
      -d '{"model":"<RETRIEVAL_RERANKER_MODEL>","query":"ping","documents":["pong"]}'
    ```
 
+   > **排障顺序建议**：
+   > - 本地开发先检查你是否在走“分别直配”口径：`RETRIEVAL_EMBEDDING_*`、`RETRIEVAL_RERANKER_*`、`WRITE_GUARD_LLM_* / COMPACT_GIST_LLM_*`。
+   > - 不要先假设 `router` 一定是最高优先级；当前仓库的本地联调场景里，`embedding` 常常会显式改为 `api` 主链路。
+   > - 只有在你明确按 C/D 发布模板回切 `router` 口径时，才优先把问题归到 `ROUTER_*` 配置或 router 服务本身。
+
 3. **重建索引**（通过 MCP 工具调用）：
 
    ```python
@@ -300,7 +305,7 @@ pytest tests -k "test_search" -q
    |---|---|---|
    | Profile A | `none` | 纯关键字搜索，不使用 Embedding |
    | Profile B | `hash` | 本地 hash Embedding（默认值） |
-   | Profile C/D | `api` 或 `router` | 调用远程 Embedding API |
+   | Profile C/D | `api` 或 `router` | 本地开发优先用 `api` 直配排障；发布验证默认回到 `router` 主链路 |
 
 3. **确认有记忆内容**：
 

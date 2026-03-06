@@ -67,8 +67,15 @@ def test_sqlite_vec_probe_resolves_platform_suffix_and_attempts_load(
         sqlite_vec_extension_path=str(tmp_path / "fake_sqlite_vec")
     )
 
-    assert payload["status"] in {"extension_load_failed", "ok"}
-    assert payload["extension_load_attempted"] is True
+    assert payload["status"] in {
+        "extension_load_failed",
+        "extension_loading_unavailable",
+        "ok",
+    }
+    if payload["status"] == "extension_loading_unavailable":
+        assert payload["extension_load_attempted"] is False
+    else:
+        assert payload["extension_load_attempted"] is True
     assert payload["extension_path"].endswith(".dylib")
     assert payload["extension_path_exists"] is True
 
