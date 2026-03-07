@@ -5,7 +5,7 @@
 <h1 align="center">🏛️ Memory Palace</h1>
 
 <p align="center">
-  <strong>A Long-Term Memory Operating System for AI Agents</strong>
+  <strong>Memory Palace provides AI agents with persistent context and seamless cross-session continuity.</strong>
 </p>
 
 <p align="center">
@@ -31,7 +31,7 @@
 
 ## 🌟 What Is Memory Palace?
 
-**Memory Palace** is a long-term memory operating system purpose-built for AI Agents. It gives LLMs **persistent, searchable, and auditable** external memory — so your Agent never "starts from scratch" in each conversation.
+**Memory Palace** provides AI agents with persistent context and seamless cross-session continuity. It gives LLMs **persistent, searchable, and auditable** historical context — so your Agent never "starts from scratch" in each conversation.
 
 Through the unified [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) interface, Memory Palace seamlessly integrates with mainstream AI development tools — **Codex, Claude Code, Gemini CLI, Cursor, and Antigravity** — enabling cross-session knowledge accumulation and instant recall.
 
@@ -516,8 +516,46 @@ The MCP tool layer handles **deterministic execution**; the Skills strategy laye
 
 | Client | Integration Method |
 |---|---|
-| Codex / Claude Code / Gemini CLI | Project-level system prompt or Skill guide |
+| Claude Code / Codex CLI / OpenCode | Prefer syncing `Memory-Palace/docs/skills/memory-palace` into the matching skills directory |
+| Gemini CLI | Prefer a user-scope install (`install_skill.py --targets gemini --scope user --force`) |
 | Cursor / Antigravity / Trae | Workspace Rules / Project Instructions |
+
+### Install The Skill
+
+```bash
+python Memory-Palace/scripts/sync_memory_palace_skill.py
+python Memory-Palace/scripts/sync_memory_palace_skill.py --check
+python Memory-Palace/scripts/evaluate_memory_palace_skill.py
+Memory-Palace/backend/.venv/bin/python Memory-Palace/scripts/evaluate_memory_palace_mcp_e2e.py
+python Memory-Palace/scripts/install_skill.py --targets claude,codex,opencode,cursor,agent --scope workspace --force
+python Memory-Palace/scripts/install_skill.py --targets gemini --scope user --force
+```
+
+For `Gemini CLI`, prefer a **user-scope** install for now:
+
+```bash
+python Memory-Palace/scripts/install_skill.py --targets gemini --scope user --force
+```
+
+Current canonical and bundled mirrors:
+
+- Canonical: `Memory-Palace/docs/skills/memory-palace/`
+- Claude Code: `.claude/skills/memory-palace/`
+- Codex CLI: `.codex/skills/memory-palace/`
+- OpenCode: `.opencode/skills/memory-palace/`
+- Cursor: `.cursor/skills/memory-palace/`
+- Compatible agent CLI: `.agent/skills/memory-palace/`
+
+The canonical skill is aligned with the current code contract:
+
+- start relevant sessions with `read_memory("system://boot")`
+- prefer `search_memory(..., include_session=true)` when the URI is uncertain
+- follow read-before-write discipline and inspect `guard_action` / `guard_reason`
+- check `index_status()` before deciding to run `rebuild_index(wait=true)`
+- when `guard_action=NOOP`, stop writing, inspect the suggested target, and only then decide whether to switch to `update_memory`
+- the trigger sample set lives at `Memory-Palace/docs/skills/memory-palace/references/trigger-samples.md`
+
+Live MCP end-to-end report: `Memory-Palace/docs/skills/MCP_LIVE_E2E_REPORT.md`
 
 Full guide: [MEMORY_PALACE_SKILLS.md](docs/skills/MEMORY_PALACE_SKILLS.md)
 

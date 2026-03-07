@@ -1049,11 +1049,11 @@ class IndexTaskWorker:
         self._enabled = _env_bool("RUNTIME_INDEX_WORKER_ENABLED", True)
         self._queue_maxsize = _env_int("RUNTIME_INDEX_QUEUE_MAXSIZE", 256, minimum=8)
         self._recent_limit = _env_int("RUNTIME_INDEX_RECENT_JOBS", 30, minimum=5)
-
-        self._queue: asyncio.Queue[IndexTask] = asyncio.Queue(maxsize=self._queue_maxsize)
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._queue: Optional[asyncio.Queue[IndexTask]] = None
         self._client_factory: Optional[Callable[[], Any]] = None
         self._runner: Optional[asyncio.Task] = None
-        self._guard = asyncio.Lock()
+        self._guard: Optional[asyncio.Lock] = None
 
         self._jobs: Dict[str, Dict[str, Any]] = {}
         self._job_events: Dict[str, asyncio.Event] = {}
@@ -1073,9 +1073,34 @@ class IndexTaskWorker:
         self._last_finished_at: Optional[str] = None
         self._cancelled_job_ids: Set[str] = set()
 
+    def _ensure_loop_state(self) -> None:
+        current_loop = asyncio.get_running_loop()
+        if (
+            self._loop is current_loop
+            and self._queue is not None
+            and self._guard is not None
+        ):
+            return
+
+        self._loop = current_loop
+        self._queue = asyncio.Queue(maxsize=self._queue_maxsize)
+        self._guard = asyncio.Lock()
+        self._runner = None
+        self._active_execution_task = None
+        self._active_job_id = None
+        self._jobs.clear()
+        self._job_events.clear()
+        self._recent_job_ids.clear()
+        self._pending_memory_jobs.clear()
+        self._rebuild_job_id = None
+        self._sleep_job_id = None
+        self._cancelled_job_ids.clear()
+
     async def ensure_started(self, client_factory: Callable[[], Any]) -> None:
         if not self._enabled:
             return
+        self._ensure_loop_state()
+        assert self._guard is not None
         async with self._guard:
             self._client_factory = client_factory
             if self._runner is None or self._runner.done():
@@ -1085,6 +1110,8 @@ class IndexTaskWorker:
 
     async def shutdown(self) -> None:
         runner: Optional[asyncio.Task] = None
+        self._ensure_loop_state()
+        assert self._guard is not None
         async with self._guard:
             runner = self._runner
             self._runner = None
@@ -1107,6 +1134,8 @@ class IndexTaskWorker:
         if not self._enabled:
             return {"queued": False, "reason": "index_worker_disabled"}
 
+        self._ensure_loop_state()
+        assert self._guard is not None and self._queue is not None
         requested_at = _utc_iso_now()
         async with self._guard:
             existing_job_id = self._pending_memory_jobs.get(memory_id)
@@ -1167,6 +1196,8 @@ class IndexTaskWorker:
         if not self._enabled:
             return {"queued": False, "reason": "index_worker_disabled"}
 
+        self._ensure_loop_state()
+        assert self._guard is not None and self._queue is not None
         requested_at = _utc_iso_now()
         async with self._guard:
             if self._rebuild_job_id:
@@ -1223,6 +1254,8 @@ class IndexTaskWorker:
         if not self._enabled:
             return {"queued": False, "reason": "index_worker_disabled"}
 
+        self._ensure_loop_state()
+        assert self._guard is not None and self._queue is not None
         requested_at = _utc_iso_now()
         async with self._guard:
             if self._sleep_job_id:
@@ -1276,6 +1309,8 @@ class IndexTaskWorker:
     ) -> Dict[str, Any]:
         if not job_id:
             return {"ok": False, "error": "job_id is required."}
+        self._ensure_loop_state()
+        assert self._guard is not None
         async with self._guard:
             job = dict(self._jobs.get(job_id, {}))
             event = self._job_events.get(job_id)
@@ -1292,6 +1327,8 @@ class IndexTaskWorker:
         return {"ok": True, "job": current}
 
     async def get_job(self, *, job_id: str) -> Dict[str, Any]:
+        self._ensure_loop_state()
+        assert self._guard is not None
         async with self._guard:
             job = self._jobs.get(job_id)
             if not job:
@@ -1312,6 +1349,8 @@ class IndexTaskWorker:
         cancellation_ts = _utc_iso_now()
         execution_task: Optional[asyncio.Task[Any]] = None
 
+        self._ensure_loop_state()
+        assert self._guard is not None
         async with self._guard:
             job = self._jobs.get(normalized_job_id)
             if not job:
@@ -1378,6 +1417,8 @@ class IndexTaskWorker:
         return {"ok": True, "cancel_requested": True, "job": snapshot}
 
     async def status(self) -> Dict[str, Any]:
+        self._ensure_loop_state()
+        assert self._guard is not None and self._queue is not None
         async with self._guard:
             recent_jobs = [
                 dict(self._jobs[job_id])
@@ -1410,6 +1451,8 @@ class IndexTaskWorker:
             }
 
     async def _run_loop(self) -> None:
+        self._ensure_loop_state()
+        assert self._queue is not None and self._guard is not None
         while True:
             task = await self._queue.get()
             should_skip = False

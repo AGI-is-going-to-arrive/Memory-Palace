@@ -4574,7 +4574,6 @@ async def startup():
     """Initialize the database on startup."""
     client = get_sqlite_client()
     await client.init_db()
-    await runtime_state.ensure_started(get_sqlite_client)
 
 
 if __name__ == "__main__":
