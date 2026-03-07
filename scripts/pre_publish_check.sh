@@ -122,15 +122,6 @@ is_scan_target_excluded() {
     secret_scan:scripts/pre_publish_check.sh)
       return 0
       ;;
-    personal_path_scan:docs/DEPLOYMENT_PROFILES.md|\
-    personal_path_scan:docs/EVALUATION.md|\
-    personal_path_scan:docs/GETTING_STARTED.md|\
-    personal_path_scan:docs/evaluation_old_vs_new_executive_summary_2026-03-05.md|\
-    personal_path_scan:docs/improvement/*|\
-    personal_path_scan:backend/tests/benchmark/*.json|\
-    personal_path_scan:backend/tests/benchmark/*.md)
-      return 0
-      ;;
     *)
       return 1
       ;;

@@ -131,6 +131,10 @@ Authorization: Bearer <MCP_API_KEY>
 
 ---
 
+<p align="center">
+  <img src="images/security_checklist.png" width="900" alt="发布前安全检查清单" />
+</p>
+
 ## 6. 开源发布前检查清单
 
 在公开仓库之前，请完成以下步骤：
@@ -184,7 +188,7 @@ Authorization: Bearer <MCP_API_KEY>
 
 ---
 
-## 7. 不建议公开的本地文件
+## 7. 不建议公开的本地文件与维护文档
 
 以下文件类型已在 [`.gitignore`](../.gitignore) 中配置排除：
 
@@ -202,5 +206,17 @@ Authorization: Bearer <MCP_API_KEY>
 | `frontend/node_modules` | NPM 依赖 |
 | `frontend/dist/` | 前端构建产物 |
 | `.DS_Store` | macOS 系统文件 |
+| `docs/improvement/` | 阶段性实施计划、重测草稿、内部排障记录 |
+| `backend/docs/benchmark_*.md` | 本地 benchmark 分析笔记 |
+| `backend/tests/benchmark_results.md` | 一次性 benchmark 汇总草稿 |
+| `docs/evaluation_old_vs_new_executive_summary_2026-03-05.md` | 一次性对照摘要，适合本地保留 |
+| `docs/changelog/current_code_improvements_vs_legacy_docs.md` | 面向维护者的补充差异清单 |
 
 > 💡 保留 `.env.example` 作为配置模板提交到仓库。
+>
+> 💡 公开文档里建议统一使用占位符：
+>
+> - `<repo-root>`：仓库根目录
+> - `<path-to-runtime-env>`：你自己的运行时 `.env`
+> - `<old-repo>`：旧项目路径
+> - `<user-home>`：用户目录

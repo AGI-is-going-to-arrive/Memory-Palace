@@ -43,6 +43,17 @@ migration_log.json
 backend/backend.log
 frontend/frontend.log
 backend/tests/benchmark/.real_profile_cache/
+scripts/save_note_*.py
+scripts/add_user_pref.py
+scripts/mcp_stdio_trace_wrapper.py
+
+# Local-only docs and benchmark notes
+docs/improvement/
+docs/evaluation_old_vs_new_executive_summary_2026-03-05.md
+docs/changelog/current_code_improvements_vs_legacy_docs.md
+backend/docs/benchmark_*.md
+backend/tests/benchmark_results.md
+docs/images/IMAGE_PROMPTS_LOCAL.md
 
 # Generated benchmark outputs (keep local, do not track)
 backend/tests/benchmark/baseline_manifest.md

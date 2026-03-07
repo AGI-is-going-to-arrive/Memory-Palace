@@ -1,8 +1,8 @@
 # Memory Palace 评测结果
 
-本文档汇总 Memory Palace 各档位（A/B/C/D）的检索质量、延迟与语义质量门禁测试结果。所有数据均来自仓库内已落盘 JSON 产物，可通过 `pytest` 命令完整复现。
+本文档汇总 Memory Palace 各档位（A/B/C/D）的检索质量、延迟与语义质量门禁测试结果。公开仓保留**摘要表 + 复现命令**；机器相关的原始 benchmark 日志和阶段性重测草稿默认只保存在本地。
 
-> 状态说明（2026-03-04）：本页表格基于 2026-02 历史口径，已与当前主线（Phase D 后续迭代）出现时间和样本口径漂移。最新重测评估与数据采集结论见 `docs/improvement/evaluation_rebaseline_assessment_2026-03-04.md`；扩展消融与 `api_tolerant` 门禁重测见 `docs/improvement/evaluation_ablation_results_2026-03-04.md`。
+> 状态说明（2026-03）：本页主要保留 2026-02 的公开基线表格，便于用户理解档位差异；当前发布口径请同时参考 `docs/changelog/release_summary_vs_old_project_2026-03-06.md`。
 
 ---
 
@@ -62,6 +62,64 @@
 > - 所有 Gate 均为 PASS，表明各档位在其适用场景下工作正常。
 
 ![检索质量与延迟对比图（A:B:C:D）](images/检索质量与延迟对比图（A:B:C:D）.png)
+
+---
+
+## 3.5 旧版 vs 当前版本（同口径摘要）
+
+下面这组数字来自一轮**同口径旧新对照复核**。公开仓只保留摘要，不保留带本机路径的原始对照记录。
+
+### 高干扰场景的核心结论
+
+| 场景 | 指标 | 旧版 C | 新版 C | 旧版 D | 新版 D |
+|---|---|---:|---:|---:|---:|
+| `s8,d10` | `HR@10` | 0.875 | 0.875 | 0.875 | 0.875 |
+| `s8,d200` | `HR@10` | 0.313 | 0.563 | 0.375 | 0.625 |
+| `s100,d200` | `HR@10` | 0.280 | 0.580 | 0.295 | 0.615 |
+
+### 更细一点看：MRR / NDCG@10
+
+| 场景 | 指标 | 旧版 C | 新版 C | 旧版 D | 新版 D |
+|---|---|---:|---:|---:|---:|
+| `s8,d10` | `MRR / NDCG@10` | 0.783 / 0.805 | 0.783 / 0.805 | 0.825 / 0.837 | 0.825 / 0.837 |
+| `s8,d200` | `MRR / NDCG@10` | 0.313 / 0.313 | 0.563 / 0.563 | 0.375 / 0.375 | 0.625 / 0.625 |
+| `s100,d200` | `MRR / NDCG@10` | 0.247 / 0.255 | 0.512 / 0.529 | 0.268 / 0.275 | 0.560 / 0.573 |
+
+### 怎么读这组数据
+
+- `s8,d10`：低难度场景，**持平**
+- `s8,d200`：干扰一多，新版提升就很明显
+- `s100,d200`：样本更大、干扰更多时，新版依然明显更稳
+
+一句话总结：
+
+> 如果你关心的是真实复杂检索，而不是最简单的演示场景，那么当前版本相对旧版本确实更强。
+
+### 延迟补充
+
+| 场景 | 仓库 | C p95(ms) | D p95(ms) |
+|---|---|---:|---:|
+| `s8,d10` | 旧版 | 474.5 | 2103.2 |
+| `s8,d10` | 新版 | 639.5 | 2088.2 |
+| `s8,d200` | 旧版 | 945.8 | 2507.1 |
+| `s8,d200` | 新版 | 1150.9 | 2428.8 |
+| `s100,d200` | 旧版 | 1027.8 | 2796.5 |
+| `s100,d200` | 新版 | 937.6 | 2772.0 |
+
+这里也要说人话：
+
+- 新版的主收益是**检索质量更高**
+- 不是所有场景都更快
+- 但在 `s100,d200` 这种更接近真实复杂检索的场景里，延迟并没有明显变坏
+
+### 新版增强口径（补充）
+
+在 `s100,d200` 场景下，如果把新版的 `candidate_multiplier` 从 `4` 调到 `8`，3 次重复均值为：
+
+- C：`HR@10=0.700`、`MRR=0.607`、`NDCG@10=0.630`
+- D：`HR@10=0.720`、`MRR=0.651`、`NDCG@10=0.668`
+
+这说明新版还有进一步调优空间，但代价是更高的候选池和更高的时延。
 
 ---
 
@@ -167,12 +225,9 @@ pytest tests/benchmark/test_compact_context_gist_quality.py -q
 
 ## 7. 2026-03 重测进展（已完成本轮）
 
-- 已完成首轮数据采集与快速验证，详情见：
-  - `docs/improvement/evaluation_rebaseline_assessment_2026-03-04.md`
-  - `docs/improvement/evaluation_ablation_results_2026-03-04.md`
 - 当前关键观察：
   - 评测产物时间戳已更新到 2026-03-03，明显晚于本页 2026-02 基线。
   - 真实 A/B/C/D 产物当前为 `sample_size_requested=1`、`dataset_scope=squad_v2_dev`，与本页“2 数据集 × 8 查询”不一致。
-  - 本轮已确认两种口径：`runtime-env-mode none + injection` 下，`docker profile c/d` 会出现 `deployment.docker.smoke` 降级失败（`embedding_request_failed` + `embedding_fallback_hash`）；按本地联调约定改为 `runtime-env-mode file --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env --allow-runtime-env-debug` 后，`profile c/d` 可通过同轮门禁。
-  - 已按评估方案完成 Phase B 产物重生成（`new/benchmark/*.json`）与 legacy 基线归档（`new/benchmark/legacy_archive/`）。
-  - 已完成 `edgefn reranker + api_tolerant<=5%` 重测（目录：`new/benchmark/ablation/retest_edgefn_t20_api_tolerant_venv_20260304_142636`）：`s100/s200/s500` 的 `phase6.gate.valid` 均为 `true`，实际 `request_failed_rate` 分别为 `1.0%`、`0.25%`、`0.2%`。
+  - `runtime-env-mode none` 更接近发布场景；如果 `profile c/d` 在本机缺少外部模型配置，可能出现 `embedding_request_failed` / `embedding_fallback_hash`。
+  - `runtime-env-mode file + --allow-runtime-env-debug` 适合本地排障，但它不是最终发布口径。
+  - 本轮还完成了 `api_tolerant<=5%` 重测，当前公开结论是：`phase6.gate.valid` 保持为 `true`。

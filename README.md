@@ -2,14 +2,14 @@
   <img src="docs/images/系统架构图.png" width="280" alt="Memory Palace Logo" />
 </p>
 
-<h1 align="center">🏛️ Memory Palace · 记忆宫殿</h1>
+<h1 align="center">🏛️ Memory Palace</h1>
 
 <p align="center">
   <strong>Memory Palace provides AI agents with persistent context and seamless cross-session continuity.</strong>
 </p>
 
 <p align="center">
-  <em>"每一次对话都留下痕迹，每一道痕迹都化为记忆。"</em>
+  <em>"Every conversation leaves a trace. Every trace becomes memory."</em>
 </p>
 
 <p align="center">
@@ -24,259 +24,263 @@
 </p>
 
 <p align="center">
-  <a href="README_EN.md">English</a> · <a href="docs/README.md">文档</a> · <a href="docs/GETTING_STARTED.md">快速开始</a> · <a href="docs/EVALUATION.md">评测报告</a>
+  <a href="README_CN.md">中文</a> · <a href="docs/README.md">Docs</a> · <a href="docs/GETTING_STARTED.md">Quick Start</a> · <a href="docs/EVALUATION.md">Benchmarks</a>
 </p>
 
 ---
 
-## 🌟 什么是 Memory Palace？
+## 🌟 What Is Memory Palace?
 
-**Memory Palace（记忆宫殿）** 是一套专为 AI Agent 打造的长期记忆操作系统。它为大语言模型提供 **持久化、可检索、可审计** 的外部记忆能力——让你的 Agent 不再"每次对话都从零开始"。
+**Memory Palace** provides AI agents with persistent context and seamless cross-session continuity. It gives LLMs **persistent, searchable, and auditable** historical context — so your Agent never "starts from scratch" in each conversation.
 
-通过统一的 [MCP（模型上下文协议）](https://modelcontextprotocol.io/) 接口，Memory Palace 可无缝接入主流 AI 开发工具——**Codex、Claude Code、Gemini CLI、Cursor、Antigravity**——实现跨会话知识积累与即时召回。
+Through the unified [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) interface, Memory Palace provides integration paths for **Codex, Claude Code, Gemini CLI, Cursor, and Antigravity**. The currently verified scope and known boundaries are documented in `docs/skills/SKILLS_QUICKSTART.md`.
 
-### 为什么选择 Memory Palace？
+### Why Memory Palace?
 
-| 痛点 | Memory Palace 如何解决 |
+| Pain Point | How Memory Palace Solves It |
 |---|---|
-| 🔄 Agent 每次对话都忘记前文 | **持久化记忆存储**——基于 SQLite，记忆跨会话保留 |
-| 🔍 过往上下文难以找到 | **混合检索引擎**（关键词 + 语义 + 重排序），支持意图感知搜索 |
-| 🚫 无法控制写入内容 | **Write Guard** 预检每次写入；快照机制支持完整回滚 |
-| 🧩 不同工具、不同集成方式 | **统一 MCP 协议**——一套接口对接所有 AI 客户端 |
-| 📊 看不到系统内部状态 | **内置仪表盘**——记忆浏览、审查、维护、可观测性四大视图 |
-
-> 📖 **项目溯源**
->
-> - 社区讨论帖：<https://linux.do/t/topic/1616409>
-> - 原始仓库：<https://github.com/Dataojitori/nocturne_memory>
->
-> 本版本已全面重构并重新化为 **Memory Palace**。
+| 🔄 Agent forgets everything after each session | **Persistent memory store** with SQLite — memories survive across sessions |
+| 🔍 Hard to find relevant past context | **Hybrid retrieval** (keyword + semantic + reranker) with intent-aware search |
+| 🚫 No control over what gets stored | **Write Guard** pre-checks every write; snapshots enable full rollback |
+| 🧩 Different tools, different integrations | **Unified MCP protocol** — one integration for all AI clients |
+| 📊 Can't observe what's happening | **Built-in dashboard** with Memory, Review, Maintenance, and Observability views |
 
 ---
 
-## ✨ 核心特性
-
-### 🔒 可审计写入流水线
-
-每一次记忆写入都经过严格流水线：**Write Guard 预检 → 快照记录 → 异步索引重建**。Write Guard 核心动作为 `ADD`、`UPDATE`、`NOOP`、`DELETE`；`BYPASS` 作为上层 metadata-only 更新场景的流程标记，整体链路每一步均可追溯。
-
-### 🔍 统一检索引擎
-
-三种检索模式——`keyword`（关键词）、`semantic`（语义）、`hybrid`（混合）——支持自动降级。当外部 Embedding 服务不可用时，系统自动回退到关键词搜索，并在发生降级时于响应中报告 `degrade_reasons`。
-
-### 🧠 意图感知搜索
-
-搜索引擎默认按四类核心意图路由——**factual（事实型）**、**exploratory（探索型）**、**temporal（时间型）**、**causal（因果型）**——并匹配对应策略模板（`factual_high_precision`、`exploratory_high_recall`、`temporal_time_filtered`、`causal_wide_pool`）；当无显著信号时默认 `factual_high_precision`，当信号冲突或低信号混合时回退为 `unknown`（模板 `default`）。
-
-### ♻️ 记忆治理循环
-
-记忆是有生命力的实体，拥有随时间衰减的 **活力值（vitality score）**。治理循环涵盖：审查与回滚、孤儿清理、活力衰减、睡眠整合（自动碎片清理）。
-
-### 🌐 多客户端 MCP 集成
-
-一套协议，多端接入：**Codex / Claude Code / Gemini CLI / Cursor / Antigravity**——全部通过同一套 9 个 MCP 工具 + Skills 策略层连接。
-
-### 📦 灵活部署
-
-四种部署档位（A/B/C/D），从纯本地到云端连接，支持 Docker 部署和一键脚本，覆盖 macOS、Windows、Linux。
-
-### 📊 内置可观测性仪表盘
-
-基于 React 的四视图仪表盘：**记忆浏览器**、**审查与回滚**、**维护管理**、**可观测性监控**。
-
----
-
-## 🏗️ 系统架构
+## 🆕 What's New In This Release?
 
 <p align="center">
-  <img src="docs/images/系统架构图.png" width="900" alt="Memory Palace 系统架构" />
+  <img src="docs/images/memory_palace_upgrade.png" width="900" alt="Memory Palace Project Upgrade Comparison" />
+</p>
+
+- **skills + MCP now feel productized**: installation, sync, smoke, and live e2e are all part of the documented path.
+- **Deployment is safer**: the Docker one-click scripts now use deployment locks, runtime env injection is opt-in, and there is a dedicated pre-publish check.
+- **High-noise retrieval is stronger**: compared with the old project, the C/D profiles improve recall in harder `s8,d200` and `s100,d200` style scenarios.
+- **Public claims are more conservative**: `macOS + Docker + pwsh-in-docker` equivalent Windows validation is done; native Windows / native `pwsh` is still pending.
+- **Client boundaries are explicit**: `Claude/Codex/OpenCode/Gemini` have documented paths; `Gemini live`, `Cursor`, and `Antigravity` still carry explicit caveats.
+
+---
+
+## ✨ Key Features
+
+### 🔒 Auditable Write Pipeline
+
+Every memory write passes through a strict pipeline: **Write Guard pre-check → Snapshot creation → Async index rebuild**. Core Write Guard actions are `ADD`, `UPDATE`, `NOOP`, and `DELETE`; `BYPASS` is an upper-layer marker for metadata-only update flows. Each step is logged and traceable.
+
+### 🔍 Unified Retrieval Engine
+
+Three retrieval modes — `keyword`, `semantic`, and `hybrid` — with automatic degradation. When external embedding services are unavailable, the system gracefully falls back to keyword search and reports `degrade_reasons` when degradation occurs.
+
+### 🧠 Intent-Aware Search
+
+The search engine routes queries with four core intent categories — **factual**, **exploratory**, **temporal**, and **causal** — and applies specialized strategy templates (`factual_high_precision`, `exploratory_high_recall`, `temporal_time_filtered`, `causal_wide_pool`); when there is no strong signal it defaults to `factual_high_precision`, and falls back to `unknown` (`default` template) only for conflicting or low-signal mixed queries.
+
+### ♻️ Memory Governance Loop
+
+Memories are living entities with a **vitality score** that decays over time. The governance loop includes: review & rollback, orphan cleanup, vitality decay, and sleep consolidation for automatic fragment cleanup.
+
+### 🌐 Multi-Client MCP Integration
+
+One protocol, many clients: the public docs focus on the most practical paths for **Claude Code / Codex / Gemini CLI / OpenCode**; `Cursor` and `Antigravity` still retain manual-validation caveats.
+
+### 📦 Flexible Deployment
+
+Four deployment profiles (A/B/C/D) from pure local to cloud-connected, with Docker support and one-click scripts. The main validated path today is `macOS + Docker`; Windows has scripts and equivalent smoke coverage, while native Windows is still pending.
+
+### 📊 Built-in Observability Dashboard
+
+A React-powered dashboard with four views: **Memory Browser**, **Review & Rollback**, **Maintenance**, and **Observability**.
+
+---
+
+## 🏗️ System Architecture
+
+<p align="center">
+  <img src="docs/images/系统架构图.png" width="900" alt="Memory Palace Architecture" />
 </p>
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    用户 / AI Agent                          │
+│                    User / AI Agent                          │
 │        (Codex · Claude Code · Gemini CLI · Cursor)          │
 └──────────────┬──────────────────────┬───────────────────────┘
                │                      │
     ┌──────────▼──────────┐  ┌────────▼─────────┐
-    │  🖥️ React 仪表盘     │  │  🔌 MCP Server    │
-    │  (记忆 / 审查 /       │  │  (9 工具 + SSE)   │
-    │   维护 / 可观测性)    │  │                   │
+    │  🖥️ React Dashboard  │  │  🔌 MCP Server    │
+    │  (Memory / Review /  │  │  (9 Tools + SSE)  │
+    │   Maintenance / Obs) │  │                   │
     └──────────┬──────────┘  └────────┬──────────┘
                │                      │
                └──────────┬───────────┘
                           │
                 ┌─────────▼──────────┐
-                │  ⚡ FastAPI 后端    │
-                │  (异步 IO)         │
+                │  ⚡ FastAPI Backend  │
+                │  (Async IO)        │
                 └───┬────────────┬───┘
                     │            │
           ┌─────────▼──┐  ┌─────▼───────────┐
-          │ 🛡️ Write    │  │ 🔍 搜索 &        │
-          │   Guard     │  │   检索引擎       │
+          │ 🛡️ Write    │  │ 🔍 Search &      │
+          │   Guard     │  │   Retrieval      │
           └─────┬──────┘  └─────┬────────────┘
                 │               │
           ┌─────▼──────┐  ┌─────▼───────────┐
           │ 📝 Write    │  │ ⚙️ Index Worker  │
-          │   Lane      │  │   (异步队列)     │
+          │   Lane      │  │   (Async Queue)  │
           └─────┬──────┘  └─────┬────────────┘
                 │               │
                 └───────┬───────┘
                         │
                 ┌───────▼────────┐
-                │ �️ SQLite 数据库│
-                │ (单文件存储)    │
+                │ 🗄️ SQLite DB   │
+                │ (Single File)  │
                 └────────────────┘
 ```
 
 ---
 
-## 🛠️ 技术栈
+## 🛠️ Tech Stack
 
-### 后端
+### Backend
 
-| 组件 | 技术 | 版本 | 用途 |
+| Component | Technology | Version | Purpose |
 |---|---|---|---|
-| Web 框架 | [FastAPI](https://fastapi.tiangolo.com/) | ≥ 0.109 | 异步 REST API，自动生成 OpenAPI 文档 |
-| ORM | [SQLAlchemy](https://www.sqlalchemy.org/) | ≥ 2.0 | 异步 ORM，支持 SQLite 迁移 |
-| 数据库 | [SQLite](https://www.sqlite.org/) + aiosqlite | ≥ 0.19 | 零配置嵌入式数据库，单文件、便携 |
-| MCP 协议 | `mcp.server.fastmcp` | ≥ 0.1 | 通过 stdio / SSE 传输暴露 9 个标准化工具 |
-| HTTP 客户端 | [httpx](https://www.python-httpx.org/) | ≥ 0.26 | 异步 HTTP，用于 Embedding / Reranker API 调用 |
-| 数据校验 | [Pydantic](https://docs.pydantic.dev/) | ≥ 2.5 | 请求/响应校验和配置管理 |
-| 差异引擎 | `diff_match_patch` | — | Google 差异算法，用于快照对比 |
+| Web Framework | [FastAPI](https://fastapi.tiangolo.com/) | ≥ 0.109 | Async REST API with auto-generated OpenAPI docs |
+| ORM | [SQLAlchemy](https://www.sqlalchemy.org/) | ≥ 2.0 | Async ORM for SQLite with migration support |
+| Database | [SQLite](https://www.sqlite.org/) + aiosqlite | ≥ 0.19 | Zero-config embedded database; single file, portable |
+| MCP Protocol | `mcp.server.fastmcp` | ≥ 0.1 | Exposes 9 standardized tools via stdio / SSE transport |
+| HTTP Client | [httpx](https://www.python-httpx.org/) | ≥ 0.26 | Async HTTP for embedding / reranker API calls |
+| Validation | [Pydantic](https://docs.pydantic.dev/) | ≥ 2.5 | Request/response validation and settings management |
+| Diff Engine | `diff_match_patch` | — | Google's diff algorithm for snapshot comparison |
 
-### 前端
+### Frontend
 
-| 组件 | 技术 | 版本 | 用途 |
+| Component | Technology | Version | Purpose |
 |---|---|---|---|
-| UI 框架 | [React](https://react.dev/) | 18 | 组件化仪表盘 UI |
-| 构建工具 | [Vite](https://vitejs.dev/) | 7.x | 极速 HMR 开发和优化构建 |
-| 样式 | [Tailwind CSS](https://tailwindcss.com/) | 3.x | 原子化 CSS 框架 |
-| 动画 | [Framer Motion](https://www.framer.com/motion/) | 12.x | 流畅页面转场和微交互 |
-| 路由 | React Router DOM | 6.x | 客户端路由，支撑四大视图 |
-| Markdown | react-markdown + remark-gfm | — | 渲染记忆内容，支持 GitHub 风格 Markdown |
-| 图标 | [Lucide React](https://lucide.dev/) | — | 统一图标体系 |
+| UI Framework | [React](https://react.dev/) | 18 | Component-based dashboard UI |
+| Build Tool | [Vite](https://vitejs.dev/) | 7.x | Fast HMR development and optimized production builds |
+| Styling | [Tailwind CSS](https://tailwindcss.com/) | 3.x | Utility-first CSS framework |
+| Animation | [Framer Motion](https://www.framer.com/motion/) | 12.x | Smooth page transitions and micro-interactions |
+| Routing | React Router DOM | 6.x | Client-side routing for four dashboard views |
+| Markdown | react-markdown + remark-gfm | — | Renders memory content with GitHub Flavored Markdown |
+| Icons | [Lucide React](https://lucide.dev/) | — | Consistent icon set across all views |
 
-### 各层实现详解
+### How Each Layer Works
 
-#### 写入流水线（`mcp_server.py` → `runtime_state.py` → `sqlite_client.py`）
+#### Write Pipeline (`mcp_server.py` → `runtime_state.py` → `sqlite_client.py`)
 
-1. **Write Guard（写入守卫）** — 每次 `create_memory` / `update_memory` 调用都先经过 Write Guard（`sqlite_client.py`）。在规则模式下，守卫以 **语义匹配 → 关键词匹配 → LLM（可选）** 的顺序判定核心动作 `ADD`、`UPDATE`、`NOOP`、`DELETE`；`BYPASS` 由上层流程在 metadata-only 更新场景标注。当设置 `WRITE_GUARD_LLM_ENABLED=true` 时，可选 LLM 通过 OpenAI 兼容 API 参与决策。
+1. **Write Guard** — Every `create_memory` / `update_memory` call first passes through the Write Guard (`sqlite_client.py`). In rule-based mode, the guard evaluates in this order: **semantic matching → keyword matching → optional LLM**, and outputs core actions `ADD`, `UPDATE`, `NOOP`, or `DELETE`; `BYPASS` is marked by upper-layer flow for metadata-only updates. When `WRITE_GUARD_LLM_ENABLED=true`, an optional LLM participates via an OpenAI-compatible chat API.
 
-2. **Snapshot（快照）** — 在任何修改前，系统通过 `mcp_server.py` 中的 `_snapshot_memory_content()` 和 `_snapshot_path_meta()` 创建当前记忆状态的快照。这使得审查仪表盘中的差异对比和一键回滚成为可能。
+2. **Snapshot** — Before any modification, the system creates a snapshot of the current memory state via `_snapshot_memory_content()` and `_snapshot_path_meta()` in `mcp_server.py`. This enables full diff comparison and one-click rollback in the Review dashboard.
 
-3. **Write Lane（写入车道）** — 写入进入序列化队列（`runtime_state.py` → `WriteLanes`），可配置并发度（`RUNTIME_WRITE_GLOBAL_CONCURRENCY`）。这防止了单 SQLite 文件上的竞态条件。
+3. **Write Lane** — Writes enter a serialized queue (`runtime_state.py` → `WriteLanes`) with configurable concurrency (`RUNTIME_WRITE_GLOBAL_CONCURRENCY`). This prevents race conditions on the single SQLite file.
 
-4. **Index Worker（索引工作者）** — 每次写入完成后，异步任务入队进行索引重建（`runtime_state.py` 中的 `IndexWorker`）。工作者按 FIFO 顺序处理索引更新，不阻塞写入路径。
+4. **Index Worker** — After each write completes, an async task is enqueued for index rebuild (`IndexWorker` in `runtime_state.py`). The worker processes index updates in FIFO order without blocking the write path.
 
-#### 检索流水线（`sqlite_client.py`）
+#### Retrieval Pipeline (`sqlite_client.py`)
 
-1. **查询预处理** — `preprocess_query()` 对搜索查询进行规范化和分词。
-2. **意图分类** — `classify_intent()` 使用关键词评分方法（`keyword_scoring_v2`）判定意图：默认为 `factual`、`exploratory`、`temporal`、`causal` 四类；无显著关键词信号时默认 `factual`（`factual_high_precision`）；信号冲突或低信号混合时回退 `unknown`（模板 `default`）。
-3. **策略匹配** — 根据意图匹配策略模板（如 `factual_high_precision` 使用更严格的匹配；`temporal_time_filtered` 添加时间范围约束）。
-4. **多阶段检索** — 按档位执行：
-   - **档位 A**：纯关键词匹配，基于 SQLite FTS
-   - **档位 B**：关键词 + 本地哈希 Embedding 混合评分
-   - **档位 C/D**：关键词 + API Embedding + Reranker（OpenAI 兼容）
-5. **结果组装** — 结果包含 `degrade_reasons` 字段，当任何阶段失败时调用方始终了解检索质量。
+1. **Query Preprocessing** — `preprocess_query()` normalizes and tokenizes the search query.
+2. **Intent Classification** — `classify_intent()` uses keyword scoring (`keyword_scoring_v2`) to determine intent: four core classes (`factual`, `exploratory`, `temporal`, `causal`); it defaults to `factual` (`factual_high_precision`) when no strong keyword signal exists, and falls back to `unknown` (`default` template) for conflicting or low-signal mixed queries.
+3. **Strategy Selection** — Based on intent, a strategy template is applied (e.g., `factual_high_precision` uses tighter matching; `temporal_time_filtered` adds time range constraints).
+4. **Multi-Stage Retrieval** — Depending on the profile:
+   - **Profile A**: Pure keyword matching via SQLite FTS
+   - **Profile B**: Keyword + local hash embedding hybrid scoring
+   - **Profile C/D**: Keyword + API embedding + reranker (OpenAI-compatible)
+5. **Result Assembly** — Results include `degrade_reasons` when any stage fails, so the caller always knows the retrieval quality.
 
-#### 记忆治理（`sqlite_client.py` → `runtime_state.py`）
+#### Memory Governance (`sqlite_client.py` → `runtime_state.py`)
 
-- **活力衰减** — 每条记忆有活力值（最大 `3.0`，可配置）。活力按指数衰减，半衰期 `VITALITY_DECAY_HALF_LIFE_DAYS=30`。低于 `VITALITY_CLEANUP_THRESHOLD=0.35` 超过 `VITALITY_CLEANUP_INACTIVE_DAYS=14` 天的记忆被标记清理。
-- **睡眠整合** — 带整合参数的 `rebuild_index` 将碎片化的小记忆合并为连贯摘要。
-- **孤儿清理** — 定期扫描识别没有有效记忆引用的路径。
+- **Vitality Decay** — Each memory has a vitality score (max `3.0`, configurable). Scores decay exponentially with `VITALITY_DECAY_HALF_LIFE_DAYS=30`. Memories below `VITALITY_CLEANUP_THRESHOLD=0.35` for over `VITALITY_CLEANUP_INACTIVE_DAYS=14` days are flagged for cleanup.
+- **Sleep Consolidation** — `rebuild_index` with consolidation merges fragmented small memories into coherent summaries.
+- **Orphan Cleanup** — Periodic scans identify paths without valid memory references.
 
 ---
 
-## 📁 项目结构
+## 📁 Project Structure
 
 ```
 memory-palace/
 ├── backend/
-│   ├── main.py                 # FastAPI 入口；注册 Review/Browse/Maintenance 路由
-│   ├── mcp_server.py           # 9 个 MCP 工具 + 快照逻辑 + URI 解析（3100+ 行）
-│   ├── runtime_state.py        # Write Lane 队列、Index Worker、活力衰减调度器
-│   ├── run_sse.py              # SSE 传输层，带 API Key 鉴权网关
+│   ├── main.py                 # FastAPI entrypoint; registers Review/Browse/Maintenance routes
+│   ├── mcp_server.py           # 9 MCP tools + snapshot logic + URI parsing (3100+ lines)
+│   ├── runtime_state.py        # Write Lane queue, Index Worker, vitality decay scheduler
+│   ├── run_sse.py              # SSE transport layer with API Key auth gating
 │   ├── db/
-│   │   └── sqlite_client.py    # Schema 定义、CRUD、检索、Write Guard、Gist
-│   ├── api/                    # REST 路由：review、browse、maintenance
+│   │   └── sqlite_client.py    # Schema definition, CRUD, retrieval, Write Guard, Gist
+│   ├── api/                    # REST routers: review, browse, maintenance
 │   └── tests/
-│       └── benchmark/          # 5 个评测 JSON 文件 + 测试运行器 + 辅助工具
+│       └── benchmark/          # 5 benchmark JSON files + test runners + helpers
 ├── frontend/
 │   └── src/
-│       ├── App.jsx             # 路由与页面脚手架
+│       ├── App.jsx             # Routing and page scaffold
 │       ├── features/
-│       │   ├── memory/         # MemoryBrowser.jsx — 树形浏览器、编辑器、Gist 视图
-│       │   ├── review/         # ReviewPage.jsx — 差异对比、回滚、整合
-│       │   ├── maintenance/    # MaintenancePage.jsx — 活力清理任务
-│       │   └── observability/  # ObservabilityPage.jsx — 检索与任务监控
+│       │   ├── memory/         # MemoryBrowser.jsx — tree browser, editor, Gist view
+│       │   ├── review/         # ReviewPage.jsx — diff comparison, rollback, integrate
+│       │   ├── maintenance/    # MaintenancePage.jsx — vitality cleanup tasks
+│       │   └── observability/  # ObservabilityPage.jsx — retrieval & task monitoring
 │       └── lib/
-│           └── api.js          # 统一 API 客户端，运行时注入鉴权信息
+│           └── api.js          # Unified API client with runtime auth injection
 ├── deploy/
-│   ├── profiles/               # A/B/C/D 档位模板（macOS/Windows/Docker）
-│   └── docker/                 # Dockerfile 和 Compose 辅助配置
+│   ├── profiles/               # A/B/C/D profile templates for macOS/Windows/Docker
+│   └── docker/                 # Dockerfile and compose helpers
 ├── scripts/
-│   ├── apply_profile.sh        # macOS/Linux 档位应用脚本
-│   ├── apply_profile.ps1       # Windows 档位应用脚本
-│   ├── backup_memory.sh        # macOS/Linux SQLite 一致性备份
-│   ├── backup_memory.ps1       # Windows SQLite 一致性备份
-│   ├── docker_one_click.sh     # macOS/Linux 一键 Docker 部署
-│   ├── docker_one_click.ps1    # Windows 一键 Docker 部署
-│   └── pre_publish_check.sh    # 上传前本地产物 / 泄露扫描
-├── docs/                       # 完整文档集
-├── .env.example                # 配置模板（140 行，含详细注释）
-├── docker-compose.yml          # Docker Compose 定义
-└── LICENSE                     # MIT 许可证
+│   ├── apply_profile.sh        # macOS/Linux profile applicator
+│   ├── apply_profile.ps1       # Windows profile applicator
+│   ├── docker_one_click.sh     # macOS/Linux one-click Docker deployment
+│   └── docker_one_click.ps1    # Windows one-click Docker deployment
+├── docs/                       # Full documentation suite
+├── .env.example                # Configuration template (140 lines, with detailed comments)
+├── docker-compose.yml          # Docker Compose definition
+└── LICENSE                     # MIT License
 ```
 
 ---
 
-## 📋 环境要求
+## 📋 Requirements
 
-| 组件 | 最低版本 | 推荐版本 |
+| Component | Minimum | Recommended |
 |---|---|---|
 | Python | 3.10+ | 3.11+ |
-| Node.js | 20.19+（或 >=22.12） | 最新 LTS |
-| npm | 9+ | 最新稳定版 |
-| Docker（可选） | 24+ | 最新稳定版 |
+| Node.js | 20.19+ (or >=22.12) | latest LTS |
+| npm | 9+ | latest stable |
+| Docker (optional) | 24+ | latest stable |
 
 ---
 
-## 🚀 快速开始
+## 🚀 Quick Start
 
-### 方式一：手动本地搭建（推荐新手使用）
+### Option 1: Manual Local Setup (Recommended for Beginners)
 
-> **💡 提示**：本教程默认使用 **档位 B**（纯本地运行，无需外部模型服务）。
-> 要获得最佳检索质量，请在搭建完成后参阅 [升级到档位 C/D](#-升级到档位-cd)。
+> **💡 Tip**: This guide uses **Profile B** (fully local, no external model services required).
+> For best retrieval quality, see [Upgrading to Profile C/D](#-upgrading-to-profile-cd) after setup.
 
-#### 第 1 步：克隆仓库
+#### Step 1: Clone the Repository
 
 ```bash
 git clone https://github.com/AGI-is-going-to-arrive/Memory-Palace.git
 cd Memory-Palace
 ```
 
-#### 第 2 步：创建配置文件
+#### Step 2: Create Configuration File
 
-选择以下 **任一** 方法：
+Choose **one** of the following methods:
 
-**方法 A — 复制模板手动编辑：**
+**Method A — Copy template and edit manually:**
 
 ```bash
 cp .env.example .env
 ```
 
-然后打开 `.env`，将 `DATABASE_URL` 设置为系统上的绝对路径：
+Then open `.env` and set `DATABASE_URL` to an absolute path on your system:
 
 ```bash
-# macOS / Linux 示例：
+# Example for macOS / Linux:
 DATABASE_URL=sqlite+aiosqlite:////Users/yourname/Memory-Palace/demo.db
 
-# Windows 示例：
+# Example for Windows:
 DATABASE_URL=sqlite+aiosqlite:///C:/Users/yourname/Memory-Palace/demo.db
 ```
 
-**方法 B — 使用档位脚本（推荐）：**
+**Method B — Use the profile script (recommended):**
 
 ```bash
 # macOS / Linux
@@ -286,25 +290,25 @@ bash scripts/apply_profile.sh macos b
 .\scripts\apply_profile.ps1 -Platform windows -Profile b
 ```
 
-脚本会根据平台从 `deploy/profiles/{macos,windows,docker}/profile-b.env` 模板生成即用的 `.env` 文件。
+This generates a ready-to-use `.env` using the platform-specific Profile B template at `deploy/profiles/{macos,windows,docker}/profile-b.env`.
 
-#### 第 3 步：启动后端
+#### Step 3: Start the Backend
 
 ```bash
 cd backend
 
-# 创建并激活虚拟环境
+# Create and activate virtual environment
 python -m venv .venv
-source .venv/bin/activate        # Windows：.venv\Scripts\activate
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
-# 安装依赖
+# Install dependencies
 pip install -r requirements.txt
 
-# 启动 API 服务器
+# Start the API server
 uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-正常情况下你会看到：
+You should see:
 
 ```
 Memory API starting...
@@ -312,21 +316,21 @@ SQLite database initialized.
 INFO:     Uvicorn running on http://127.0.0.1:8000
 ```
 
-#### 第 4 步：启动前端
+#### Step 4: Start the Frontend
 
-打开一个 **新的终端窗口**：
+Open a **new terminal** window:
 
 ```bash
 cd frontend
 
-# 安装依赖
+# Install dependencies
 npm install
 
-# 启动开发服务器
+# Start the development server
 npm run dev
 ```
 
-正常情况下你会看到：
+You should see:
 
 ```
   VITE v7.x.x  ready
@@ -334,39 +338,39 @@ npm run dev
   ➜  Local:   http://localhost:5173/
 ```
 
-#### 第 5 步：验证安装
+#### Step 5: Verify Everything Works
 
 ```bash
-# 检查后端健康状态
+# Check backend health
 curl -s http://127.0.0.1:8000/health | python -m json.tool
 
-# 浏览记忆树（新数据库应返回空树；若复用已有 demo.db 可能非空）
+# Browse memory tree (should be empty on a fresh DB; may be non-empty if reusing demo.db)
 curl -s "http://127.0.0.1:8000/browse/node?domain=core&path=" | python -m json.tool
 ```
 
-在浏览器中打开 **<http://localhost:5173>** —— 你应该能看到 Memory Palace 仪表盘 🎉
+Open your browser at **<http://localhost:5173>** — you should see the Memory Palace dashboard 🎉
 
-#### 第 6 步：连接 AI 客户端
+#### Step 6: Connect an AI Client
 
-启动 MCP 服务器以便 AI 客户端访问 Memory Palace：
+Start the MCP server so AI clients can access Memory Palace:
 
 ```bash
 cd backend
 
-# stdio 模式（用于 IDE 内部调用，如 Cursor）
+# stdio mode (for IDE-integrated clients like Cursor)
 python mcp_server.py
 
-# SSE 模式（用于远程 / 多客户端访问）
+# SSE mode (for remote / multi-client access)
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
-> 说明：`stdio` 直接连接 MCP 工具进程，不经过 HTTP/SSE 鉴权中间层；未设置 `MCP_API_KEY` 时也可本地使用 MCP 工具。
+> Note: `stdio` connects directly to the MCP tool process and does not pass through the HTTP/SSE auth middleware; MCP tools can still be used locally without `MCP_API_KEY`.
 
-详细的客户端配置请参阅 [多客户端集成](#-多客户端集成)。
+See [Multi-Client Integration](#-multi-client-integration) for detailed client configuration.
 
 ---
 
-### 方式二：一键 Docker 部署
+### Option 2: One-Click Docker Deployment
 
 ```bash
 # macOS / Linux
@@ -375,21 +379,21 @@ bash scripts/docker_one_click.sh --profile b
 # Windows PowerShell
 .\scripts\docker_one_click.ps1 -Profile b
 
-# 仅在需要时显式注入当前进程环境（默认关闭）
+# Explicitly opt in when runtime env injection is required (disabled by default)
 bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
-# 或
+# or
 .\scripts\docker_one_click.ps1 -Profile c -AllowRuntimeEnvInjection
 ```
 
-| 服务 | 地址 |
+| Service | URL |
 |---|---|
-| 前端仪表盘 | <http://127.0.0.1:3000> |
-| 后端 API | <http://127.0.0.1:18000> |
-| 健康检查 | <http://127.0.0.1:18000/health> |
+| Frontend Dashboard | <http://127.0.0.1:3000> |
+| Backend API | <http://127.0.0.1:18000> |
+| Health Check | <http://127.0.0.1:18000/health> |
 
-> 注：以上为默认端口。若端口被占用，一键脚本会自动调整并在控制台输出实际地址。
+> Note: these are default ports. If occupied, the one-click script auto-adjusts ports and prints the actual URLs in console output.
 
-停止服务：
+Stop services:
 
 ```bash
 docker compose -f docker-compose.yml down
@@ -397,141 +401,133 @@ docker compose -f docker-compose.yml down
 
 ---
 
-## ⚙️ 部署档位（A / B / C / D）
+## ⚙️ Deployment Profiles (A / B / C / D)
 
-Memory Palace 提供四种部署档位以匹配你的硬件和需求：
+Memory Palace provides four deployment profiles to match your hardware and requirements:
 
-| 档位 | 检索模式 | Embedding | Reranker | 适用场景 |
+| Profile | Retrieval Mode | Embedding | Reranker | Best For |
 |---|---|---|---|---|
-| **A** | 纯 `keyword` | ❌ 关闭 | ❌ 关闭 | 🟢 最小资源，初步验证 |
-| **B** | `hybrid` 混合 | 📦 本地哈希 | ❌ 关闭 | 🟡 **默认**——本地开发，无需外部服务 |
-| **C** | `hybrid` 混合 | 🌐 API 调用 | ✅ 开启 | 🟠 本地模型服务器（Ollama / LM Studio）|
-| **D** | `hybrid` 混合 | 🌐 API 调用 | ✅ 开启 | 🔴 远程 API，生产环境 |
+| **A** | `keyword` only | ❌ Off | ❌ Off | 🟢 Minimal resources, initial validation |
+| **B** | `hybrid` | 📦 Local Hash | ❌ Off | 🟡 **Default** — local dev, no external services |
+| **C** | `hybrid` | 🌐 API | ✅ On | 🟠 Local model server (Ollama / LM Studio) |
+| **D** | `hybrid` | 🌐 API | ✅ On | 🔴 Remote API, production environments |
 
-> **说明**：档位 C 和 D 共享相同的混合检索流水线（`keyword + semantic + reranker`），区别仅在于路由偏好（本地优先 vs 远程优先）。
+> **Note**: Profiles C and D share the same hybrid retrieval pipeline (`keyword + semantic + reranker`). The only difference is routing preference (local-first vs remote-first).
 
-### 🔼 升级到档位 C/D
+### 🔼 Upgrading to Profile C/D
 
-在 `.env` 文件中配置以下参数。所有端点均支持 **OpenAI 兼容 API** 格式，包括本地部署的 Ollama 或 LM Studio：
+Configure these parameters in your `.env` file. All endpoints support the **OpenAI-compatible API** format, including locally deployed Ollama or LM Studio:
 
 ```bash
-# ── Embedding 模型 ──────────────────────────────────────────
+# ── Embedding Model ──────────────────────────────────────────
 RETRIEVAL_EMBEDDING_BACKEND=api
-RETRIEVAL_EMBEDDING_API_BASE=http://localhost:11434/v1   # 例如 Ollama
+RETRIEVAL_EMBEDDING_API_BASE=http://localhost:11434/v1   # e.g., Ollama
 RETRIEVAL_EMBEDDING_API_KEY=your-api-key
-RETRIEVAL_EMBEDDING_MODEL=Qwen3-Embedding-8B
+RETRIEVAL_EMBEDDING_MODEL=bge-m3
 
-# ── Reranker 模型 ───────────────────────────────────────────
+# ── Reranker Model ───────────────────────────────────────────
 RETRIEVAL_RERANKER_ENABLED=true
 RETRIEVAL_RERANKER_API_BASE=http://localhost:11434/v1
 RETRIEVAL_RERANKER_API_KEY=your-api-key
-RETRIEVAL_RERANKER_MODEL=Qwen3-Reranker-8B
+RETRIEVAL_RERANKER_MODEL=bge-reranker-v2-m3
 
-# ── 调参旋钮（推荐 0.20 ~ 0.40）────────────────────────────
+# ── Tuning (recommended 0.20 ~ 0.40) ────────────────────────
 RETRIEVAL_RERANKER_WEIGHT=0.25
 ```
 
-> 配置语义说明：
-> - `RETRIEVAL_EMBEDDING_BACKEND` 只控制 Embedding 链路。
-> - Reranker 没有 `RETRIEVAL_RERANKER_BACKEND` 开关，启用与否由 `RETRIEVAL_RERANKER_ENABLED` 控制。
-> - Reranker 连接参数优先读取 `RETRIEVAL_RERANKER_API_BASE/API_KEY/MODEL`；缺失时才回退 `ROUTER_*`（其中 base/key 还可继续回退 `OPENAI_*`）。
->
-> **推荐口径（重要）**：
-> - **本地开发 / 调试**：优先直接分别配置 `RETRIEVAL_EMBEDDING_*`、`RETRIEVAL_RERANKER_*`、`WRITE_GUARD_LLM_*` / `COMPACT_GIST_LLM_*`。
-> - **为什么这样配**：因为三条链路的可达性、模型名、性能瓶颈往往不同，分别直配更容易定位问题，也不会把“本机 router 没有某个模型”的问题误判成整个系统故障。
-> - **生产 / 客户环境**：若已有统一模型网关，再回到 `router` 主链路；它更适合承接统一鉴权、限流、审计和模型切换，但不是本地调试的硬性前提。
-> - **更多高级配置**：例如 `INTENT_LLM_*`、`CORS_ALLOW_*`、`RETRIEVAL_MMR_*` 与运行时观测/睡眠整合开关，统一以 `.env.example` 和 `docs/DEPLOYMENT_PROFILES.md` 为准。
+> Configuration semantics:
+> - `RETRIEVAL_EMBEDDING_BACKEND` controls only the embedding path.
+> - There is no `RETRIEVAL_RERANKER_BACKEND` switch; reranker activation is controlled by `RETRIEVAL_RERANKER_ENABLED`.
+> - Reranker connection settings are resolved from `RETRIEVAL_RERANKER_API_BASE/API_KEY/MODEL` first, and fall back to `ROUTER_*` only when missing (with base/key then able to fall back to `OPENAI_*`).
 
-### 可选：LLM 驱动的 Write Guard 与 Gist
+### Optional: LLM-Powered Write Guard & Gist
 
 ```bash
-# ── Write Guard LLM（写入守卫）──────────────────────────────
+# ── Write Guard LLM ─────────────────────────────────────────
 WRITE_GUARD_LLM_ENABLED=true
 WRITE_GUARD_LLM_API_BASE=http://localhost:11434/v1
 WRITE_GUARD_LLM_API_KEY=your-api-key
-WRITE_GUARD_LLM_MODEL=Qwen3.5-35B-A3B
+WRITE_GUARD_LLM_MODEL=qwen2.5
 
-# ── Compact Gist LLM（留空则回退至 Write Guard 配置）───────
+# ── Compact Gist LLM (falls back to Write Guard if empty) ──
 COMPACT_GIST_LLM_ENABLED=true
 COMPACT_GIST_LLM_API_BASE=
 COMPACT_GIST_LLM_API_KEY=
-COMPACT_GIST_LLM_MODEL=Qwen3.5-35B-A3B
+COMPACT_GIST_LLM_MODEL=
 ```
 
-> 当前推荐模型：Embedding 使用 `Qwen3-Embedding-8B`，Reranker 使用 `Qwen3-Reranker-8B`，LLM 使用 `Qwen3.5-35B-A3B`。如需启用实验性的 Intent LLM、CORS、自定义 MMR 或运行时审计上限，请直接参考 `.env.example`；README 只保留最常用主配置。
+Profile templates are located at: `deploy/profiles/{macos,windows,docker}/profile-{a,b,c,d}.env`
 
-档位模板位于：`deploy/profiles/{macos,windows,docker}/profile-{a,b,c,d}.env`
-
-完整参数参考：[DEPLOYMENT_PROFILES.md](docs/DEPLOYMENT_PROFILES.md)
+Full parameter reference: [DEPLOYMENT_PROFILES.md](docs/DEPLOYMENT_PROFILES.md)
 
 ---
 
-## 🔌 MCP 工具参考
+## 🔌 MCP Tools Reference
 
-Memory Palace 通过 MCP 协议暴露 **9 个标准化工具**：
+Memory Palace exposes **9 standardized tools** via the MCP protocol:
 
-| 类别 | 工具 | 说明 |
+| Category | Tool | Description |
 |---|---|---|
-| **读写** | `read_memory` | 读取记忆内容（完整或按 `RETRIEVAL_CHUNK_SIZE` 分块）|
-| | `create_memory` | 创建新记忆节点（先通过 Write Guard 预检）|
-| | `update_memory` | 更新现有记忆（Patch / Append 模式）|
-| | `delete_memory` | 删除记忆路径 |
-| | `add_alias` | 为记忆添加别名路径 |
-| **检索** | `search_memory` | 统一搜索入口，支持 `keyword` / `semantic` / `hybrid` 模式 |
-| **治理** | `compact_context` | 压缩会话上下文为长期摘要（Gist + Trace）|
-| | `rebuild_index` | 触发索引重建 / 睡眠整合 |
-| | `index_status` | 查询索引可用性和运行时状态 |
+| **Read/Write** | `read_memory` | Read memory content (full or chunked by `RETRIEVAL_CHUNK_SIZE`) |
+| | `create_memory` | Create new memory node (passes through Write Guard first) |
+| | `update_memory` | Update existing memory (Patch / Append modes) |
+| | `delete_memory` | Delete a memory path |
+| | `add_alias` | Add an alias path for a memory |
+| **Retrieval** | `search_memory` | Unified search entry with `keyword` / `semantic` / `hybrid` modes |
+| **Governance** | `compact_context` | Compress session context into long-term summary (Gist + Trace) |
+| | `rebuild_index` | Trigger index rebuild / sleep consolidation |
+| | `index_status` | Query index availability and runtime state |
 
-### 系统 URI
+### System URIs
 
-| URI | 说明 |
+| URI | Description |
 |---|---|
-| `system://boot` | 读取该 URI 时按 `CORE_MEMORY_URIS` 加载核心记忆 |
-| `system://index` | 索引状态概览 |
-| `system://recent` | 最近修改的记忆 |
-| `system://recent/N` | 最近 N 条记忆 |
+| `system://boot` | Loads core memories from `CORE_MEMORY_URIS` when `system://boot` is read |
+| `system://index` | Index status overview |
+| `system://recent` | Recently modified memories |
+| `system://recent/N` | Last N memories |
 
-### 启动 MCP 服务器
+### Starting the MCP Server
 
 ```bash
-# stdio 模式（用于 IDE 内部调用——Cursor、Codex 等）
+# stdio mode (for IDE internal calls — Cursor, Codex, etc.)
 cd backend && python mcp_server.py
 
-# SSE 模式（用于远程 / 多客户端')
+# SSE mode (for remote / multi-client)
 cd backend && HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
-完整工具语义：[TOOLS.md](docs/TOOLS.md)
+Full tool semantics: [TOOLS.md](docs/TOOLS.md)
 
 ---
 
-## 🔄 多客户端集成
+## 🔄 Multi-Client Integration
 
-MCP 工具层负责 **确定性执行**；Skills 策略层负责 **策略与时机**。
+The MCP tool layer handles **deterministic execution**; the Skills strategy layer handles **policy and timing**.
 
 <p align="center">
-  <img src="docs/images/多客户端 MCP + Skills 编排图.png" width="900" alt="多客户端 MCP + Skills 编排图" />
+  <img src="docs/images/多客户端 MCP + Skills 编排图.png" width="900" alt="Multi-Client MCP + Skills Orchestration" />
 </p>
 
-### 推荐默认流程
+### Recommended Default Flow
 
 ```
-1. 🚀 启动    → read_memory("system://boot")               # 加载核心记忆
-2. 🔍 召回    → search_memory(include_session=true)         # 话题召回
-3. ✍️ 写入    → 优先 update_memory；新建用 create_memory    # 先读后写
-4. 📦 压缩    → compact_context(force=false)                 # 会话压缩
-5. 🔧 恢复    → rebuild_index(wait=true) + index_status()   # 降级恢复
+1. 🚀 Boot    → read_memory("system://boot")               # Load core memories
+2. 🔍 Recall  → search_memory(include_session=true)         # Topic recall
+3. ✍️ Write   → prefer update_memory; create_memory if new  # Read before write
+4. 📦 Compact → compact_context(force=false)                 # Session compression
+5. 🔧 Recover → rebuild_index(wait=true) + index_status()   # Degradation recovery
 ```
 
-### 支持的客户端
+### Supported Clients
 
-| 客户端 | 集成方式 |
+| Client | Integration Method |
 |---|---|
-| Claude Code / Codex CLI / OpenCode | 优先同步 `Memory-Palace/docs/skills/memory-palace` 到对应 skills 目录 |
-| Gemini CLI | 优先使用 `user` 级安装（`install_skill.py --targets gemini --scope user --force`） |
+| Claude Code / Codex CLI / OpenCode | Prefer syncing `Memory-Palace/docs/skills/memory-palace` into the matching skills directory |
+| Gemini CLI | Prefer a user-scope install (`install_skill.py --targets gemini --scope user --force`) |
 | Cursor / Antigravity / Trae | Workspace Rules / Project Instructions |
 
-### 安装 Skill
+### Install The Skill
 
 ```bash
 python Memory-Palace/scripts/sync_memory_palace_skill.py
@@ -542,70 +538,64 @@ python Memory-Palace/scripts/install_skill.py --targets claude,codex,opencode,cu
 python Memory-Palace/scripts/install_skill.py --targets gemini --scope user --force
 ```
 
-其中 `Gemini CLI` 当前建议优先用 `user` 级安装：
+For `Gemini CLI`, prefer a **user-scope** install for now:
 
 ```bash
 python Memory-Palace/scripts/install_skill.py --targets gemini --scope user --force
 ```
 
-当前 canonical 与镜像目录：
+Current canonical and bundled mirrors:
 
-- Canonical：`Memory-Palace/docs/skills/memory-palace/`
-- Claude Code：`.claude/skills/memory-palace/`
-- Codex CLI：`.codex/skills/memory-palace/`
-- OpenCode：`.opencode/skills/memory-palace/`
-- Cursor：`.cursor/skills/memory-palace/`
-- 兼容 agent CLI：`.agent/skills/memory-palace/`
+- Canonical: `Memory-Palace/docs/skills/memory-palace/`
+- Claude Code: `.claude/skills/memory-palace/`
+- Codex CLI: `.codex/skills/memory-palace/`
+- OpenCode: `.opencode/skills/memory-palace/`
+- Cursor: `.cursor/skills/memory-palace/`
+- Compatible agent CLI: `.agent/skills/memory-palace/`
 
-这套 skill 已按当前真实代码口径收敛：
+The canonical skill is aligned with the current code contract:
 
-- 会话启动优先 `read_memory("system://boot")`
-- URI 不确定时优先 `search_memory(..., include_session=true)`
-- 写入遵循“先读后写”，并显式处理 `guard_action` / `guard_reason`
-- 检索降级时先 `index_status()`，再视情况 `rebuild_index(wait=true)`
-- `guard_action=NOOP` 时不要继续写入；先检查建议目标，再决定是否切换为 `update_memory`
-- 触发样例集固定在 `Memory-Palace/docs/skills/memory-palace/references/trigger-samples.md`
+- start relevant sessions with `read_memory("system://boot")`
+- prefer `search_memory(..., include_session=true)` when the URI is uncertain
+- follow read-before-write discipline and inspect `guard_action` / `guard_reason`
+- check `index_status()` before deciding to run `rebuild_index(wait=true)`
+- when `guard_action=NOOP`, stop writing, inspect the suggested target, and only then decide whether to switch to `update_memory`
+- the trigger sample set lives at `Memory-Palace/docs/skills/memory-palace/references/trigger-samples.md`
 
-真实 MCP 端到端回归报告见：`Memory-Palace/docs/skills/MCP_LIVE_E2E_REPORT.md`
+Live MCP end-to-end report: `Memory-Palace/docs/skills/MCP_LIVE_E2E_REPORT.md`
 
-完整指南见：[MEMORY_PALACE_SKILLS.md](docs/skills/MEMORY_PALACE_SKILLS.md)
+Full guide: [MEMORY_PALACE_SKILLS.md](docs/skills/MEMORY_PALACE_SKILLS.md)
 
 ---
 
-## 📊 评测结果
+## 📊 Benchmark Results
 
-> **可复现性**：以下所有指标均来源于仓库中已提交的 JSON 产物文件，可通过 `pytest tests/benchmark` 复现。
+> This section keeps the **user-facing summary tables**. More detailed benchmark logs, one-off re-baseline notes, and machine-specific artifacts stay local by default and are not treated as public guarantees.
 >
-> **数据源文件**（位于 `backend/tests/benchmark/`）：
->
-> - [`profile_abcd_real_metrics.json`](backend/tests/benchmark/profile_abcd_real_metrics.json) — A/B/C/D 真实运行数据
-> - [`profile_ab_metrics.json`](backend/tests/benchmark/profile_ab_metrics.json) — A/B 大样本门控数据
-> - [`write_guard_quality_metrics.json`](backend/tests/benchmark/write_guard_quality_metrics.json)
-> - [`intent_accuracy_metrics.json`](backend/tests/benchmark/intent_accuracy_metrics.json)
-> - [`compact_context_gist_quality_metrics.json`](backend/tests/benchmark/compact_context_gist_quality_metrics.json)
+> For methodology, caveats, and reproduction commands, see `docs/EVALUATION.md`. For the old-vs-new release delta, see `docs/changelog/release_summary_vs_old_project_2026-03-06.md`.
 
-### 检索质量 — A/B/C/D 真实运行
+### Retrieval Quality — A/B/C/D Real Run
 
-数据源：`profile_abcd_real_metrics.json` · 每数据集样本量 = 8 · 10 个干扰文档 · Seed = 20260219
+Source: `profile_abcd_real_metrics.json` · Sample size = 8 per dataset · 10 distractor documents · Seed = 20260219
 
-| 档位 | 数据集 | HR@10 | MRR | NDCG@10 | p95（ms） | 门控 |
+| Profile | Dataset | HR@10 | MRR | NDCG@10 | p95 (ms) | Gate |
 |---|---|---:|---:|---:|---:|---|
-| A | SQuAD v2 | 0.000 | 0.000 | 0.000 | 1.78 | ✅ 通过 |
-| A | NFCorpus | 0.250 | 0.250 | 0.250 | 1.74 | ✅ 通过 |
-| B | SQuAD v2 | 0.625 | 0.302 | 0.383 | 4.92 | ✅ 通过 |
-| B | NFCorpus | 0.750 | 0.478 | 0.542 | 5.02 | ✅ 通过 |
-| **C** | **SQuAD v2** | **1.000** | **1.000** | **1.000** | 665.14 | ✅ 通过 |
-| C | NFCorpus | 0.750 | 0.567 | 0.611 | 454.42 | ✅ 通过 |
-| **D** | **SQuAD v2** | **1.000** | **1.000** | **1.000** | 2078.38 | ✅ 通过 |
-| D | NFCorpus | 0.750 | 0.650 | 0.673 | 2364.97 | ✅ 通过 |
+| A | SQuAD v2 | 0.000 | 0.000 | 0.000 | 1.78 | ✅ PASS |
+| A | NFCorpus | 0.250 | 0.250 | 0.250 | 1.74 | ✅ PASS |
+| B | SQuAD v2 | 0.625 | 0.302 | 0.383 | 4.92 | ✅ PASS |
+| B | NFCorpus | 0.750 | 0.478 | 0.542 | 5.02 | ✅ PASS |
+| **C** | **SQuAD v2** | **1.000** | **1.000** | **1.000** | 665.14 | ✅ PASS |
+| C | NFCorpus | 0.750 | 0.567 | 0.611 | 454.42 | ✅ PASS |
+| **D** | **SQuAD v2** | **1.000** | **1.000** | **1.000** | 2078.38 | ✅ PASS |
+| D | NFCorpus | 0.750 | 0.650 | 0.673 | 2364.97 | ✅ PASS |
 
-> 💡 档位 C/D 通过外部 Embedding（bge-m3）+ Reranker（bge-reranker-v2-m3）在 SQuAD v2 上达到完美召回。额外延迟来自模型推理和网络开销。
+> 💡 Profiles C/D achieve perfect recall on SQuAD v2 through external Embedding (bge-m3) + Reranker (bge-reranker-v2-m3). The additional latency comes from model inference and network overhead.
 
-### 检索质量 — A/B 大样本门控
+### Retrieval Quality — A/B Large-Sample Gate
 
-数据源：`profile_ab_metrics.json` · 样本量 = 100
+Source: `profile_ab_metrics.json` · Sample size = 100
 
-| 档位 | 数据集 | HR@10 | MRR | NDCG@10 | p95（ms） |
+| Profile | Dataset | HR@10 | MRR | NDCG@10 | p95 (ms) |
 |---|---|---:|---:|---:|---:|
 | A | MS MARCO | 0.333 | 0.333 | 0.333 | 2.1 |
 | A | BEIR NFCorpus | 0.300 | 0.300 | 0.300 | 2.6 |
@@ -615,35 +605,35 @@ python Memory-Palace/scripts/install_skill.py --targets gemini --scope user --fo
 | B | SQuAD v2 | 1.000 | 0.765 | 0.822 | 3.9 |
 
 <p align="center">
-  <img src="docs/images/检索质量与延迟对比图（A:B:C:D）.png" width="800" alt="检索质量与延迟对比图（A/B/C/D）" />
+  <img src="docs/images/检索质量与延迟对比图（A:B:C:D）.png" width="800" alt="Retrieval Quality vs Latency Comparison (A/B/C/D)" />
 </p>
 
-### 质量门控汇总
+### Quality Gates Summary
 
-| 门控项 | 指标 | 结果 | 阈值 | 状态 |
+| Gate | Metric | Result | Threshold | Status |
 |---|---|---:|---:|---|
-| Write Guard | 精确率 | 1.000 | ≥ 0.90 | ✅ 通过 |
-| Write Guard | 召回率 | 1.000 | ≥ 0.85 | ✅ 通过 |
-| 意图分类 | 准确率 | 1.000 | ≥ 0.80 | ✅ 通过 |
-| Gist 质量 | ROUGE-L | 0.759 | ≥ 0.40 | ✅ 通过 |
-| Phase 6 门控 | 有效性 | true | — | ✅ 通过 |
+| Write Guard | Precision | 1.000 | ≥ 0.90 | ✅ PASS |
+| Write Guard | Recall | 1.000 | ≥ 0.85 | ✅ PASS |
+| Intent Classification | Accuracy | 1.000 | ≥ 0.80 | ✅ PASS |
+| Gist Quality | ROUGE-L | 0.759 | ≥ 0.40 | ✅ PASS |
+| Phase 6 Gate | Valid | true | — | ✅ PASS |
 
-> **Write Guard**：在 6 个测试用例上评估（4 TP, 0 FP, 0 FN）。数据源：`write_guard_quality_metrics.json`
+> **Write Guard**: Evaluated on 6 test cases (4 TP, 0 FP, 0 FN). Source: `write_guard_quality_metrics.json`
 >
-> **意图分类**：使用 `keyword_scoring_v2` 方法，6/6 正确分类，覆盖 temporal、causal、exploratory、factual 四种意图。数据源：`intent_accuracy_metrics.json`
+> **Intent Classification**: 6/6 correct classifications across temporal, causal, exploratory, and factual intents using `keyword_scoring_v2`. Source: `intent_accuracy_metrics.json`
 >
-> **Gist ROUGE-L**：5 个测试用例的平均值（范围：0.667 – 0.923）。数据源：`compact_context_gist_quality_metrics.json`
+> **Gist ROUGE-L**: Average across 5 test cases (range: 0.667 – 0.923). Source: `compact_context_gist_quality_metrics.json`
 
-### 复现评测
+### Reproducing Benchmarks
 
 ```bash
 cd backend
 source .venv/bin/activate
 
-# 运行全部评测
+# Run all benchmarks
 pytest tests/benchmark -q
 
-# 定向门控测试
+# Specific gate tests
 pytest tests/benchmark/test_benchmark_public_datasets_profiles.py -q -k small_gate
 pytest tests/benchmark/test_write_guard_quality_metrics.py -q
 pytest tests/benchmark/test_intent_accuracy_metrics.py -q
@@ -653,108 +643,108 @@ pytest tests/benchmark/test_search_memory_contract_regression.py -q
 
 ---
 
-## 🖼️ 仪表盘截图
+## 🖼️ Dashboard Screenshots
 
 <details>
-<summary>📂 记忆 — 树形浏览器与编辑器</summary>
+<summary>📂 Memory — Tree Browser & Editor</summary>
 
-<img src="docs/images/memory-palace-memory-page.png" width="900" alt="Memory Palace — 记忆浏览器页面" />
+<img src="docs/images/memory-palace-memory-page.png" width="900" alt="Memory Palace — Memory Browser Page" />
 
-树形结构的记忆浏览器，支持内联编辑和 Gist 视图。按 域名 → 路径 层级导航。
+Tree-structured memory browser with inline editor and Gist view. Navigate by domain → path hierarchy.
 </details>
 
 <details>
-<summary>📋 审查 — 差异对比与回滚</summary>
+<summary>📋 Review — Diff & Rollback</summary>
 
-<img src="docs/images/memory-palace-review-page.png" width="900" alt="Memory Palace — 审查页面" />
+<img src="docs/images/memory-palace-review-page.png" width="900" alt="Memory Palace — Review Page" />
 
-快照的并排差异对比，支持一键回滚和整合操作。
+Side-by-side diff comparison of snapshots with one-click rollback and integrate actions.
 </details>
 
 <details>
-<summary>🔧 维护 — 活力治理</summary>
+<summary>🔧 Maintenance — Vitality Governance</summary>
 
-<img src="docs/images/memory-palace-maintenance-page.png" width="900" alt="Memory Palace — 维护页面" />
+<img src="docs/images/memory-palace-maintenance-page.png" width="900" alt="Memory Palace — Maintenance Page" />
 
-监控记忆活力值、触发清理任务、管理衰减参数。
+Monitor memory vitality scores, trigger cleanup tasks, and manage decay parameters.
 </details>
 
 <details>
-<summary>📊 可观测性 — 搜索与任务监控</summary>
+<summary>📊 Observability — Search & Task Monitoring</summary>
 
-<img src="docs/images/memory-palace-observability-page.png" width="900" alt="Memory Palace — 可观测性页面" />
+<img src="docs/images/memory-palace-observability-page.png" width="900" alt="Memory Palace — Observability Page" />
 
-实时搜索查询监控、检索质量洞察和任务队列状态。
+Real-time search query monitoring, retrieval quality insights, and task queue status.
 </details>
 
 <details>
-<summary>📄 API 文档 — Swagger</summary>
+<summary>📄 API Docs — Swagger</summary>
 
-<img src="docs/images/memory-palace-api-docs.png" width="900" alt="Memory Palace — API 文档（Swagger）" />
+<img src="docs/images/memory-palace-api-docs.png" width="900" alt="Memory Palace — API Docs (Swagger)" />
 
-自动生成的交互式 API 文档，访问 `/docs` 即可使用。
+Auto-generated interactive API documentation at `/docs`.
 </details>
 
 ---
 
-## ⏱️ 记忆写入与审查工作流
+## ⏱️ Memory Write & Review Workflow
 
 <p align="center">
-  <img src="docs/images/记忆写入与审查时序图.png" width="900" alt="记忆写入与审查时序图" />
+  <img src="docs/images/记忆写入与审查时序图.png" width="900" alt="Memory Write & Review Sequence Diagram" />
 </p>
 
-### 写入路径
+### Write Path
 
-1. `create_memory` / `update_memory` 进入 **Write Lane** 队列
-2. 写入前 **Write Guard** 评估 → 核心动作：`ADD` / `UPDATE` / `NOOP` / `DELETE`（`BYPASS` 仅用于 metadata-only 更新流程标记）
-3. **快照** 与版本变更记录生成
-4. 异步 **Index Worker** 入队进行索引更新
+1. `create_memory` / `update_memory` enters the **Write Lane** queue
+2. Pre-write **Write Guard** evaluation → core action: `ADD` / `UPDATE` / `NOOP` / `DELETE` (`BYPASS` is only used as a metadata-only flow marker)
+3. **Snapshot** and version change record generation
+4. Async **Index Worker** enqueue for index updates
 
-### 检索路径
+### Retrieval Path
 
-1. `preprocess_query` → `classify_intent`（factual / exploratory / temporal / causal；无显著信号默认 factual_high_precision，冲突或低信号混合时为 unknown/default）
-2. 策略模板匹配（如 `factual_high_precision`、`temporal_time_filtered`）
-3. 执行 `keyword` / `semantic` / `hybrid` 检索
-4. 返回 `results` + `degrade_reasons`
+1. `preprocess_query` → `classify_intent` (factual / exploratory / temporal / causal; default `factual_high_precision` when no strong signal, `unknown/default` for conflicting or low-signal mixed queries)
+2. Strategy template matching (e.g., `factual_high_precision`, `temporal_time_filtered`)
+3. Execute `keyword` / `semantic` / `hybrid` retrieval
+4. Return `results` + `degrade_reasons`
 
 ---
 
-## 📚 文档导航
+## 📚 Documentation
 
-| 文档 | 说明 |
+| Document | Description |
 |---|---|
-| [快速开始](docs/GETTING_STARTED.md) | 从零到运行的完整指南 |
-| [技术概述](docs/TECHNICAL_OVERVIEW.md) | 架构设计与模块职责 |
-| [部署档位](docs/DEPLOYMENT_PROFILES.md) | A/B/C/D 详细配置与调参指南 |
-| [MCP 工具](docs/TOOLS.md) | 全部 9 个工具的完整语义与返回格式 |
-| [评测报告](docs/EVALUATION.md) | 检索质量、写入门控、意图分类指标 |
-| [Skills 指南](docs/skills/MEMORY_PALACE_SKILLS.md) | 多客户端统一集成策略 |
-| [安全与隐私](docs/SECURITY_AND_PRIVACY.md) | API Key 认证与安全策略 |
-| [故障排查](docs/TROUBLESHOOTING.md) | 常见问题与解决方案 |
+| [Getting Started](docs/GETTING_STARTED.md) | Complete guide from zero to running |
+| [Technical Overview](docs/TECHNICAL_OVERVIEW.md) | Architecture design and module responsibilities |
+| [Deployment Profiles](docs/DEPLOYMENT_PROFILES.md) | A/B/C/D detailed configuration and tuning guide |
+| [MCP Tools](docs/TOOLS.md) | Full semantics and return formats for all 9 tools |
+| [Evaluation](docs/EVALUATION.md) | Retrieval quality, write gates, intent classification metrics |
+| [Skills Guide](docs/skills/MEMORY_PALACE_SKILLS.md) | Multi-client unified integration strategy |
+| [Security & Privacy](docs/SECURITY_AND_PRIVACY.md) | API Key authentication and security policies |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Common issues and solutions |
 
 ---
 
-## 🔐 安全与隐私
+## 🔐 Security & Privacy
 
-- 仅 `.env.example` 被提交——**实际 `.env` 文件始终被 gitignore**
-- 文档中所有 API Key 均使用占位符
-- HTTP/SSE 鉴权默认 **失败关闭（fail-closed）**：未配置或未提供有效 `MCP_API_KEY` 时，受保护接口返回 `401`
-- 上述门控仅作用于 HTTP/SSE 接口；`stdio` 模式不受影响
-- 本地绕过需显式启用：`MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`（仅限回环地址）
+- Only `.env.example` is committed — **real `.env` files are always gitignored**
+- All API keys in documentation use placeholders only
+- HTTP/SSE auth is **fail-closed** by default: protected endpoints return `401` when `MCP_API_KEY` is missing or invalid
+- This gate applies only to HTTP/SSE interfaces; `stdio` mode is unaffected
+- Local bypass requires explicit opt-in: `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` (loopback only)
 
-详情：[SECURITY_AND_PRIVACY.md](docs/SECURITY_AND_PRIVACY.md)
+Details: [SECURITY_AND_PRIVACY.md](docs/SECURITY_AND_PRIVACY.md)
 
 ---
 
-## 🔀 迁移与兼容性
+## 🔀 Migration & Compatibility
 
-为向后兼容旧版 `nocturne_memory` 部署：
+For backward compatibility with legacy `nocturne_memory` deployments:
 
-- 脚本仍支持旧版 `NOCTURNE_*` 环境变量前缀
-- Docker 脚本自动检测并复用旧版数据卷
-- 后端启动时通过 `_try_restore_legacy_sqlite_file()` 自动从旧版 SQLite 文件名恢复（`agent_memory.db`、`nocturne_memory.db`、`nocturne.db`）
+- Scripts still support the legacy `NOCTURNE_*` env prefix
+- Docker scripts auto-detect and reuse legacy data volumes
+- Backend auto-recovers from legacy SQLite filenames (`agent_memory.db`, `nocturne_memory.db`, `nocturne.db`) on startup via `_try_restore_legacy_sqlite_file()`
 
-> 兼容层不影响当前 Memory Palace 品牌和主路径。
+> The compatibility layer does not affect current Memory Palace branding or primary paths.
 
 ---
 
@@ -764,16 +754,24 @@ pytest tests/benchmark/test_search_memory_contract_regression.py -q
 
 ---
 
-## 📄 开源协议
+## 📄 License
 
 [MIT](LICENSE) — Copyright (c) 2026 agi
 
 ---
 
+## 🙏 Acknowledgements
+
+- The original inspiration came from the community discussion: <https://linux.do/t/topic/1616409>
+- The earliest project reference came from `Dataojitori/nocturne_memory`: <https://github.com/Dataojitori/nocturne_memory>
+- Memory Palace is a full rework on top of that initial idea, with a new public documentation, deployment, and verification path
+
+---
+
 <p align="center">
-  <strong>用 ❤️ 为有记忆的 AI Agent 而构建。</strong>
+  <strong>Built with ❤️ for AI Agents that remember.</strong>
 </p>
 
 <p align="center">
-  <sub>Memory Palace · 记忆宫殿 —— 因为最好的 AI 助手，从不遗忘。</sub>
+  <sub>Memory Palace — because the best AI assistant never forgets.</sub>
 </p>

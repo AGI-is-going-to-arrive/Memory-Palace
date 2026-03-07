@@ -51,11 +51,9 @@
 >
 > **本地开发临时策略（重要）**：为降低本地联调复杂度，可临时将 `RETRIEVAL_EMBEDDING_BACKEND=api`，并显式配置 `RETRIEVAL_EMBEDDING_*` 与 `RETRIEVAL_RERANKER_*`。该策略仅用于本地开发；面向客户交付前，应根据客户环境回切到目标部署口径（通常为 C/D 模板的 `router` 路线）。
 >
-> **本仓本地联调补充（记录）**：`new/run_post_change_checks.sh` 在 `--docker-profile c|d` 下默认 `--runtime-env-mode none`（不加载本地 runtime 覆盖）；仅在显式传入 `--runtime-env-mode auto|file` 且附加 `--allow-runtime-env-debug` 时，才会加载覆盖文件（优先 `Memory-Palace/.env`，其次 `~/Desktop/clawmemo/nocturne_memory/.env`）。若保持 `--runtime-env-mode none`，注入模式必须同时提供 `--allow-runtime-env-injection` 与 `--runtime-env-file /abs/path/.env`；脚本会先加载该文件，再把允许的环境变量注入 `.env.docker`（不做自动探测，适配 CI secrets 注入）。在 `profile c/d` 的注入模式下，脚本会强制 `RETRIEVAL_EMBEDDING_BACKEND=api`，避免本机 router 缺 embedding/reranker 时误判失败；其余仍注入 API 地址/密钥/模型字段及 `WRITE_GUARD_LLM_ENABLED`、`COMPACT_GIST_LLM_ENABLED`。
+> **本地联调补充（公开版）**：`new/run_post_change_checks.sh` 在 `--docker-profile c|d` 下默认 `--runtime-env-mode none`（不加载本地 runtime 覆盖）。只有显式传入 `--runtime-env-mode auto|file` 且附加 `--allow-runtime-env-debug` 时，才会加载你指定的 `<path-to-runtime-env>`。在 `profile c/d` 的注入模式下，脚本会临时强制 `RETRIEVAL_EMBEDDING_BACKEND=api`，避免本机 router 缺 embedding / reranker 时误判失败。
 >
-> **当前本地开发约定（避免重复踩坑）**：当本机 router 未部署 embedding/reranker/llm 时，C/D 本地联调统一使用 `/Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env` 作为测试注入源；其中 embedding、reranker 与 LLM（当前为 `gpt-5.2`）都直接沿用该文件。推荐命令：`bash new/run_post_change_checks.sh --with-docker --docker-profile c --runtime-env-mode file --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env --allow-runtime-env-debug`（`profile d` 同理）。
->
-> **上线口径提醒**：上述 `.env` 注入只用于当前本地开发/验证。真实交付时仍应优先回到 C/D 模板的 `router` 主链路，由客户环境提供 llm / embedding / reranker；若 router 侧暂时缺项，系统也会按既有 fallback 机制降级，而不是直接报错。
+> **上线口径提醒**：上述 `.env` 注入只用于当前本地开发 / 验证。真实交付时仍应优先回到 C/D 模板的 `router` 主链路，由客户环境提供 llm / embedding / reranker。
 >
 > `runtime-env-mode none + --allow-runtime-env-injection + --runtime-env-file` 适用于本地 C/D API 联调（脚本会强制 `RETRIEVAL_EMBEDDING_BACKEND=api`）；若要验证“保持 router 策略不变”的发布场景，请使用 `runtime-env-mode none` 且**不要**附加注入参数。
 >
@@ -162,7 +160,7 @@ RETRIEVAL_RERANKER_WEIGHT=0.35                     # 远程推荐略高
 ```bash
 # 以下命令在仓库根目录（clawanti）执行
 # 0) 变量准备（按你的本地实际路径替换）
-RUNTIME_ENV_FILE=/Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env
+RUNTIME_ENV_FILE=/absolute/path/to/runtime-debug.env
 
 # 1) 可选：本地 C/D API 联调（router 缺 embedding/reranker 时使用）
 bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse --runtime-env-mode file --runtime-env-file "${RUNTIME_ENV_FILE}" --allow-runtime-env-debug
@@ -443,11 +441,12 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 
 ```bash
 # 以 profile c 为例；profile d 只需把 --docker-profile c 改成 d
-bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse --runtime-env-mode file --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env --allow-runtime-env-debug
+RUNTIME_ENV_FILE=/absolute/path/to/runtime-debug.env
+bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse --runtime-env-mode file --runtime-env-file "${RUNTIME_ENV_FILE}" --allow-runtime-env-debug
 ```
 
-1. 如果日志里仍有 `embedding_request_failed` / `embedding_fallback_hash`，先检查外部 embedding/reranker 服务本身是否可达、API key 是否有效（本地约定优先使用 `nocturne_memory/.env` 中的服务配置）。
-2. 若显式设置了 `MEMORY_PALACE_DOCKER_ENV_FILE`，可用下面命令确认目标 env 文件已注入预期模型（本地约定为 `gpt-5.2`）；默认临时 env 文件会在脚本退出后自动清理：
+1. 如果日志里仍有 `embedding_request_failed` / `embedding_fallback_hash`，先检查外部 embedding / reranker 服务本身是否可达、API key 是否有效。
+2. 若显式设置了 `MEMORY_PALACE_DOCKER_ENV_FILE`，可用下面命令确认目标 env 文件已注入预期模型；默认临时 env 文件会在脚本退出后自动清理：
 
 ```bash
 rg -n "RETRIEVAL_EMBEDDING_MODEL|RETRIEVAL_RERANKER_MODEL|WRITE_GUARD_LLM_MODEL|COMPACT_GIST_LLM_MODEL" "${MEMORY_PALACE_DOCKER_ENV_FILE}"
@@ -460,7 +459,7 @@ rg -n "RETRIEVAL_EMBEDDING_MODEL|RETRIEVAL_RERANKER_MODEL|WRITE_GUARD_LLM_MODEL|
 - 本轮已修复 `apply_profile` 只去重 `DATABASE_URL` 的问题；`scripts/apply_profile.sh` 与 `scripts/apply_profile.ps1` 现在都会对重复 env key 做统一去重。
 - 本机无原生 `pwsh` 时，可先参考 `pwsh-in-docker` 等效 smoke；当前 `arm64` 宿主若无法可靠运行该 helper，应记录为 `SKIP`（等效 smoke 跳过），而不是 `FAIL` 或 native Windows 终验通过。
 - 若要形成最终 Windows 交付证据，仍建议在原生 Windows / 原生 `pwsh` 环境补跑一次专项验证。
-- 详细清单见：`docs/improvement/pwsh_native_validation_checklist_2026-03-06.md`
+- 公开仓只保留结论口径；详细逐项检查建议在目标 Windows 环境单独记录。
 
 ### 调参提示
 

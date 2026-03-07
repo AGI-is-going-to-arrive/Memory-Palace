@@ -13,7 +13,7 @@
 | 客户端 | skill 自动识别 | MCP 连接现状 | 你该怎么做 |
 |---|---|---|---|
 | `Claude Code` | 已就绪 | 已补项目级 allowlist，非交互模式也能直接调 `memory-palace` 工具 | 直接在本仓库打开即可 |
-| `Gemini CLI` | 已就绪 | 已有 `.gemini/settings.json` | 直接在本仓库打开即可 |
+| `Gemini CLI` | 已就绪 | 已有 `.gemini/settings.json`，但 `live MCP` 仍有个别场景待补验 | 先在本仓库打开；需要更稳时再补一次 user-scope 安装 |
 | `Codex CLI` | 已有 repo-local skill | 当前机器已修正为真实 backend 启动命令 | 当前机器可直接使用；新机器第一次执行 1 条 `codex mcp add` |
 | `OpenCode` | 已有 repo-local skill | 当前机器 live smoke 已通过；新机器通常要先确认本地 MCP 注册 | 先看 `opencode mcp list`，没有再补注册 |
 
@@ -23,9 +23,19 @@
 - **MCP** 负责“真正去调用 `read_memory / search_memory / update_memory` 这些工具”
 - 两个都到位，才叫“真的能自动触发并且真的能干活”
 
+> 当前公开口径：
+>
+> - `Claude / Codex / OpenCode / Gemini` 的 **smoke** 已有结果
+> - `Gemini live` 还没到可以写成“完全通过”的程度
+> - `Cursor / agent / Antigravity` 目前仍是 **PARTIAL**
+
 ---
 
 ## 🧠 skill 和 MCP 到底啥关系
+
+<p align="center">
+  <img src="../images/skill_vs_mcp.png" width="800" alt="Skill vs MCP 工作原理" />
+</p>
 
 可以把它理解成：
 
@@ -137,8 +147,10 @@ python Memory-Palace/scripts/install_skill.py --targets gemini --scope user --fo
 
 ```bash
 gemini mcp remove memory-palace
-gemini mcp add -s project -e DATABASE_URL=sqlite+aiosqlite:////Users/yangjunjie/Desktop/clawanti/Memory-Palace/backend/memory.db memory-palace /bin/zsh -lc 'cd /Users/yangjunjie/Desktop/clawanti/Memory-Palace/backend && source .venv/bin/activate && RETRIEVAL_REMOTE_TIMEOUT_SEC=1 python mcp_server.py'
+gemini mcp add -s project -e DATABASE_URL=sqlite+aiosqlite:////<repo-root>/Memory-Palace/backend/memory.db memory-palace /bin/zsh -lc 'cd <repo-root>/Memory-Palace/backend && source .venv/bin/activate && RETRIEVAL_REMOTE_TIMEOUT_SEC=1 python mcp_server.py'
 ```
+
+> 把上面的 `<repo-root>` 替换成你的实际仓库根目录。
 
 ---
 
@@ -253,7 +265,7 @@ Memory-Palace/backend/.venv/bin/python Memory-Palace/scripts/evaluate_memory_pal
 
 对应报告：
 
-- `Memory-Palace/docs/skills/TRIGGER_SMOKE_REPORT.md`
+- `Memory-Palace/docs/skills/TRIGGER_SMOKE_REPORT.md`（脱敏后的 smoke 摘要）
 - `Memory-Palace/docs/skills/MCP_LIVE_E2E_REPORT.md`
 
 ---

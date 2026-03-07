@@ -56,6 +56,10 @@ memory-palace/
 
 ---
 
+<p align="center">
+  <img src="images/onboarding_flow.png" width="900" alt="Memory Palace 快速开始流程图" />
+</p>
+
 ## 3. 本地开发（推荐先走这一条）
 
 ### Step 1：准备配置文件
@@ -82,7 +86,7 @@ bash scripts/apply_profile.sh macos b
 
 > apply_profile 脚本会将 `.env.example` 复制到 `.env`（或你指定的目标文件），然后追加对应 Profile 的覆盖配置。macOS 平台还会自动检测并填充 `DATABASE_URL`。
 >
-> `apply_profile.sh/.ps1` 当前会在生成后统一去重重复 env key；如需补做原生 Windows / `pwsh` 验证，可参考 `docs/improvement/pwsh_native_validation_checklist_2026-03-06.md`。
+> `apply_profile.sh/.ps1` 当前会在生成后统一去重重复 env key；原生 Windows / native `pwsh` 仍建议在目标环境单独补跑一次。
 
 #### 关键配置项说明
 
@@ -179,19 +183,20 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > 同一 checkout 下的并发部署会被 deployment lock 串行化；若已有另一条一键部署在执行，后续进程会直接退出并提示稍后重试。
 
-> **C/D 本地联调固定口径（避免重复踩坑）**：
+> **C/D 本地联调建议**：
 >
-> - 当本机 `router` 暂时没有 embedding/reranker/llm 时，使用 `/Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env` 作为注入源。
-> - 当前这份本地 `.env` 会同时提供 `embedding` / `reranker` 模型配置，以及 LLM 配置（当前测试口径为 `gpt-5.2`）。
-> - 当前推荐的本地联调命令（`profile c/d` 二选一）：
+> - 只有当本机 `router` 暂时没有 embedding / reranker / llm 时，才建议临时使用 `--runtime-env-mode file`。
+> - 请把运行时注入文件放在你自己的 `<path-to-runtime-env>`，不要把真实本机路径写进公开文档。
+> - 推荐命令（`profile c/d` 二选一）：
 >
 > ```bash
-> bash new/run_post_change_checks.sh --skip-frontend --skip-sse --with-docker --docker-profile c --runtime-env-mode file --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env --allow-runtime-env-debug
-> bash new/run_post_change_checks.sh --skip-frontend --skip-sse --with-docker --docker-profile d --runtime-env-mode file --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env --allow-runtime-env-debug
+> RUNTIME_ENV_FILE=/absolute/path/to/runtime-debug.env
+> bash new/run_post_change_checks.sh --skip-frontend --skip-sse --with-docker --docker-profile c --runtime-env-mode file --runtime-env-file "${RUNTIME_ENV_FILE}" --allow-runtime-env-debug
+> bash new/run_post_change_checks.sh --skip-frontend --skip-sse --with-docker --docker-profile d --runtime-env-mode file --runtime-env-file "${RUNTIME_ENV_FILE}" --allow-runtime-env-debug
 > ```
 >
-> - 该口径仅用于本地验证：当前 checkout 的 `profile c/d` 测试允许直接复用这份 `.env` 中的 embedding / reranker / LLM 配置，以避免本机 `router` 缺模型时重复排障。
-> - 上线/交付前必须回到 `router` 默认链路复验（`runtime-env-mode none` 且不注入本地 `.env`）；真实客户环境应由 `router` 提供 llm / embedding / reranker，即使暂时缺项，系统也会按既有 fallback 链路降级，避免直接报错。
+> - 这套命令只用于**本地排障**：你可以先确认 embedding / reranker / llm 哪一段不可达。
+> - 上线前必须回到 `runtime-env-mode none` 且不注入本地文件，再按目标环境复跑一次。
 >
 > **为什么当前本地建议这样配**：
 >
@@ -257,6 +262,8 @@ bash scripts/backup_memory.sh --env-file .env --output-dir backups
 - 前端本地产物：`frontend/node_modules/`、`frontend/dist/`
 - 日志与快照：`*.log`、`snapshots/`、`backups/`
 - 临时测试草稿：`frontend/src/*.tmp.test.jsx`
+- 维护期内部文档：`docs/improvement/`、`backend/docs/benchmark_*.md`
+- 一次性对照摘要：`docs/evaluation_old_vs_new_executive_summary_2026-03-05.md`
 
 上传前建议执行：
 
