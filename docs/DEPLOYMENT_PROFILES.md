@@ -274,6 +274,8 @@ cd <project-root>
 >
 > `docker_one_click.sh/.ps1` 默认会为每次运行生成独立的临时 Docker env 文件，并通过 `MEMORY_PALACE_DOCKER_ENV_FILE` 传给 `docker compose`；只有显式设置该环境变量时才会复用指定路径，而不是固定共享 `.env.docker`。
 >
+> 如果本次 Docker env 文件里的 `MCP_API_KEY` 为空，`apply_profile.sh/.ps1` 会自动生成一把本地 key，供 Dashboard 代理和 SSE 共用。
+>
 > 同一 checkout 下的并发一键部署会被 deployment lock 串行化，避免共享 compose project / env 文件互相覆盖。
 
 ### 部署完成后的访问地址
@@ -282,6 +284,7 @@ cd <project-root>
 |---|:---:|:---:|---|
 | Frontend（Web UI） | `3000` | `8080` | `http://localhost:3000` |
 | Backend（API） | `18000` | `8000` | `http://localhost:18000` |
+| SSE（前端代理） | `3000` | `8080 -> 8000` | `http://localhost:3000/sse` |
 | 健康检查 | `18000` | `8000` | `http://localhost:18000/health` |
 
 ### 一键脚本做了什么
@@ -291,7 +294,7 @@ cd <project-root>
 3. 自动检测端口占用，若默认端口被占用则自动递增寻找空闲端口
 4. 检测是否存在历史数据卷（`memory_palace_data` 或 `nocturne_*` 系列），自动复用以保留历史数据
 5. 对同一 checkout 的并发部署加 deployment lock，避免多次 `docker_one_click` 互相覆盖
-6. 使用 `docker compose` 构建并启动前后端容器
+6. 使用 `docker compose` 构建并启动后端、SSE、前端三个容器
 
 ### 安全说明
 
@@ -417,7 +420,7 @@ Authorization: Bearer <你的 MCP_API_KEY>
 
 ### 前端访问受保护接口
 
-通过运行时注入 API Key（不建议在构建变量中写死）：
+**本地手动启动前后端**时，推荐通过运行时注入 API Key（不建议在构建变量中写死）：
 
 ```html
 <script>
@@ -430,10 +433,22 @@ Authorization: Bearer <你的 MCP_API_KEY>
 
 > 也兼容旧字段名：`window.__MCP_RUNTIME_CONFIG__`
 
+**Docker 一键部署**时，不需要把 key 写进浏览器页面：
+
+- 前端容器会在代理层自动给 `/api/*`、`/sse`、`/messages` 带上同一把 `MCP_API_KEY`
+- 这把 key 默认保存在本次运行使用的 Docker env 文件里
+- 浏览器只看到代理后的结果，不会直接拿到真实 key
+
 ### SSE 启动示例
 
 ```bash
 HOST=127.0.0.1 PORT=8010 python run_sse.py
+```
+
+Docker 一键部署时，直接使用：
+
+```bash
+http://localhost:3000/sse
 ```
 
 ---

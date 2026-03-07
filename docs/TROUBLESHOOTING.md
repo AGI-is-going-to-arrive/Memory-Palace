@@ -14,6 +14,8 @@
 > - `Memory / Review / Maintenance / Observability` 里出现空态、等待提示或 `401`
 >
 > 这通常不是前端挂了，而是**你还没给受保护接口授权**。
+>
+> 如果你用的是 **Docker 一键部署**，默认不需要手动点这个按钮。优先先确认是不是用了 `apply_profile.*` / `docker_one_click.*` 生成的 Docker env 文件。
 
 **排查步骤**：
 
@@ -94,7 +96,7 @@
 | `reason` | 含义 | 处理方式 |
 |---|---|---|
 | `invalid_or_missing_api_key` | Key 错误或未提供 | 检查 Key 是否正确 |
-| `api_key_not_configured` | `.env` 中 `MCP_API_KEY` 为空 | 设置 Key 或启用 insecure local |
+| `api_key_not_configured` | 本地手动启动时 `.env` 中 `MCP_API_KEY` 为空 | 设置 Key 或启用 insecure local |
 | `insecure_local_override_requires_loopback` | 启用了 insecure local 但请求非 loopback | 确保从 `127.0.0.1` 或 `localhost` 访问 |
 
 > 💡 如果你看到的是：
@@ -110,7 +112,10 @@
 
 ## 3. SSE 启动失败或端口占用
 
-**现象**：`python run_sse.py` 报 `address already in use`。
+**现象**：
+
+- 本地手动启动 `python run_sse.py` 报 `address already in use`
+- 或 Docker 下访问 `http://127.0.0.1:3000/sse` 失败
 
 **处理**：
 
@@ -132,6 +137,19 @@
    # Windows PowerShell
    netstat -ano | findstr :8000
    taskkill /PID <PID> /F
+   ```
+
+3. Docker 一键部署时，优先检查前端入口：
+
+   ```bash
+   curl -i -H 'Accept: text/event-stream' http://127.0.0.1:3000/sse
+   ```
+
+   正常情况下你应该能看到：
+
+   ```text
+   event: endpoint
+   data: /messages/?session_id=...
    ```
 
 ---
@@ -374,7 +392,7 @@ http://127.0.0.1:3000
 **如果仍然报错**，通常原因是：
 
 - 前端开发服务器的代理未正确配置（检查 `frontend/vite.config.js`）
-- Docker 部署时前端 Nginx 没有正确转发到后端（检查 `deploy/docker/nginx.conf`）
+- Docker 部署时前端 Nginx 没有正确转发到后端（检查 `deploy/docker/nginx.conf.template`）
 - 你正在从一个**不在允许列表里的浏览器来源**访问后端
 
 **处理建议**：

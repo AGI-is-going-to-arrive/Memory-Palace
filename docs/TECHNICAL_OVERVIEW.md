@@ -202,6 +202,7 @@ frontend/src/
 
 - 当前版本的应用壳层右上角有统一的鉴权入口：`Set API key` / `Update API key` / `Clear key`
 - 如果还没配置鉴权，受保护页面会先显示授权提示或空态，而不是直接加载完整数据
+- Docker 一键部署默认不需要手动点 `Set API key`：前端代理会在服务端自动转发同一把 `MCP_API_KEY`
 
 ---
 
@@ -225,6 +226,8 @@ frontend/src/
 > 代码参考：`frontend/src/lib/api.js` 第 14 行。
 >
 > 说人话就是：前端把鉴权做成了“运行时再决定”，所以你可以在页面顶部直接补 key，也可以由部署脚本在页面加载前注入。
+>
+> Docker 一键部署走的是第三种方式：不把 key 注入页面，而是在前端代理层自动转发。
 
 ---
 
@@ -271,7 +274,7 @@ frontend/src/
 | 场景 | 宿主机端口 | 容器内部端口 | 说明 |
 |---|---|---|---|
 | 本地开发 | Backend `8000` · Frontend `5173` | — | 直接启动 |
-| Docker 默认 | Backend `18000` · Frontend `3000` | Backend `8000` · Frontend `8080` | 端口可通过环境变量覆盖 |
+| Docker 默认 | Backend `18000` · Frontend `3000` · SSE `3000/sse` | Backend `8000` · Frontend `8080` · SSE `8000` | 端口可通过环境变量覆盖 |
 
 Docker 端口环境变量：
 
@@ -282,8 +285,8 @@ Docker 端口环境变量：
 
 - Compose 文件：`docker-compose.yml`
 - 镜像定义：`deploy/docker/Dockerfile.backend`（基于 `python:3.11-slim`）、`deploy/docker/Dockerfile.frontend`（构建阶段 `node:22-alpine`，运行阶段 `nginxinc/nginx-unprivileged:1.27-alpine`）
-- Nginx 配置：`deploy/docker/nginx.conf`
-- 入口脚本：`deploy/docker/backend-entrypoint.sh`
+- Nginx 配置模板：`deploy/docker/nginx.conf.template`
+- 入口脚本：`deploy/docker/backend-entrypoint.sh`、`deploy/docker/frontend-entrypoint.sh`
 - 备份脚本：`scripts/backup_memory.sh`、`scripts/backup_memory.ps1`
 - 分享前检查：`scripts/pre_publish_check.sh`
 

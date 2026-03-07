@@ -19,13 +19,30 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  sse:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.backend
+    env_file:
+      - ${MEMORY_PALACE_DOCKER_ENV_FILE:-./.env.docker}
+    command: ["python", "run_sse.py"]
+    volumes:
+      - memory_palace_data:/app/data
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
   frontend:
     build:
       context: .
       dockerfile: deploy/docker/Dockerfile.frontend
+    env_file:
+      - ${MEMORY_PALACE_DOCKER_ENV_FILE:-./.env.docker}
     depends_on:
       backend:
         condition: service_healthy
+      sse:
+        condition: service_started
     ports:
       - "${MEMORY_PALACE_FRONTEND_PORT:-${NOCTURNE_FRONTEND_PORT:-3000}}:8080"
     security_opt:

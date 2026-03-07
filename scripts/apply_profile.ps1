@@ -82,6 +82,34 @@ function Dedupe-EnvKeys {
     }
 }
 
+function Get-EnvValueFromFile {
+    param(
+        [string]$FilePath,
+        [string]$Key
+    )
+
+    if (-not (Test-Path $FilePath)) {
+        return ''
+    }
+
+    $escaped = [regex]::Escape($Key)
+    $lastLine = Get-Content -Path $FilePath |
+        Where-Object { $_ -match "^${escaped}=" } |
+        Select-Object -Last 1
+
+    if (-not $lastLine) {
+        return ''
+    }
+
+    return ($lastLine -split '=', 2)[1]
+}
+
+function New-DockerMcpApiKey {
+    $bytes = [byte[]]::new(24)
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    return [Convert]::ToHexString($bytes).ToLowerInvariant()
+}
+
 if (-not (Test-Path $baseEnv)) {
     Write-Error "Missing base env template: $baseEnv"
     exit 1
@@ -127,6 +155,15 @@ if ($Platform -eq 'windows') {
         $dbUrl = 'DATABASE_URL=sqlite+aiosqlite:///' + $dbPath
         Set-EnvValueInFile -FilePath $Target -Key 'DATABASE_URL' -Value $dbUrl.Substring('DATABASE_URL='.Length)
         Write-Host "[auto-fill] DATABASE_URL set to $dbPath"
+    }
+}
+
+if ($Platform -eq 'docker') {
+    $currentApiKey = Get-EnvValueFromFile -FilePath $Target -Key 'MCP_API_KEY'
+    if ([string]::IsNullOrWhiteSpace($currentApiKey)) {
+        $generatedApiKey = New-DockerMcpApiKey
+        Set-EnvValueInFile -FilePath $Target -Key 'MCP_API_KEY' -Value $generatedApiKey
+        Write-Host "[auto-fill] MCP_API_KEY generated for docker profile"
     }
 }
 

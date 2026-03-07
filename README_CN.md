@@ -384,10 +384,19 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 .\scripts\docker_one_click.ps1 -Profile c -AllowRuntimeEnvInjection
 ```
 
+> Docker 一键部署会自动启动三部分：
+>
+> - Dashboard：`http://127.0.0.1:3000`
+> - Backend API：`http://127.0.0.1:18000`
+> - SSE：`http://127.0.0.1:3000/sse`
+>
+> 如果 Docker env 文件里的 `MCP_API_KEY` 为空，脚本会自动生成一把本地 key。前端会在代理层自动带上这把 key，所以默认不需要手动点 `Set API key`。
+
 | 服务 | 地址 |
 |---|---|
 | 前端仪表盘 | <http://127.0.0.1:3000> |
 | 后端 API | <http://127.0.0.1:18000> |
+| SSE | <http://127.0.0.1:3000/sse> |
 | 健康检查 | <http://127.0.0.1:18000/health> |
 
 > 注：以上为默认端口。若端口被占用，一键脚本会自动调整并在控制台输出实际地址。
@@ -505,7 +514,7 @@ Memory Palace 通过 MCP 协议暴露 **9 个标准化工具**：
 # stdio 模式（用于 IDE 内部调用——Cursor、Codex 等）
 cd backend && python mcp_server.py
 
-# SSE 模式（用于远程 / 多客户端')
+# SSE 模式（用于远程 / 多客户端）
 cd backend && HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
@@ -766,6 +775,7 @@ curl -fsS http://127.0.0.1:8000/health
 - 文档中所有 API Key 均使用占位符
 - HTTP/SSE 鉴权默认 **失败关闭（fail-closed）**：未配置或未提供有效 `MCP_API_KEY` 时，受保护接口返回 `401`
 - 上述门控仅作用于 HTTP/SSE 接口；`stdio` 模式不受影响
+- Docker 一键部署默认通过服务端代理转发鉴权头，浏览器页面不会直接拿到真实 `MCP_API_KEY`
 - 本地绕过需显式启用：`MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`（仅限回环地址）
 
 详情：[SECURITY_AND_PRIVACY.md](docs/SECURITY_AND_PRIVACY.md)

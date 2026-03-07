@@ -109,7 +109,7 @@ def apply_mcp_api_key_middleware(app: ASGIApp) -> ASGIApp:
 
 
 def create_sse_app() -> ASGIApp:
-    app = mcp.sse_app("/sse")
+    app = mcp.sse_app()
     return apply_mcp_api_key_middleware(app)
 
 

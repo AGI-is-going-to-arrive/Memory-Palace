@@ -55,6 +55,27 @@ set_env_value() {
   mv "${tmp_file}" "${file_path}"
 }
 
+generate_random_mcp_api_key() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 24 | tr -d '\r\n'
+    return 0
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import secrets; print(secrets.token_hex(24))'
+    return 0
+  fi
+
+  echo "Failed to generate MCP_API_KEY: neither openssl nor python3 is available." >&2
+  return 1
+}
+
+get_env_value() {
+  local file_path="$1"
+  local key="$2"
+  awk -F= -v key="${key}" '$1 == key { value = substr($0, length($1) + 2) } END { print value }' "${file_path}"
+}
+
 resolve_windows_db_path() {
   local db_path="${PROJECT_ROOT}/demo.db"
   if command -v cygpath >/dev/null 2>&1; then
@@ -117,6 +138,15 @@ elif [[ "${platform}" == "windows" ]]; then
       set_env_value "${target_file}" "DATABASE_URL" "sqlite+aiosqlite:///${db_path}"
       echo "[auto-fill] DATABASE_URL set to ${db_path}"
     fi
+  fi
+fi
+
+if [[ "${platform}" == "docker" ]]; then
+  current_mcp_api_key="$(get_env_value "${target_file}" "MCP_API_KEY")"
+  if [[ -z "${current_mcp_api_key}" ]]; then
+    generated_mcp_api_key="$(generate_random_mcp_api_key)"
+    set_env_value "${target_file}" "MCP_API_KEY" "${generated_mcp_api_key}"
+    echo "[auto-fill] MCP_API_KEY generated for docker profile"
   fi
 fi
 

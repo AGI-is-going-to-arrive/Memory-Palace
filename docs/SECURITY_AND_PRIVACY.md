@@ -29,6 +29,7 @@
 - ✅ 公开截图前确认没有包含真实 key、用户名、绝对路径
 - ✅ 对外日志中不打印请求头和密钥
 - ✅ 定期轮换 API Key，尤其在团队成员变更后
+- ✅ Docker 场景优先使用服务端代理转发鉴权头，而不是把 key 写进前端静态资源
 
 ---
 
@@ -110,6 +111,12 @@ Authorization: Bearer <MCP_API_KEY>
 
 > 兼容性：也支持旧字段名 `window.__MCP_RUNTIME_CONFIG__`（同一文件第 14 行 fallback 逻辑）。
 
+**Docker 一键部署的默认做法不一样：**
+
+- `apply_profile.*` 在 `docker` 平台下如果发现 `MCP_API_KEY` 为空，会自动生成一把本地 key
+- 前端容器不会把这把 key 写进页面，而是由 Nginx 代理在服务端转发到 `/api/*`、`/sse`、`/messages`
+- 这样浏览器可以直接使用 Dashboard，但不会在页面源码里暴露真实 key
+
 **前端测试覆盖：**
 
 - `frontend/src/lib/api.contract.test.js` — 验证 runtime config 注入与鉴权头附加
@@ -124,6 +131,7 @@ Authorization: Bearer <MCP_API_KEY>
 |---|---|---|
 | 非 root 运行（后端） | `groupadd --gid 10001 app && useradd --uid 10001` | `deploy/docker/Dockerfile.backend` |
 | 非 root 运行（前端） | 使用 `nginxinc/nginx-unprivileged:1.27-alpine` 基础镜像 | `deploy/docker/Dockerfile.frontend` |
+| 前端代理鉴权 | 由 Nginx 在服务端转发 `X-MCP-API-Key`，浏览器侧不保存真实 key | `deploy/docker/nginx.conf.template` |
 | 禁止提权 | `security_opt: no-new-privileges:true` | `docker-compose.yml` 第 13 行 |
 | 数据持久化 | Docker Volume `memory_palace_data` 挂载到 `/app/data` | `docker-compose.yml` 第 9、40 行 |
 | 健康检查（后端） | Python `urllib.request.urlopen('http://127.0.0.1:8000/health')` | `docker-compose.yml` 第 15 行 |

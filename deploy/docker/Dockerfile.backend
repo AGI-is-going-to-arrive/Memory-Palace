@@ -17,8 +17,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend /app/backend
 COPY deploy/docker/backend-entrypoint.sh /usr/local/bin/backend-entrypoint.sh
 RUN chmod +x /usr/local/bin/backend-entrypoint.sh \
-    && mkdir -p /app/data \
-    && chown -R app:app /app/backend /app/data
+    && mkdir -p /app/data /app/snapshots \
+    && chown -R app:app /app/backend /app/data /app/snapshots
 
 EXPOSE 8000
 

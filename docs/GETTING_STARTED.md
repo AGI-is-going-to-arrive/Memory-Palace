@@ -66,7 +66,7 @@ memory-palace/
 >
 > - 后端默认是 `uvicorn` 跑在 `127.0.0.1:8000`
 > - 前端开发服务器默认是 `5173`
-> - Docker 默认暴露的是 `18000 / 3000`
+> - Docker 默认入口是 `http://127.0.0.1:3000`（Dashboard）与 `http://127.0.0.1:3000/sse`（SSE）
 
 ## 3. 本地开发（推荐先走这一条）
 
@@ -198,6 +198,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > `docker_one_click.sh/.ps1` 默认会为**每次运行**生成独立的临时 Docker env 文件，并通过 `MEMORY_PALACE_DOCKER_ENV_FILE` 传给 `docker compose`；只有显式设置该环境变量时才会复用指定文件，而不是固定共享 `.env.docker`。
 >
 > 同一 checkout 下的并发部署会被 deployment lock 串行化；若已有另一条一键部署在执行，后续进程会直接退出并提示稍后重试。
+>
+> 如果 Docker env 文件里的 `MCP_API_KEY` 为空，`apply_profile.*` 会自动生成一把本地 key。Docker 前端会在代理层自动带上这把 key，所以 Dashboard 默认不需要再手动点 `Set API key`。
 
 > **C/D 本地联调建议**：
 >
@@ -383,6 +385,8 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
 > `run_sse.py` 默认监听 `0.0.0.0:8000`（通过 `HOST` 和 `PORT` 环境变量可自定义），SSE 端点路径为 `/sse`。SSE 模式受 `MCP_API_KEY` 鉴权保护。
+>
+> 如果你使用 Docker 一键部署，SSE 会由独立容器启动，并通过前端代理暴露在 `http://127.0.0.1:3000/sse`。
 
 ### 6.3 客户端配置示例
 
@@ -456,6 +460,10 @@ curl -fsS http://127.0.0.1:8000/maintenance/orphans \
 </script>
 ```
 
+> 这段配置主要用于**本地手动启动前后端**的场景。
+>
+> Docker 一键部署默认不需要把 key 写进页面：前端容器会在代理层自动把同一把 `MCP_API_KEY` 转发到 `/api/*`、`/sse` 和 `/messages`。
+
 ### 本地调试跳过鉴权
 
 如果在本地开发时不想配置 API Key，可在 `.env` 中设置：
@@ -475,7 +483,7 @@ MCP_API_KEY_ALLOW_INSECURE_LOCAL=true
 | 启动后端时 `ModuleNotFoundError` | 未激活虚拟环境或未安装依赖。执行 `source .venv/bin/activate && pip install -r requirements.txt` |
 | `DATABASE_URL` 报错 | 路径必须是绝对路径且使用 `sqlite+aiosqlite:///` 前缀。示例：`sqlite+aiosqlite:////absolute/path/to/memory_palace.db` |
 | 前端访问 API 返回 `502` 或 `Network Error` | 确认后端已启动且运行在 `8000` 端口。检查 `vite.config.js` 中 proxy 目标与后端端口是否一致 |
-| 受保护接口返回 `401` | 配置 `MCP_API_KEY` 或设置 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` |
+| 受保护接口返回 `401` | 本地手动启动：配置 `MCP_API_KEY` 或设置 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`；Docker：优先确认是否使用 `apply_profile.*` / `docker_one_click.*` 生成的 Docker env 文件 |
 | Docker 启动端口冲突 | `docker_one_click.sh` 默认会自动寻找空闲端口。也可通过 `--frontend-port` / `--backend-port` 手动指定 |
 
 更多问题排查请参考 [TROUBLESHOOTING.md](TROUBLESHOOTING.md)。
