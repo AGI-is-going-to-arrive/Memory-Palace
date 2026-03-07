@@ -3,11 +3,11 @@ import sys
 import hmac
 import asyncio
 import uvicorn
-from typing import Optional, Callable, Awaitable
+from typing import Optional
 
-from starlette.requests import Request
+from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 # Ensure we can import from backend dir
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -41,21 +41,6 @@ def _allow_insecure_local_without_api_key() -> bool:
     return value in _TRUTHY_ENV_VALUES
 
 
-def _is_loopback_request(request: Request) -> bool:
-    client = getattr(request, "client", None)
-    host = str(getattr(client, "host", "") or "").strip().lower()
-    if host not in _LOOPBACK_CLIENT_HOSTS:
-        return False
-    headers = getattr(request, "headers", None)
-    if headers is None:
-        return True
-    for header_name in _FORWARDED_HEADER_NAMES:
-        header_value = headers.get(header_name)
-        if isinstance(header_value, str) and header_value.strip():
-            return False
-    return True
-
-
 def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
     if not authorization or not isinstance(authorization, str):
         return None
@@ -69,18 +54,42 @@ def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
     return token if token else None
 
 
+def _is_loopback_scope(scope: Scope) -> bool:
+    client = scope.get("client")
+    host = ""
+    if isinstance(client, tuple) and client:
+        host = str(client[0] or "").strip().lower()
+    elif client is not None:
+        host = str(getattr(client, "host", "") or "").strip().lower()
+    if host not in _LOOPBACK_CLIENT_HOSTS:
+        return False
+
+    headers = Headers(scope=scope)
+    for header_name in _FORWARDED_HEADER_NAMES:
+        header_value = headers.get(header_name)
+        if isinstance(header_value, str) and header_value.strip():
+            return False
+    return True
+
+
 def apply_mcp_api_key_middleware(app: ASGIApp) -> ASGIApp:
-    async def _auth_middleware(request: Request, call_next: Callable[[Request], Awaitable]):
+    async def _auth_middleware(scope: Scope, receive: Receive, send: Send) -> None:
+        if scope.get("type") != "http":
+            await app(scope, receive, send)
+            return
+
         configured = _get_configured_mcp_api_key()
+        headers = Headers(scope=scope)
         if not configured:
-            if _allow_insecure_local_without_api_key() and _is_loopback_request(request):
-                return await call_next(request)
+            if _allow_insecure_local_without_api_key() and _is_loopback_scope(scope):
+                await app(scope, receive, send)
+                return
             reason = (
                 "insecure_local_override_requires_loopback"
                 if _allow_insecure_local_without_api_key()
                 else "api_key_not_configured"
             )
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=401,
                 content={
                     "error": "mcp_sse_auth_failed",
@@ -88,13 +97,15 @@ def apply_mcp_api_key_middleware(app: ASGIApp) -> ASGIApp:
                 },
                 headers={"WWW-Authenticate": "Bearer"},
             )
+            await response(scope, receive, send)
+            return
 
         provided = (
-            str(request.headers.get(_MCP_API_KEY_HEADER, "")).strip()
-            or _extract_bearer_token(request.headers.get("Authorization"))
+            str(headers.get(_MCP_API_KEY_HEADER, "")).strip()
+            or _extract_bearer_token(headers.get("Authorization"))
         )
         if not provided or not hmac.compare_digest(provided, configured):
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=401,
                 content={
                     "error": "mcp_sse_auth_failed",
@@ -102,10 +113,11 @@ def apply_mcp_api_key_middleware(app: ASGIApp) -> ASGIApp:
                 },
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        return await call_next(request)
+            await response(scope, receive, send)
+            return
+        await app(scope, receive, send)
 
-    app.middleware("http")(_auth_middleware)
-    return app
+    return _auth_middleware
 
 
 def create_sse_app() -> ASGIApp:

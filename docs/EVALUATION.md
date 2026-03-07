@@ -226,7 +226,7 @@
 
 ## 5. 如何复核当前公开口径
 
-当前这份面向用户的项目内容**不附带 `tests/benchmark` 评测脚手架**，因此不能直接从日常使用包里重跑完整 benchmark。
+当前仓库里保留了 `backend/tests/benchmark/` 相关脚本和数据，但完整 benchmark 更耗时，也更偏维护 / 复核用途。
 
 如果你只是想确认当前安装状态，建议使用下面这组最小检查：
 
@@ -235,7 +235,7 @@ bash scripts/pre_publish_check.sh
 curl -fsS http://127.0.0.1:8000/health
 ```
 
-如果你需要完整 benchmark runners、原始 JSON 产物或更细的门控脚本，那属于维护阶段验证材料，默认只在完整开发工作区里使用，不作为公开用户仓承诺的一部分。
+如果你需要更深入的复现，当前仓库已经附带 `backend/tests/benchmark/` 下的 benchmark helpers 与测试用例；只有一次性维护产物和临时门禁脚本不作为公开文档主入口。
 
 ---
 
@@ -252,11 +252,9 @@ curl -fsS http://127.0.0.1:8000/health
 
 ---
 
-## 7. 2026-03 重测进展（已完成本轮）
+## 7. 如何读这页评测
 
-- 当前关键观察：
-  - 评测产物时间戳已更新到 2026-03-03，明显晚于本页 2026-02 基线。
-  - 真实 A/B/C/D 产物当前为 `sample_size_requested=1`、`dataset_scope=squad_v2_dev`，与本页“2 数据集 × 8 查询”不一致。
-  - `runtime-env-mode none` 更接近发布场景；如果 `profile c/d` 在本机缺少外部模型配置，可能出现 `embedding_request_failed` / `embedding_fallback_hash`。
-  - `runtime-env-mode file + --allow-runtime-env-debug` 适合本地排障，但它不是最终发布口径。
-  - 本轮还完成了 `api_tolerant<=5%` 重测，当前公开结论是：`phase6.gate.valid` 保持为 `true`。
+- 比较不同结果时，先确认 `profile`、数据集范围、样本量和模型配置一致。
+- 如果 `profile c/d` 缺少可用的外部模型服务，可能出现 `embedding_request_failed` / `embedding_fallback_hash`；这代表外部链路未就绪，不等于主流程不可用。
+- 如果你采用的是分别直配 `RETRIEVAL_EMBEDDING_*` 与 `RETRIEVAL_RERANKER_*` 的部署方式，也应只拿同一套最终配置做横向比较。
+- 对外沟通时，优先引用本页已经整理好的摘要表和图；不要把不同口径的临时重测结果混在一起讲。

@@ -213,6 +213,18 @@ export const extractApiError = (error, fallback = 'Request failed') => {
       pushPart(`operation=${detail.operation.trim()}`);
     }
     pushPart(detail.message);
+    const errorCode = normalizeApiErrorCode(detail.error);
+    const reasonCode = normalizeApiErrorCode(detail.reason);
+    const isAuthError =
+      error?.response?.status === 401
+      || errorCode === 'maintenance_auth_failed'
+      || errorCode === 'mcp_sse_auth_failed'
+      || reasonCode === 'invalid_or_missing_api_key'
+      || reasonCode === 'api_key_not_configured'
+      || reasonCode === 'insecure_local_override_requires_loopback';
+    if (isAuthError) {
+      pushPart('Click "Set API key" in the top-right corner, or configure MCP_API_KEY / MCP_API_KEY_ALLOW_INSECURE_LOCAL first.');
+    }
     if (parts.length > 0) {
       return parts.join(' | ');
     }

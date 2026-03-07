@@ -26,13 +26,13 @@ except Exception:  # pragma: no cover
     yaml = None
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-PROJECT_ROOT = REPO_ROOT / "Memory-Palace"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = PROJECT_ROOT
 CANONICAL_DIR = PROJECT_ROOT / "docs" / "skills" / "memory-palace"
 BACKEND_DIR = PROJECT_ROOT / "backend"
 EXPECTED_DB_PATH = BACKEND_DIR / "memory.db"
 EXPECTED_DB_URI = f"sqlite+aiosqlite:///{EXPECTED_DB_PATH}"
-WRAPPER_RELATIVE = Path("Memory-Palace/scripts/run_memory_palace_mcp_stdio.sh")
+WRAPPER_RELATIVE = Path("scripts/run_memory_palace_mcp_stdio.sh")
 WRAPPER_ABSOLUTE = PROJECT_ROOT / "scripts" / "run_memory_palace_mcp_stdio.sh"
 MIRRORS = {
     "claude": REPO_ROOT / ".claude" / "skills" / "memory-palace",

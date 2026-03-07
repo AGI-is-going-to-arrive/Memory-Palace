@@ -12,7 +12,7 @@
 
 | 密钥 | 用途 | 在 `.env.example` 中对应变量 |
 |---|---|---|
-| `MCP_API_KEY` | 维护接口、审查接口、Browse 写操作与 SSE 鉴权 | `MCP_API_KEY=` |
+| `MCP_API_KEY` | 维护接口、审查接口、Browse 读写与 SSE 鉴权 | `MCP_API_KEY=` |
 | `RETRIEVAL_EMBEDDING_API_KEY` | Embedding 模型 API 访问 | `RETRIEVAL_EMBEDDING_API_KEY=` |
 | `RETRIEVAL_RERANKER_API_KEY` | Reranker 模型 API 访问 | `RETRIEVAL_RERANKER_API_KEY=` |
 | `WRITE_GUARD_LLM_API_KEY` | Write Guard LLM 决策 | `WRITE_GUARD_LLM_API_KEY=` |
@@ -79,13 +79,13 @@ Authorization: Bearer <MCP_API_KEY>
 
 > 📌 Loopback 地址仅包含 `127.0.0.1`、`::1`、`localhost`（代码常量 `_LOOPBACK_CLIENT_HOSTS`）；且必须为直连本机请求（无 `Forwarded` / `X-Forwarded-*` / `X-Real-IP` 等转发头）。
 
-### 维护期验证锚点（完整开发仓）
+### 当前仓库中的验证锚点
 
-以上鉴权逻辑在完整开发仓的以下测试文件中有覆盖；公开用户仓默认不附带这些 `tests/` 文件：
+以上鉴权逻辑在当前仓库的以下测试文件中有覆盖：
 
 - `backend/tests/test_week6_maintenance_auth.py` — 维护 API 五项鉴权场景
 - `backend/tests/test_week6_sse_auth.py` — SSE 鉴权场景
-- `backend/tests/test_sensitive_api_auth.py` — Review 与 Browse 写操作鉴权
+- `backend/tests/test_sensitive_api_auth.py` — Review 与 Browse 读写鉴权
 - `backend/tests/test_review_rollback.py` — Review 操作携带鉴权测试
 
 ---
@@ -155,7 +155,7 @@ Authorization: Bearer <MCP_API_KEY>
 
    该脚本会检查：本地敏感产物是否存在、是否被 git 跟踪、已跟踪文件中的密钥模式、个人绝对路径泄露、`.env.example` 的 API key 占位状态。
 
-   脚本会把检查结果直接输出在当前终端；如果你另外运行 `python scripts/evaluate_memory_palace_skill.py` 或 `backend/.venv/bin/python scripts/evaluate_memory_palace_mcp_e2e.py`，对应的 Markdown 摘要会在 `<repo-root>/docs/skills/` 下本地生成或更新，通常更适合当成你自己机器上的验证记录。
+   脚本会把检查结果直接输出在当前终端；如果你另外运行 `python scripts/evaluate_memory_palace_skill.py` 或 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`，对应的 Markdown 摘要会在 `<repo-root>/docs/skills/` 下本地生成或更新，通常更适合当成你自己机器上的验证记录。
 
 1. **检查工作区状态** — 确认无意外暴露：
 
@@ -165,7 +165,7 @@ Authorization: Bearer <MCP_API_KEY>
 
    应确保以下文件不在提交中（均已在 `.gitignore` 中配置）：
    - `.env`、`.env.docker`
-   - `.venv`、`.claude`
+   - `.venv`、`.mcp.json`、`.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.gemini/`、`.agent/`
    - `*.db`（数据库文件）
    - `backend/backend.log`、`frontend/frontend.log`
    - `snapshots/`、`frontend/dist/`
@@ -190,7 +190,7 @@ Authorization: Bearer <MCP_API_KEY>
 4. **运行验证** — 确认项目可复现构建：
 
    ```bash
-   # 用户仓最小检查
+   # 最小检查
    bash scripts/pre_publish_check.sh
    curl -fsS http://127.0.0.1:8000/health
 
@@ -198,7 +198,7 @@ Authorization: Bearer <MCP_API_KEY>
    cd frontend && npm ci && npm run test && npm run build
    ```
 
-   > 如果你使用的是完整开发仓，再额外运行 `cd backend && python -m pytest tests -q`。
+   > 如需更深一层的验证，再额外运行 `cd backend && python -m pytest tests -q`。
 
 ---
 
@@ -210,7 +210,7 @@ Authorization: Bearer <MCP_API_KEY>
 |---|---|
 | `.env`、`.env.docker` | 包含真实 API Key |
 | `.venv`、`backend/.venv`、`frontend/.venv` | 本地虚拟环境，不应进入仓库 |
-| `.claude/` | 本地工具配置目录 |
+| `.mcp.json`、`.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.gemini/`、`.agent/` | 本地工具 / MCP 配置目录 |
 | `*.db` | SQLite 数据库文件（如 `demo.db`） |
 | `backend/backend.log` | 后端运行日志 |
 | `frontend/frontend.log` | 前端运行日志 |
@@ -223,7 +223,7 @@ Authorization: Bearer <MCP_API_KEY>
 | `backups/` | 本地备份目录，通常只在你自己的机器上使用 |
 | `docs/improvement/` | 阶段性实施计划、重测草稿、内部排障记录 |
 | `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` | 运行 `python scripts/evaluate_memory_palace_skill.py` 后本地生成或更新的 skill smoke 摘要 |
-| `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` | 运行 `backend/.venv/bin/python scripts/evaluate_memory_palace_mcp_e2e.py` 后本地生成或更新的 MCP e2e 摘要 |
+| `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` | 运行 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py` 后本地生成或更新的 MCP e2e 摘要 |
 | `backend/docs/benchmark_*.md` | 本地 benchmark 分析笔记 |
 | `backend/tests/benchmark_results.md` | 一次性 benchmark 汇总草稿 |
 | `docs/evaluation_old_vs_new_executive_summary_2026-03-05.md` | 一次性对照摘要，更适合作为维护阶段材料 |
@@ -234,8 +234,6 @@ Authorization: Bearer <MCP_API_KEY>
 > 💡 公开文档里建议统一使用占位符：
 >
 > - `<repo-root>`：仓库根目录
-> - `<path-to-runtime-env>`：你自己的运行时 `.env`
-> - `<old-repo>`：旧项目路径
 > - `<user-home>`：用户目录
 > - `/absolute/path/to/...`：macOS / Linux 绝对路径示例
 > - `C:/absolute/path/to/...`：Windows 绝对路径示例

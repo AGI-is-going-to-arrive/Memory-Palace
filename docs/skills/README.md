@@ -35,7 +35,7 @@
 - `TRIGGER_SMOKE_REPORT.md`
   - 运行 `python scripts/evaluate_memory_palace_skill.py` 后在本地生成
 - `MCP_LIVE_E2E_REPORT.md`
-  - 运行 `backend/.venv/bin/python scripts/evaluate_memory_palace_mcp_e2e.py` 后在本地生成
+  - 运行 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py` 后在本地生成
 
 它们的定位是：
 

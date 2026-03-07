@@ -228,8 +228,8 @@ search_memory(query="...", include_session=True)
 2. 再改 `SKILL.md` 正文
 3. 运行 `python scripts/sync_memory_palace_skill.py --check`
 4. 再跑 `python scripts/evaluate_memory_palace_skill.py`
-5. 再跑 `backend/.venv/bin/python scripts/evaluate_memory_palace_mcp_e2e.py`
-6. 再跑 `bash new/run_post_change_checks.sh`
+5. 再跑 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`
+6. 再跑 `bash scripts/pre_publish_check.sh`
 7. 只在确实需要时继续扩 `references/`
 
 ### Should trigger

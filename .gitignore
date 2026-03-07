@@ -5,6 +5,12 @@
 
 # Local tooling metadata
 .claude/
+.codex/
+.cursor/
+.opencode/
+.gemini/
+.agent/
+.mcp.json
 .tmp/
 
 # OS artifacts

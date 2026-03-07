@@ -1,6 +1,13 @@
 from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
+from pathlib import Path
+import os
 import pytest
+import socket
+import subprocess
+import sys
+import time
 
 import run_sse
 from run_sse import apply_mcp_api_key_middleware
@@ -13,8 +20,8 @@ def _build_client(*, client=("testclient", 50000)) -> TestClient:
     async def ping():
         return {"ok": True}
 
-    apply_mcp_api_key_middleware(app)
-    return TestClient(app, client=client)
+    wrapped_app = apply_mcp_api_key_middleware(app)
+    return TestClient(wrapped_app, client=client)
 
 
 def test_sse_auth_rejects_when_api_key_not_configured_by_default(monkeypatch) -> None:
@@ -89,6 +96,100 @@ def test_sse_auth_accepts_bearer_token(monkeypatch) -> None:
         response = client.get("/ping", headers=headers)
     assert response.status_code == 200
     assert response.json().get("ok") is True
+
+
+def test_sse_auth_preserves_streaming_response(monkeypatch) -> None:
+    monkeypatch.setenv("MCP_API_KEY", "week6-sse-secret")
+
+    app = FastAPI()
+
+    @app.get("/stream")
+    async def stream():
+        async def _events():
+            yield "event: endpoint\n\n"
+            yield "data: ok\n\n"
+
+        return StreamingResponse(_events(), media_type="text/event-stream")
+
+    wrapped_app = apply_mcp_api_key_middleware(app)
+    with TestClient(wrapped_app) as client:
+        with client.stream("GET", "/stream", headers={"X-MCP-API-Key": "week6-sse-secret"}) as response:
+            assert response.status_code == 200
+            lines = list(response.iter_lines())
+    assert "event: endpoint" in lines
+    assert "data: ok" in lines
+
+
+def test_sse_auth_does_not_raise_on_streaming_disconnect(tmp_path) -> None:
+    backend_dir = Path(__file__).resolve().parents[1]
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    env = dict(**os.environ)
+    env["MCP_API_KEY"] = "week6-sse-secret"
+    env["DATABASE_URL"] = f"sqlite+aiosqlite:///{tmp_path / 'streaming_disconnect.db'}"
+    env["HOST"] = "127.0.0.1"
+    env["PORT"] = str(port)
+    server = subprocess.Popen(
+        [
+            sys.executable,
+            "run_sse.py",
+        ],
+        cwd=str(backend_dir),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    try:
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            if server.poll() is not None:
+                pytest.fail("uvicorn exited before the streaming test could connect")
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                    break
+            except OSError:
+                time.sleep(0.1)
+        else:
+            pytest.fail("timed out waiting for streaming test server to start")
+
+        request = (
+            "GET /sse HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{port}\r\n"
+            "Accept: text/event-stream\r\n"
+            "X-MCP-API-Key: week6-sse-secret\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        ).encode("utf-8")
+
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
+            client.sendall(request)
+            chunks = []
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                chunk = client.recv(4096).decode("utf-8", errors="ignore")
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                if "event: endpoint" in "".join(chunks):
+                    break
+            received = "".join(chunks)
+            assert "200 OK" in received
+            assert "event: endpoint" in received
+
+        time.sleep(0.5)
+    finally:
+        server.terminate()
+        try:
+            output, _ = server.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            server.kill()
+            output, _ = server.communicate(timeout=5)
+
+    assert "AssertionError: Unexpected message" not in output
 
 
 def test_sse_main_runs_mcp_startup_before_uvicorn(monkeypatch) -> None:

@@ -9,7 +9,7 @@
 >
 > - 本文只写**已落地、已验证**的内容。
 > - 原始 benchmark 日志、阶段性重测草稿和维护笔记默认只在维护阶段使用；这里保留的是可直接阅读的结论版。
-> - Windows 口径当前仅完成 `pwsh-in-docker` 等效验证，**未完成原生 Windows / native `pwsh` 终验**。
+> - Windows 路径仍建议在目标 Windows 环境里按同样步骤自行复验。
 
 ---
 
@@ -116,7 +116,7 @@
 
 - 旧版更像“能起服务”；新版更强调“能稳定发布”。
 - 现在有 `scripts/pre_publish_check.sh` 做分享或发布前的仓库卫生检查。
-- 更大的变更后还可以走 `new/run_post_change_checks.sh` 做统一门禁。
+- 更大的变更后再补跑对应的仓内测试与最小启动检查，会更稳妥。
 
 ### 3.5 客户端接入
 
@@ -143,13 +143,13 @@
 - `scripts/pre_publish_check.sh` 存在且可执行
 - MCP stdio live e2e 报告为 `PASS`
 - `Claude / Codex / OpenCode / Gemini` 均有 smoke 结果
-- `macOS + Docker + pwsh-in-docker` 等效 Windows 口径已覆盖
+- `macOS + Docker` 路径已完成公开文档中的启动与 smoke 说明
 
 ### 5.2 仍需保守表述
 
 - `Gemini live`：当前仍未完全通过
 - `Cursor / agent / Antigravity`：当前仍为 `PARTIAL`
-- 原生 Windows / native `pwsh`：仍需在目标环境补验
+- Windows：仍建议在目标环境补验
 
 ---
 
@@ -159,7 +159,7 @@
 
 > 当前版本已经完成一轮基于真实代码、真实脚本和真实测试结果的升级收口。  
 > 相对旧项目，最大的变化是 `skills/MCP` 更完整、部署门禁更稳、benchmark 更可复核，并且在高干扰检索场景下表现更好。  
-> 当前已完成 `macOS + Docker + pwsh-in-docker` 等效 Windows 验证；原生 Windows / native `pwsh` 仍保留为后续补验项。
+> 当前公开文档只承诺已验证路径；如果你的目标环境是 Windows，请在目标环境中再跑一次同样的启动与 smoke。
 
 不建议这样写：
 

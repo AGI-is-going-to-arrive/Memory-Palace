@@ -4,18 +4,37 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from mcp import ClientSession
-from mcp.client.stdio import StdioServerParameters, stdio_client
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+BACKEND_ROOT = PROJECT_ROOT / "backend"
+REPORT_PATH = PROJECT_ROOT / "docs" / "skills" / "MCP_LIVE_E2E_REPORT.md"
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-BACKEND_ROOT = REPO_ROOT / "Memory-Palace" / "backend"
-REPORT_PATH = REPO_ROOT / "Memory-Palace" / "docs" / "skills" / "MCP_LIVE_E2E_REPORT.md"
+def _maybe_reexec_with_backend_python() -> None:
+    backend_venv = (BACKEND_ROOT / ".venv").resolve()
+    if Path(sys.prefix).resolve() == backend_venv:
+        return
+    candidates = (
+        BACKEND_ROOT / ".venv" / "bin" / "python",
+        BACKEND_ROOT / ".venv" / "Scripts" / "python.exe",
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            os.execv(str(candidate), [str(candidate), str(Path(__file__).resolve()), *sys.argv[1:]])
+
+
+try:
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+except ModuleNotFoundError as exc:
+    if exc.name == "mcp":
+        _maybe_reexec_with_backend_python()
+    raise
 EXPECTED_TOOLS = {
     "read_memory",
     "create_memory",

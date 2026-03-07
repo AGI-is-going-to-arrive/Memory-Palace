@@ -61,9 +61,9 @@
 
 ---
 
-## 2. `/maintenance/*` 或 `/review/*` 返回 401
+## 2. `/maintenance/*`、`/review/*` 或 `/browse/*` 返回 401
 
-**原因**：启用了 `MCP_API_KEY` 但请求没带鉴权头。
+**原因**：启用了 `MCP_API_KEY` 但请求没带鉴权头。注意 `/browse/node` 的读操作也受保护。
 
 **排查与处理**：
 
@@ -220,9 +220,9 @@
    ```
 
    > **排障顺序建议**：
-   > - 本地开发先检查你是否在走“分别直配”口径：`RETRIEVAL_EMBEDDING_*`、`RETRIEVAL_RERANKER_*`、`WRITE_GUARD_LLM_* / COMPACT_GIST_LLM_*`。
-   > - 不要先假设 `router` 一定是最高优先级；当前仓库的本地联调场景里，`embedding` 常常会显式改为 `api` 主链路。
-   > - 只有在你明确按 C/D 发布模板回切 `router` 口径时，才优先把问题归到 `ROUTER_*` 配置或 router 服务本身。
+   > - 先确认你当前使用的是 `router` 方案，还是分别直配 `RETRIEVAL_EMBEDDING_*`、`RETRIEVAL_RERANKER_*`、`WRITE_GUARD_LLM_* / COMPACT_GIST_LLM_*`。
+   > - 如果采用直配方案，优先检查实际 `*_API_BASE` / `*_API_KEY` / `*_MODEL`。
+   > - 如果采用 `router` 方案，再检查 `ROUTER_*` 配置和 router 服务本身。
 
 3. **重建索引**（通过 MCP 工具调用）：
 
@@ -264,32 +264,37 @@ npm run build              # 构建产物
 
 常见原因：
 
-- Node.js 版本不兼容：建议使用 Node.js 22+（Docker 中使用 `node:22-alpine`）
+- Node.js 版本不兼容：建议使用 Node.js `20.19+`（或 `>=22.12`）
 - 网络问题导致 `npm ci` 失败：可配置 NPM Mirror
 
 ---
 
-## 7. 完整开发仓测试失败（用户仓可跳过）
+## 7. 测试失败或想做更深验证
 
-如果你使用的是公开用户仓，通常**不会附带 `tests/` 目录**。这时不需要卡在 pytest，先做最小运行检查：
+如果你只是想先确认安装可用，先做最小运行检查：
 
 ```bash
 curl -fsS http://127.0.0.1:8000/health
 ```
 
-如果你使用的是完整开发仓，再运行：
+如果你想继续确认后端/前端都可用，再运行仓库自带测试：
 
 ```bash
 cd backend
 python3 -m venv .venv
-source .venv/bin/activate           # Windows: .venv\Scripts\Activate.ps1
+source .venv/bin/activate           # Windows PowerShell: .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 pytest tests -q
+
+cd ../frontend
+npm ci
+npm run test
+npm run build
 ```
 
-> **Windows PowerShell 用户**：`source` 命令不可用，使用 `.venv\Scripts\Activate.ps1` 激活虚拟环境。
+> **Windows PowerShell 用户**：`source` 命令不可用，使用 `.\.venv\Scripts\Activate.ps1` 激活虚拟环境。
 
-**完整开发仓快速定位技巧**：优先查看最近改动文件对应的测试集，再扩大全量回归：
+**快速定位技巧**：优先查看最近改动文件对应的测试集，再扩大全量回归：
 
 ```bash
 # 只运行特定测试文件
@@ -332,7 +337,7 @@ pytest tests -k "test_search" -q
    rm -f /path/to/demo.db.migrate.lock
    ```
 
-**维护期验证锚点**：如果你使用的是完整开发仓，`backend/tests/test_migration_runner.py` 覆盖了迁移锁与超时场景。
+**验证锚点**：当前仓库中的 `backend/tests/test_migration_runner.py` 覆盖了迁移锁与超时场景。
 
 ---
 

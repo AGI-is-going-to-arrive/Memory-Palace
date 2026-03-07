@@ -112,15 +112,15 @@ def resolve_targets(raw: str) -> list[str]:
 
 
 def workspace_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[1]
 
 
 def project_root() -> Path:
-    return workspace_root() / "Memory-Palace"
+    return workspace_root()
 
 
 def repo_wrapper_relative() -> Path:
-    return Path("Memory-Palace/scripts/run_memory_palace_mcp_stdio.sh")
+    return Path("scripts/run_memory_palace_mcp_stdio.sh")
 
 
 def repo_wrapper_absolute() -> Path:

@@ -2,11 +2,11 @@
 
 > **Memory Palace** 是一套为 AI 编程助手设计的长期记忆系统，通过 MCP（Model Context Protocol）为 Codex / Claude Code / Gemini CLI / Cursor 等客户端提供统一的记忆读写、检索、审查与维护能力。
 >
-> 当前版本：**v1.0.1** · 许可证：MIT
+> 许可证：MIT
 >
 > 这里优先放**用户真正要用到**的说明；阶段性实验草稿、本机验证日志和一次性排障记录不放在这一层主入口里。
 >
-> 如需在你自己的工作区复核当前 smoke / live e2e 状态，请运行 `python scripts/evaluate_memory_palace_skill.py` 或 `backend/.venv/bin/python scripts/evaluate_memory_palace_mcp_e2e.py`。脚本会在 `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` 与 `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` 本地生成或更新摘要，但这些结果不再作为这一页的主入口。
+> 如需在你自己的工作区复核当前 smoke / live e2e 状态，请运行 `python scripts/evaluate_memory_palace_skill.py` 或 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`。脚本会在 `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` 与 `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` 本地生成或更新摘要，但这些结果不再作为这一页的主入口。
 
 ![系统架构图](images/系统架构图.png)
 

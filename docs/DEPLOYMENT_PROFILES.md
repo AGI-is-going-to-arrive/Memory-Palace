@@ -49,18 +49,12 @@
 
 > **口径说明（避免与评测文档混淆）**：部署模板里的 C 默认开启 reranker；`docs/EVALUATION.md` 的“真实 A/B/C/D 运行”里，`profile_c` 作为对照组会关闭 reranker（`profile_d` 才开启），用于观测增益。
 >
-> **本地开发临时策略（重要）**：为降低本地联调复杂度，可临时将 `RETRIEVAL_EMBEDDING_BACKEND=api`，并显式配置 `RETRIEVAL_EMBEDDING_*` 与 `RETRIEVAL_RERANKER_*`。该策略仅用于本地开发；面向客户交付前，应根据客户环境回切到目标部署口径（通常为 C/D 模板的 `router` 路线）。
+> **补充说明**：C/D 模板默认走 `router` 路线；如果你的部署不使用统一 router，也可以直接配置 `RETRIEVAL_EMBEDDING_*`、`RETRIEVAL_RERANKER_*`、`WRITE_GUARD_LLM_* / COMPACT_GIST_LLM_*` 连接 OpenAI-compatible 服务。
 >
-> **本地联调补充（公开版）**：`new/run_post_change_checks.sh` 在 `--docker-profile c|d` 下默认 `--runtime-env-mode none`（不加载本地 runtime 覆盖）。只有显式传入 `--runtime-env-mode auto|file` 且附加 `--allow-runtime-env-debug` 时，才会加载你指定的 `<path-to-runtime-env>`。在 `profile c/d` 的注入模式下，脚本会临时强制 `RETRIEVAL_EMBEDDING_BACKEND=api`，避免本机 router 缺 embedding / reranker 时误判失败。
->
-> **上线口径提醒**：上述 `.env` 注入只用于当前本地开发 / 验证。真实交付时仍应优先回到 C/D 模板的 `router` 主链路，由客户环境提供 llm / embedding / reranker。
->
-> `runtime-env-mode none + --allow-runtime-env-injection + --runtime-env-file` 适用于本地 C/D API 联调（脚本会强制 `RETRIEVAL_EMBEDDING_BACKEND=api`）；若要验证“保持 router 策略不变”的发布场景，请使用 `runtime-env-mode none` 且**不要**附加注入参数。
->
-> **为什么本地不强制一切都走 router**：
+> **为什么不强制一切都走 router**：
 > - `embedding`、`reranker`、`llm` 三条链路的模型、地址、密钥和故障模式不同，分开配置更便于定位和替换。
 > - 当前仓库已经支持分别直配：`RETRIEVAL_EMBEDDING_*`、`RETRIEVAL_RERANKER_*`、`WRITE_GUARD_LLM_* / COMPACT_GIST_LLM_*` 均可独立工作。
-> - `router` 的主要价值在生产侧：统一入口、模型编排、鉴权、限流、审计和后续 provider 切换；它适合作为**交付默认口径**，但不必成为**本地排障的唯一入口**。
+> - `router` 的主要价值在生产侧：统一入口、模型编排、鉴权、限流、审计和后续 provider 切换；它适合作为**默认模板口径**，但不是唯一支持方式。
 >
 >
 > **配置优先级说明（避免误配）**：
@@ -127,15 +121,15 @@ RETRIEVAL_RERANKER_MODEL=Qwen3-Reranker-8B
 RETRIEVAL_RERANKER_WEIGHT=0.30                     # 推荐 0.20 ~ 0.40
 ```
 
-本地开发时若采用临时 `api` 后端，请使用以下覆盖项（不改模型名）：
+如果你不使用统一 `router`，也可以直接配置 OpenAI-compatible embedding / reranker 服务：
 
 ```bash
-# 临时本地开发覆盖（交付客户前请回切）
+# 直连 OpenAI-compatible 服务
 RETRIEVAL_EMBEDDING_BACKEND=api
 RETRIEVAL_RERANKER_ENABLED=true
 RETRIEVAL_RERANKER_API_BASE=http://127.0.0.1:PORT/v1
 RETRIEVAL_RERANKER_API_KEY=replace-with-your-key
-# 保持以下模型配置不变
+# 下面两项按你的服务实际模型名填写
 RETRIEVAL_EMBEDDING_MODEL=Qwen3-Embedding-8B
 RETRIEVAL_RERANKER_MODEL=Qwen3-Reranker-8B
 # 注意：不存在 RETRIEVAL_RERANKER_BACKEND 配置项
@@ -152,33 +146,23 @@ RETRIEVAL_RERANKER_WEIGHT=0.35                     # 远程推荐略高
 ```
 
 > **🔑 C/D 第一调参项**：`RETRIEVAL_RERANKER_WEIGHT`，建议范围 `0.20 ~ 0.40`，以 `0.05` 步长微调。
->
-> **回切提醒**：本地开发阶段若临时改为 `RETRIEVAL_EMBEDDING_BACKEND=api`，在客户部署前需按目标环境恢复（通常恢复为模板中的 `router` 口径），并重新验证 C/D profile 烟测。
 
-目标环境部署前回切 `router` 标准 SOP（固定模板）：
+如果你采用直连方式，最小验证步骤如下：
 
 ```bash
-# 以下命令在仓库根目录（clawanti）执行
-# 0) 变量准备（按你的本地实际路径替换）
-RUNTIME_ENV_FILE=/absolute/path/to/runtime-debug.env
+# 1) 按你的最终配置启动对应档位
+bash scripts/docker_one_click.sh --profile c
 
-# 1) 可选：本地 C/D API 联调（router 缺 embedding/reranker 时使用）
-bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse --runtime-env-mode file --runtime-env-file "${RUNTIME_ENV_FILE}" --allow-runtime-env-debug
-bash new/run_post_change_checks.sh --with-docker --docker-profile d --skip-sse --runtime-env-mode file --runtime-env-file "${RUNTIME_ENV_FILE}" --allow-runtime-env-debug
-
-# 2) 必做：确认模板仍为 router 默认（不允许被开发联调改写）
-bash new/run_post_change_checks.sh --skip-frontend --skip-sse
-
-# 3) 必做：目标环境部署前回切 router 口径复验（不加载本地 runtime 覆盖/不注入）
-bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse --runtime-env-mode none
-bash new/run_post_change_checks.sh --with-docker --docker-profile d --skip-sse --runtime-env-mode none
+# 2) 复验基础接口
+curl -fsS http://127.0.0.1:18000/health
+curl -fsS http://127.0.0.1:18000/browse/node -H "X-MCP-API-Key: <YOUR_MCP_API_KEY>"
 ```
 
 结果判定口径：
 
-1. 第 1 步通过，只说明“本地 API 联调链路可用”，不代表目标环境部署口径通过。
-2. 第 3 步通过，才代表“router 目标环境部署口径通过”。
-3. 若第 3 步在占位 endpoint/key 下失败（常见为 `deployment.docker.smoke`），属于预期 fail-closed；在目标环境部署前必须替换为客户可用 router/key 后重跑通过。
+1. 请只拿**同一套最终部署配置**做对比和验收，不要混用不同链路的结果。
+2. 无论你走 `router` 还是直连，都应在最终配置下通过启动 + 健康检查。
+3. 若占位 endpoint/key 下启动失败，属于预期 fail-closed；请替换成真实可用值后再复验。
 
 ### 推荐模型选型
 
@@ -306,7 +290,7 @@ cd <project-root>
 
 ```bash
 cd <project-root>
-docker compose -f docker-compose.yml down
+COMPOSE_PROJECT_NAME=<控制台打印出的 compose project> docker compose -f docker-compose.yml down --remove-orphans
 ```
 
 ---
@@ -335,7 +319,7 @@ bash scripts/apply_profile.sh macos c
 ```bash
 cd <project-root>/backend
 python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\Activate.ps1
+source .venv/bin/activate          # Windows PowerShell: .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 uvicorn main:app --host 127.0.0.1 --port 18000
 ```
@@ -469,26 +453,29 @@ http://localhost:3000/sse
 ### C/D 降级信号快速排查（本地联调）
 
 ```bash
-# 以 profile c 为例；profile d 只需把 --docker-profile c 改成 d
-RUNTIME_ENV_FILE=/absolute/path/to/runtime-debug.env
-bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse --runtime-env-mode file --runtime-env-file "${RUNTIME_ENV_FILE}" --allow-runtime-env-debug
+# 先检查服务是否真的起来
+curl -fsS http://127.0.0.1:18000/health
 ```
 
-1. 如果日志里仍有 `embedding_request_failed` / `embedding_fallback_hash`，先检查外部 embedding / reranker 服务本身是否可达、API key 是否有效。
-2. 若显式设置了 `MEMORY_PALACE_DOCKER_ENV_FILE`，可用下面命令确认目标 env 文件已注入预期模型；默认临时 env 文件会在脚本退出后自动清理：
+1. 如果日志或返回结果里仍有 `embedding_request_failed` / `embedding_fallback_hash`，先检查 embedding / reranker 服务本身是否可达、API key 是否有效。
+2. 直接检查真实调用端点，比只看配置文件更可靠：
 
 ```bash
-rg -n "RETRIEVAL_EMBEDDING_MODEL|RETRIEVAL_RERANKER_MODEL|WRITE_GUARD_LLM_MODEL|COMPACT_GIST_LLM_MODEL" "${MEMORY_PALACE_DOCKER_ENV_FILE}"
+curl -fsS -X POST <RETRIEVAL_EMBEDDING_API_BASE>/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{"model":"<RETRIEVAL_EMBEDDING_MODEL>","input":"ping"}'
+curl -fsS -X POST <RETRIEVAL_RERANKER_API_BASE>/rerank \
+  -H "Content-Type: application/json" \
+  -d '{"model":"<RETRIEVAL_RERANKER_MODEL>","query":"ping","documents":["pong"]}'
 ```
 
-3. 这套 `file` 方式只用于本地联调；上线时仍以客户环境的 `router` 配置为准，缺失模型时按系统 fallback 链路降级。若要专门验证“保持 router 策略不变”的场景，请使用 `runtime-env-mode none` 且不附加注入参数。
+3. 如果只是当前机器排障，可以临时改成 `RETRIEVAL_EMBEDDING_BACKEND=api` 并分别直配 embedding / reranker / llm；上线前再恢复到目标环境的 `router` 配置并复验一次。
 
-### PowerShell / Windows 专项验证清单（2026-03-06）
+### PowerShell / Windows 验证建议
 
-- 本轮已修复 `apply_profile` 只去重 `DATABASE_URL` 的问题；`scripts/apply_profile.sh` 与 `scripts/apply_profile.ps1` 现在都会对重复 env key 做统一去重。
-- 本机无原生 `pwsh` 时，可先参考 `pwsh-in-docker` 等效 smoke；当前 `arm64` 宿主若无法可靠运行该 helper，应记录为 `SKIP`（等效 smoke 跳过），而不是 `FAIL` 或 native Windows 终验通过。
-- 若要形成最终 Windows 交付证据，仍建议在原生 Windows / 原生 `pwsh` 环境补跑一次专项验证。
-- 主文档这里只保留结论口径；详细逐项检查建议在目标 Windows 环境单独记录。
+- `scripts/apply_profile.sh` 与 `scripts/apply_profile.ps1` 都会对重复 env key 做统一去重。
+- 如果你要交付 Windows 环境，建议直接在目标 Windows 机器上按同一份模板跑一次启动与 smoke。
+- 主文档只保留公开可执行的步骤；目标环境专项验证建议单独记录。
 
 ### 调参提示
 

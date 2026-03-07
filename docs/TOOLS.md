@@ -58,7 +58,7 @@ system://boot             ← 系统内置 URI（只读）
 
 - `core` — 核心记忆（人格、偏好、关键事实）
 - `writer` — 写作域（故事、章节）
-- `system` — 系统保留（`boot` / `index` / `recent`），不可写入
+- `system` — 系统保留（`boot` / `index` / `index-lite` / `audit` / `recent`），不可写入
 
 > 💡 优先级 (`priority`) 是一个整数，**数字越小优先级越高**（0 最高）。它决定了检索排序和冲突解决时的先后顺序。
 
@@ -312,8 +312,8 @@ search_memory(
 | 模式 | 说明 |
 |---|---|
 | `keyword` | 基于 BM25 关键词匹配（默认模式） |
-| `semantic` | 基于 Embedding 向量语义搜索（需配置 Embedding API） |
-| `hybrid` | 关键词 + 语义 + Reranker 混合检索 |
+| `semantic` | 基于 Embedding 向量语义搜索（需启用可用的 embedding 链路，如 `hash` / `api` / `router` / `openai`） |
+| `hybrid` | 关键词 + 语义混合检索；若已启用 Reranker，会在后面继续重排 |
 
 **过滤条件 (`filters`)：**
 

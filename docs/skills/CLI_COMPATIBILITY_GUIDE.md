@@ -223,8 +223,8 @@ docs/skills/TRIGGER_SMOKE_REPORT.md
 ### 真实 MCP e2e
 
 ```bash
-backend/.venv/bin/python \
-  scripts/evaluate_memory_palace_mcp_e2e.py
+cd backend
+python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ```
 
 本地输出：

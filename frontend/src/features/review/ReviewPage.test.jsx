@@ -342,7 +342,7 @@ describe('ReviewPage', () => {
 
     await screen.findByText('Connection Lost');
     expect(
-      screen.getByText('unauthorized | missing_api_key | operation=list_review_sessions')
+      screen.getByText(/unauthorized \| missing_api_key \| operation=list_review_sessions/)
     ).toBeInTheDocument();
     expect(api.extractApiError).toHaveBeenCalledWith(
       expect.anything(),

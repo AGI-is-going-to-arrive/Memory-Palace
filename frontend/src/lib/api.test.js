@@ -46,6 +46,23 @@ describe('extractApiError', () => {
     expect(extractApiError(error)).toBe('queue_full');
   });
 
+  it('adds an actionable hint for auth failures', () => {
+    const error = {
+      response: {
+        status: 401,
+        data: {
+          detail: {
+            error: 'maintenance_auth_failed',
+            reason: 'invalid_or_missing_api_key',
+          },
+        },
+      },
+    };
+    expect(extractApiError(error)).toBe(
+      'maintenance_auth_failed | invalid_or_missing_api_key | Click "Set API key" in the top-right corner, or configure MCP_API_KEY / MCP_API_KEY_ALLOW_INSECURE_LOCAL first.',
+    );
+  });
+
   it('returns fallback message when no structured detail exists', () => {
     const error = { message: '' };
     expect(extractApiError(error, 'fallback-message')).toBe('fallback-message');

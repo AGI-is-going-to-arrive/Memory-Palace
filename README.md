@@ -56,7 +56,7 @@ Through the unified [MCP (Model Context Protocol)](https://modelcontextprotocol.
 - **skills + MCP now feel productized**: installation, sync, smoke, and live e2e are all part of the documented path.
 - **Deployment is safer**: the Docker one-click scripts now use deployment locks, runtime env injection is opt-in, and there is a dedicated repository hygiene check before sharing or publishing your workspace.
 - **High-noise retrieval looks stronger in the current benchmark set**: compared with the old project, the C/D profiles show better recall in harder `s8,d200` and `s100,d200` style scenarios.
-- **Public claims are more conservative**: `macOS + Docker + pwsh-in-docker` equivalent Windows validation is done; native Windows / native `pwsh` is still pending.
+- **Public claims stay conservative**: the docs only describe verified paths, and still ask you to re-check your own Windows / remote deployment environment.
 - **Client boundaries are explicit**: `Claude/Codex/OpenCode/Gemini` have documented paths; `Gemini live`, `Cursor`, and `Antigravity` still carry explicit caveats.
 
 ---
@@ -270,7 +270,7 @@ Choose **one** of the following methods:
 cp .env.example .env
 ```
 
-Then open `.env` and set `DATABASE_URL` to an absolute path on your system:
+Then open `.env` and set `DATABASE_URL` to a path on your system. An absolute path is recommended for shared or production-like environments:
 
 ```bash
 # Example for macOS / Linux:
@@ -278,6 +278,16 @@ DATABASE_URL=sqlite+aiosqlite:////absolute/path/to/demo.db
 
 # Example for Windows:
 DATABASE_URL=sqlite+aiosqlite:///C:/absolute/path/to/demo.db
+```
+
+If you want to use the Dashboard or call `/browse` / `/review` / `/maintenance` locally right away, choose **one** of these before starting the backend:
+
+```bash
+# Option A: set a local API key (recommended)
+MCP_API_KEY=change-this-local-key
+
+# Option B: local loopback-only debugging (do not use on shared machines)
+MCP_API_KEY_ALLOW_INSECURE_LOCAL=true
 ```
 
 **Method B — Use the profile script (recommended):**
@@ -299,7 +309,7 @@ cd backend
 
 # Create and activate virtual environment
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate        # Windows PowerShell: .\.venv\Scripts\Activate.ps1
 
 # Install dependencies
 pip install -r requirements.txt
@@ -344,11 +354,16 @@ You should see:
 # Check backend health
 curl -s http://127.0.0.1:8000/health | python -m json.tool
 
-# Browse memory tree (should be empty on a fresh DB; may be non-empty if reusing demo.db)
-curl -s "http://127.0.0.1:8000/browse/node?domain=core&path=" | python -m json.tool
+# Browse memory tree (use the same local key you configured in `.env`)
+curl -s "http://127.0.0.1:8000/browse/node?domain=core&path=" \
+  -H "X-MCP-API-Key: <YOUR_MCP_API_KEY>" | python -m json.tool
 ```
 
 Open your browser at **<http://localhost:5173>** — you should see the Memory Palace dashboard 🎉
+
+> If local manual setup shows `Set API key` in the top-right corner, that is expected. The dashboard shell is up, but protected data requests (`/browse/*`, `/review/*`, `/maintenance/*`) still follow `MCP_API_KEY` / `MCP_API_KEY_ALLOW_INSECURE_LOCAL`. The separate MCP SSE endpoints (`/sse` and `/messages`) follow the same rule.
+>
+> If you set `MCP_API_KEY`, click `Set API key` in the top-right corner and enter the same key. If you enabled `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`, direct loopback requests (`127.0.0.1` / `::1` / `localhost`, without forwarded headers) can load those protected requests without manually entering a key.
 
 #### Step 6: Connect an AI Client
 
@@ -364,7 +379,7 @@ python mcp_server.py
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
-> Note: `stdio` connects directly to the MCP tool process and does not pass through the HTTP/SSE auth middleware; MCP tools can still be used locally without `MCP_API_KEY`.
+> Note: `stdio` connects directly to the MCP tool process and does not pass through the HTTP/SSE auth middleware, so MCP tools can still be used locally without `MCP_API_KEY`. This applies to `stdio` only — protected HTTP/SSE routes still follow the normal API key rules.
 
 See [Multi-Client Integration](#-multi-client-integration) for detailed client configuration.
 
@@ -405,7 +420,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 Stop services:
 
 ```bash
-docker compose -f docker-compose.yml down
+COMPOSE_PROJECT_NAME=<printed-compose-project> docker compose -f docker-compose.yml down --remove-orphans
 ```
 
 ---
@@ -418,10 +433,10 @@ Memory Palace provides four deployment profiles to match your hardware and requi
 |---|---|---|---|---|
 | **A** | `keyword` only | ❌ Off | ❌ Off | 🟢 Minimal resources, initial validation |
 | **B** | `hybrid` | 📦 Local Hash | ❌ Off | 🟡 **Default** — local dev, no external services |
-| **C** | `hybrid` | 🌐 API | ✅ On | 🟠 Local model server (Ollama / LM Studio) |
-| **D** | `hybrid` | 🌐 API | ✅ On | 🔴 Remote API, production environments |
+| **C** | `hybrid` | 🌐 Router / API | ✅ On | 🟠 Local model server (Ollama / LM Studio) |
+| **D** | `hybrid` | 🌐 Router / API | ✅ On | 🔴 Remote API, production environments |
 
-> **Note**: Profiles C and D share the same hybrid retrieval pipeline (`keyword + semantic + reranker`). The only difference is routing preference (local-first vs remote-first).
+> **Note**: Profiles C and D share the same hybrid retrieval pipeline (`keyword + semantic + reranker`). In the shipped templates, the main differences are the model endpoint (local vs remote) and the default `RETRIEVAL_RERANKER_WEIGHT` (`0.30` vs `0.35`).
 
 ### 🔼 Upgrading to Profile C/D
 
@@ -462,13 +477,13 @@ RETRIEVAL_RERANKER_WEIGHT=0.25
 WRITE_GUARD_LLM_ENABLED=true
 WRITE_GUARD_LLM_API_BASE=http://localhost:11434/v1
 WRITE_GUARD_LLM_API_KEY=your-api-key
-WRITE_GUARD_LLM_MODEL=Qwen3.5-4B
+WRITE_GUARD_LLM_MODEL=Qwen3.5-35B-A3B
 
 # ── Compact Gist LLM (falls back to Write Guard if empty) ──
 COMPACT_GIST_LLM_ENABLED=true
 COMPACT_GIST_LLM_API_BASE=
 COMPACT_GIST_LLM_API_KEY=
-COMPACT_GIST_LLM_MODEL=Qwen3.5-4B
+COMPACT_GIST_LLM_MODEL=Qwen3.5-35B-A3B
 ```
 
 Profile templates are located at: `deploy/profiles/{macos,windows,docker}/profile-{a,b,c,d}.env`
@@ -498,7 +513,9 @@ Memory Palace exposes **9 standardized tools** via the MCP protocol:
 | URI | Description |
 |---|---|
 | `system://boot` | Loads core memories from `CORE_MEMORY_URIS` when `system://boot` is read |
-| `system://index` | Index status overview |
+| `system://index` | Full memory index overview |
+| `system://index-lite` | Gist-backed lightweight index summary |
+| `system://audit` | Consolidated observability / audit summary |
 | `system://recent` | Recently modified memories |
 | `system://recent/N` | Last N memories |
 
@@ -548,7 +565,7 @@ The MCP tool layer handles **deterministic execution**; the Skills strategy laye
 python scripts/sync_memory_palace_skill.py
 python scripts/sync_memory_palace_skill.py --check
 python scripts/evaluate_memory_palace_skill.py
-backend/.venv/bin/python scripts/evaluate_memory_palace_mcp_e2e.py
+cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 python scripts/install_skill.py --targets claude,codex,opencode,cursor,agent --scope workspace --force
 python scripts/install_skill.py --targets gemini --scope user --force
 ```
@@ -577,7 +594,7 @@ The canonical skill is aligned with the current code contract:
 - when `guard_action=NOOP`, stop writing, inspect the suggested target, and only then decide whether to switch to `update_memory`
 - the trigger sample set lives at `<repo-root>/docs/skills/memory-palace/references/trigger-samples.md`
 
-If you want to re-check the live MCP path on your own machine, run `backend/.venv/bin/python scripts/evaluate_memory_palace_mcp_e2e.py`. It generates `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` locally by default.
+If you want to re-check the live MCP path on your own machine, run `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`. It generates `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` locally by default.
 
 Full guide: [MEMORY_PALACE_SKILLS.md](docs/skills/MEMORY_PALACE_SKILLS.md)
 
@@ -690,8 +707,8 @@ than part of the public user package.
 > 📌 These images are here to help you quickly understand the main dashboard areas.
 >
 > - They show the **typical post-entry dashboard state**
-> - The current version now has a unified `Set API key` button in the top bar
-> - If auth is not configured yet, the protected pages (`Memory / Review / Maintenance / Observability`) will show an auth prompt before full data is available
+> - The top bar now provides a unified auth entry (`Set API key` / `Update API key` / `Clear key`, or `Runtime key active` when injected at runtime)
+> - If auth is not configured yet, the page shell still opens, but protected data requests show an auth hint, empty state, or `401` until credentials are available
 
 <details>
 <summary>📂 Memory — Tree Browser & Editor</summary>

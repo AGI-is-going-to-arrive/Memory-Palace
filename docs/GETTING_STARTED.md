@@ -11,7 +11,7 @@
 | 依赖 | 最低版本 | 检查命令 |
 |---|---|---|
 | Python | `3.10+` | `python3 --version` |
-| Node.js | `20+` | `node --version` |
+| Node.js | `20.19+`（或 `>=22.12`） | `node --version` |
 | npm | `9+` | `npm --version` |
 | Docker（可选） | `20+` | `docker --version` |
 | Docker Compose（可选） | `2.0+` | `docker compose version` |
@@ -76,10 +76,10 @@ memory-palace/
 cp .env.example .env
 ```
 
-> **重要**：复制后必须修改 `.env` 中的 `DATABASE_URL`，将路径改为你的实际绝对路径。例如：
+> **重要**：复制后请检查 `.env` 中的 `DATABASE_URL`，将路径改成你的实际路径。共享环境或接近生产的场景更推荐使用绝对路径。例如：
 >
 > ```
-> DATABASE_URL=sqlite+aiosqlite:////absolute/path/to/memory_palace.db
+> DATABASE_URL=sqlite+aiosqlite:////absolute/path/to/memory_palace/demo.db
 > ```
 
 也可以使用 Profile 脚本快速生成带有默认配置的 `.env`：
@@ -100,9 +100,9 @@ bash scripts/apply_profile.sh macos b
 
 以下是 `.env` 中最常用的配置项（更多配置项请查看 `.env.example` 中的注释说明）：
 
-| 配置项 | 说明 | 默认值 |
+| 配置项 | 说明 | 模板示例值 |
 |---|---|---|
-| `DATABASE_URL` | SQLite 数据库路径（**必须使用绝对路径**） | `sqlite+aiosqlite:////absolute/path/to/memory_palace/memory_palace.db` |
+| `DATABASE_URL` | SQLite 数据库路径（**建议使用绝对路径**） | `sqlite+aiosqlite:////absolute/path/to/memory_palace/demo.db` |
 | `SEARCH_DEFAULT_MODE` | 检索模式：`keyword` / `semantic` / `hybrid` | `keyword` |
 | `RETRIEVAL_EMBEDDING_BACKEND` | 嵌入后端：`none` / `hash` / `router` / `api` / `openai` | `none` |
 | `RETRIEVAL_EMBEDDING_MODEL` | Embedding 模型名 | `Qwen3-Embedding-8B` |
@@ -114,11 +114,13 @@ bash scripts/apply_profile.sh macos b
 | `RETRIEVAL_MMR_ENABLED` | hybrid 检索下的去重 / 多样性重排 | `false` |
 | `RETRIEVAL_SQLITE_VEC_ENABLED` | sqlite-vec rollout 开关 | `false` |
 | `MCP_API_KEY` | HTTP/SSE 接口鉴权密钥 | 空（见下方鉴权说明） |
-| `MCP_API_KEY_ALLOW_INSECURE_LOCAL` | 本地调试时允许无 Key 访问（仅对 `127.0.0.1` 生效） | `false` |
+| `MCP_API_KEY_ALLOW_INSECURE_LOCAL` | 本地调试时允许无 Key 访问（仅对直连 loopback 请求生效） | `false` |
 | `CORS_ALLOW_ORIGINS` | 允许跨域访问的来源列表（留空使用本地默认） | 空 |
 | `VALID_DOMAINS` | 允许的可写记忆 URI 域（`system://` 为内建只读域） | `core,writer,game,notes` |
 
 > B 档位默认使用本地 hash Embedding 且不启用 Reranker；C/D 档位需要配置外部 Embedding 与 Reranker，详见 [DEPLOYMENT_PROFILES.md](DEPLOYMENT_PROFILES.md)。
+>
+> 上表展示的是 `.env.example` 里的模板示例值；如果某些检索环境变量在运行时完全缺失，后端内部还会使用自己的回退值（例如 `hash` / `hash-v1` / `64`）。
 >
 > 配置语义说明：`RETRIEVAL_EMBEDDING_BACKEND` 只作用于 Embedding。Reranker 不存在 `RETRIEVAL_RERANKER_BACKEND` 开关，优先读取 `RETRIEVAL_RERANKER_*`，缺失时才回退 `ROUTER_*`（最后回退 `OPENAI_*` 的 base/key）。
 >
@@ -131,6 +133,11 @@ bash scripts/apply_profile.sh macos b
 > - `CORS_ALLOW_ORIGINS=`：本地开发留空；要开放给浏览器跨域访问时再写明确域名
 >
 > 当前推荐模型：Embedding 使用 `Qwen3-Embedding-8B`，Reranker 使用 `Qwen3-Reranker-8B`；如需启用可选 LLM，推荐使用 `Qwen3.5-35B-A3B`。
+>
+> 如果你接下来就要在本地打开 Dashboard，或者直接用 `curl` 调 `/browse` / `/review` / `/maintenance`，建议再补一项鉴权配置（二选一）：
+>
+> - `MCP_API_KEY=change-this-local-key`
+> - `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`（只建议你自己机器上的回环调试时使用）
 
 ### Step 2：启动后端
 
@@ -142,7 +149,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 
 # Windows PowerShell
-# .venv\Scripts\Activate.ps1
+# .\.venv\Scripts\Activate.ps1
 
 pip install -r requirements.txt
 uvicorn main:app --host 127.0.0.1 --port 8000 --reload
@@ -175,6 +182,11 @@ VITE v7.x.x  ready in xxx ms
 
 打开浏览器访问 `http://127.0.0.1:5173`，即可看到 Memory Palace Dashboard。
 
+> 如果你在本地手动启动时看到右上角的 `Set API key`，这是正常现象：页面已经打开，但 `/browse/*`、`/review/*`、`/maintenance/*` 等受保护接口还没授权。第 5 节会继续说明本地验证方式。
+
+> 如果你配置了 `MCP_API_KEY`，打开页面后请点右上角 `Set API key`，输入同一把 key。
+> 如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，本机回环地址上的直连请求可直接访问这些受保护数据接口。
+
 > 前端开发服务器通过 `vite.config.js` 中配置的 proxy 将 `/api` 路径代理到后端 `http://127.0.0.1:8000`，因此前后端无需手动配置 CORS。
 
 ---
@@ -200,27 +212,12 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > 同一 checkout 下的并发部署会被 deployment lock 串行化；若已有另一条一键部署在执行，后续进程会直接退出并提示稍后重试。
 >
 > 如果 Docker env 文件里的 `MCP_API_KEY` 为空，`apply_profile.*` 会自动生成一把本地 key。Docker 前端会在代理层自动带上这把 key，所以 Dashboard 默认不需要再手动点 `Set API key`。
-
+>
 > **C/D 本地联调建议**：
 >
-> - 只有当本机 `router` 暂时没有 embedding / reranker / llm 时，才建议临时使用 `--runtime-env-mode file`。
-> - 请把运行时注入文件放在你自己的 `<path-to-runtime-env>`，不要把真实本机路径写进公开文档。
-> - 推荐命令（`profile c/d` 二选一）：
->
-> ```bash
-> RUNTIME_ENV_FILE=/absolute/path/to/runtime-debug.env
-> bash new/run_post_change_checks.sh --skip-frontend --skip-sse --with-docker --docker-profile c --runtime-env-mode file --runtime-env-file "${RUNTIME_ENV_FILE}" --allow-runtime-env-debug
-> bash new/run_post_change_checks.sh --skip-frontend --skip-sse --with-docker --docker-profile d --runtime-env-mode file --runtime-env-file "${RUNTIME_ENV_FILE}" --allow-runtime-env-debug
-> ```
->
-> - 这套命令只用于**本地排障**：你可以先确认 embedding / reranker / llm 哪一段不可达。
-> - 部署到目标环境前，必须回到 `runtime-env-mode none` 且不注入本地文件，再按目标环境复跑一次。
->
-> **为什么当前本地建议这样配**：
->
-> - 本地最常见的问题不是后端主流程，而是 `router` 本身没有同步部署 embedding / reranker / llm 模型。
-> - 将 `embedding` / `reranker` / `llm` 分别直配到可用的 OpenAI-compatible 端点，更容易判断到底是哪条链路不可达。
-> - 这种口径只解决“本地联调效率”问题，不改变生产设计：上线时仍应优先由 `router` 作为统一入口承接模型编排与 fallback。
+> - 如果你本机的 `router` 还没接好 embedding / reranker / llm，可以先直接分别配置 `RETRIEVAL_EMBEDDING_*`、`RETRIEVAL_RERANKER_*`、`WRITE_GUARD_LLM_*` / `COMPACT_GIST_LLM_*`。
+> - 这样更容易判断到底是哪一条链路不可达，不会把“某个模型没配好”误判成整个系统不可用。
+> - 无论你最终采用 `router` 方案，还是分别直配 `RETRIEVAL_EMBEDDING_*` / `RETRIEVAL_RERANKER_*`，都建议按**最终实际部署配置**重新跑一次启动与健康检查。
 
 > 脚本会自动执行以下步骤：
 >
@@ -247,10 +244,10 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 停止服务：
 
 ```bash
-docker compose -f docker-compose.yml down
+COMPOSE_PROJECT_NAME=<控制台打印出的 compose project> docker compose -f docker-compose.yml down --remove-orphans
 ```
 
-> 若宿主机是 `arm64` 且没有原生 Windows / native `pwsh`，`deployment.windows_equivalent_pwsh_docker` 会以 `pwsh-in-docker` 等效 smoke 为准；该检查在不适合当前宿主机时可能记为 `SKIP`，而不是 `FAIL`。
+> 如果你需要验证 Windows 路径，建议直接在目标 Windows 环境里补跑一次启动与 smoke。
 
 ### 4.1 备份当前数据库
 
@@ -278,6 +275,7 @@ bash scripts/backup_memory.sh --env-file .env --output-dir backups
 当前仓库已经把以下典型本地产物放入 `<repo-root>/.gitignore`：
 
 - 运行期数据库：`*.db`、`*.sqlite`、`*.sqlite3`
+- 本地工具配置：`.mcp.json`、`.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.gemini/`、`.agent/`
 - 本地缓存与临时目录：`.tmp/`、`backend/.pytest_cache/`
 - 前端本地产物：`frontend/node_modules/`、`frontend/dist/`
 - 日志与快照：`*.log`、`snapshots/`、`backups/`
@@ -297,7 +295,7 @@ bash scripts/pre_publish_check.sh
 
 ```bash
 python scripts/evaluate_memory_palace_skill.py
-backend/.venv/bin/python scripts/evaluate_memory_palace_mcp_e2e.py
+cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ```
 
 脚本会分别在 `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` 和 `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` 本地生成或更新摘要。这两份结果更适合当成你自己机器上的验证记录，而不是主说明文档。
@@ -417,6 +415,8 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
 > ⚠️ 请将 `/path/to/memory-palace` 替换为你的实际项目路径。SSE 模式的端口需与你启动 `run_sse.py` 时的 `PORT` 一致。
+>
+> ⚠️ SSE 仍受 `MCP_API_KEY` 保护。多数客户端还需要额外配置请求头或 Bearer Token；具体字段名请以客户端自己的 MCP 文档为准。
 
 ---
 
@@ -431,7 +431,7 @@ Memory Palace 的部分 HTTP 接口受 `MCP_API_KEY` 保护，采用 **fail-clos
 | `/maintenance/*` | 维护接口（孤立节点清理等） | `require_maintenance_api_key` |
 | `/review/*` | 审查接口（内容审核流程） | `require_maintenance_api_key` |
 | `/browse/*`（GET/POST/PUT/DELETE） | 记忆树读写操作 | `require_maintenance_api_key` |
-| `run_sse.py` 的 `/sse` | MCP SSE 传输通道 | `apply_mcp_api_key_middleware` |
+| `run_sse.py` 的 `/sse` 与 `/messages` | MCP SSE 传输通道与消息入口 | `apply_mcp_api_key_middleware` |
 
 ### 鉴权方式
 
@@ -472,7 +472,7 @@ curl -fsS http://127.0.0.1:8000/maintenance/orphans \
 MCP_API_KEY_ALLOW_INSECURE_LOCAL=true
 ```
 
-> 此选项仅对来自 `127.0.0.1` / `::1` / `localhost` 的请求生效，且仅影响 HTTP/SSE 接口，**不影响** stdio 模式（stdio 不经过鉴权层）。
+> 此选项仅对来自 `127.0.0.1` / `::1` / `localhost` 的**直连请求**生效；如果请求带有 forwarded headers，仍会被拒绝。它只影响 HTTP/SSE 接口，**不影响** stdio 模式（stdio 不经过鉴权层）。
 
 ---
 
@@ -481,7 +481,7 @@ MCP_API_KEY_ALLOW_INSECURE_LOCAL=true
 | 问题 | 原因与解决 |
 |---|---|
 | 启动后端时 `ModuleNotFoundError` | 未激活虚拟环境或未安装依赖。执行 `source .venv/bin/activate && pip install -r requirements.txt` |
-| `DATABASE_URL` 报错 | 路径必须是绝对路径且使用 `sqlite+aiosqlite:///` 前缀。示例：`sqlite+aiosqlite:////absolute/path/to/memory_palace.db` |
+| `DATABASE_URL` 报错 | 路径建议使用绝对路径，并且要带 `sqlite+aiosqlite:///` 前缀。示例：`sqlite+aiosqlite:////absolute/path/to/memory_palace.db` |
 | 前端访问 API 返回 `502` 或 `Network Error` | 确认后端已启动且运行在 `8000` 端口。检查 `vite.config.js` 中 proxy 目标与后端端口是否一致 |
 | 受保护接口返回 `401` | 本地手动启动：配置 `MCP_API_KEY` 或设置 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`；Docker：优先确认是否使用 `apply_profile.*` / `docker_one_click.*` 生成的 Docker env 文件 |
 | Docker 启动端口冲突 | `docker_one_click.sh` 默认会自动寻找空闲端口。也可通过 `--frontend-port` / `--backend-port` 手动指定 |

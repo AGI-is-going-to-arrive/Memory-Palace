@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-CANONICAL_DIR = REPO_ROOT / "Memory-Palace" / "docs" / "skills" / "memory-palace"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+CANONICAL_DIR = REPO_ROOT / "docs" / "skills" / "memory-palace"
 BUNDLE_MIRROR_DIRS = [
     REPO_ROOT / ".claude" / "skills" / "memory-palace",
     REPO_ROOT / ".codex" / "skills" / "memory-palace",

@@ -260,7 +260,7 @@ python scripts/evaluate_memory_palace_skill.py
 再看真实 MCP 调用链：
 
 ```bash
-backend/.venv/bin/python scripts/evaluate_memory_palace_mcp_e2e.py
+cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ```
 
 这两条脚本都会在本地生成验证报告：
@@ -312,5 +312,5 @@ Gemini 对隐藏目录有时更保守，所以这个仓库才同时补了：
 ```bash
 python scripts/sync_memory_palace_skill.py --check
 python scripts/evaluate_memory_palace_skill.py
-backend/.venv/bin/python scripts/evaluate_memory_palace_mcp_e2e.py
+cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ```

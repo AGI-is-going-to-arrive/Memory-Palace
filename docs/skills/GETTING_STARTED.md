@@ -212,8 +212,8 @@ docs/skills/TRIGGER_SMOKE_REPORT.md
 ### 真实 MCP 调用链
 
 ```bash
-backend/.venv/bin/python \
-  scripts/evaluate_memory_palace_mcp_e2e.py
+cd backend
+python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ```
 
 这条命令会在本地生成真实 MCP e2e 摘要：
@@ -296,4 +296,4 @@ docs/skills/memory-palace/references/trigger-samples.md
 
 - 想看四端口径：`CLI_COMPATIBILITY_GUIDE.md`
 - 想本地复核 skill 触发结果：先跑 `python scripts/evaluate_memory_palace_skill.py`
-- 想本地复核真实 MCP e2e：先跑 `backend/.venv/bin/python scripts/evaluate_memory_palace_mcp_e2e.py`
+- 想本地复核真实 MCP e2e：先跑 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`

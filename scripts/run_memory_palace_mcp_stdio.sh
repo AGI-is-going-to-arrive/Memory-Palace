@@ -2,8 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
-BACKEND_DIR="${REPO_ROOT}/Memory-Palace/backend"
+PROJECT_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+BACKEND_DIR="${PROJECT_ROOT}/backend"
 VENV_PYTHON="${BACKEND_DIR}/.venv/bin/python"
 DB_PATH="${BACKEND_DIR}/memory.db"
 
