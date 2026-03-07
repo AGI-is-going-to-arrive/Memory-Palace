@@ -3,7 +3,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 
 BENCHMARK_DIR = Path(__file__).resolve().parent

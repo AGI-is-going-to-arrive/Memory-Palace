@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: deploy/docker/Dockerfile.backend
     env_file:
-      - ./.env.docker
+      - ${MEMORY_PALACE_DOCKER_ENV_FILE:-./.env.docker}
     volumes:
       - memory_palace_data:/app/data
     ports:
@@ -28,6 +28,8 @@ services:
         condition: service_healthy
     ports:
       - "${MEMORY_PALACE_FRONTEND_PORT:-${NOCTURNE_FRONTEND_PORT:-3000}}:8080"
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/"]
       interval: 10s

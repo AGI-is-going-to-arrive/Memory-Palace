@@ -8,6 +8,13 @@
 
 **现象**：页面能打开，但列表为空或接口报错。
 
+> 📌 当前版本还有一种很常见的“看起来像坏了，其实是正常门控”的情况：
+>
+> - 页面右上角出现 `Set API key`
+> - `Memory / Review / Maintenance / Observability` 里出现空态、等待提示或 `401`
+>
+> 这通常不是前端挂了，而是**你还没给受保护接口授权**。
+
 **排查步骤**：
 
 1. 确认**后端已启动**：
@@ -73,6 +80,7 @@
   ```
 
 - **前端**：注入 `window.__MEMORY_PALACE_RUNTIME__`（详见 [SECURITY_AND_PRIVACY.md](SECURITY_AND_PRIVACY.md) 第 4 节）
+- **前端页面**：也可以直接点右上角的 `Set API key` / `Update API key`
 
 - **本地调试** 可设置 insecure local override（仅 loopback 生效）：
 
@@ -88,6 +96,15 @@
 | `invalid_or_missing_api_key` | Key 错误或未提供 | 检查 Key 是否正确 |
 | `api_key_not_configured` | `.env` 中 `MCP_API_KEY` 为空 | 设置 Key 或启用 insecure local |
 | `insecure_local_override_requires_loopback` | 启用了 insecure local 但请求非 loopback | 确保从 `127.0.0.1` 或 `localhost` 访问 |
+
+> 💡 如果你看到的是：
+>
+> - `Awaiting Input`
+> - `Failed to load node`
+> - `Connection Lost`
+> - `maintenance_auth_failed | api_key_not_configured`
+>
+> 优先先配 key，再判断是不是别的问题。
 
 ---
 
@@ -154,7 +171,7 @@
 
 **排查步骤**：
 
-1. **查看 `degrade_reasons`**：`search_memory` MCP 工具返回的 `degrade_reasons` 字段会告诉你具体降级原因。常见值包括：
+1. **查看 `degrade_reasons`**：`search_memory` MCP 工具返回的 `degrade_reasons` 字段会告诉你检索链路的具体降级原因。常见值包括：
 
    | `degrade_reasons` 值 | 含义 | 来源文件 |
    |---|---|---|
@@ -163,13 +180,17 @@
    | `embedding_request_failed` | Embedding API 请求失败 | `backend/db/sqlite_client.py` |
    | `reranker_request_failed` | Reranker API 请求失败 | `backend/db/sqlite_client.py` |
    | `reranker_config_missing` | Reranker 配置缺失 | `backend/db/sqlite_client.py` |
-   | `write_guard_exception` | Write Guard LLM 异常 | `backend/mcp_server.py` |
    | `compact_gist_llm_empty` | Compact Gist LLM 返回空结果 | `backend/mcp_server.py` |
    | `index_enqueue_dropped` | 索引任务入队被丢弃 | `backend/mcp_server.py` |
+
+   > `write_guard_exception` 属于写入/学习链路（如 `create_memory`、`update_memory`、显式学习触发），语义为写入已 fail-closed 拒绝，并非检索质量降级。
 
 2. **检查 Embedding / Reranker API 可达性**：
 
    ```bash
+   # 配置语义：RETRIEVAL_EMBEDDING_BACKEND 只控制 embedding。
+   # reranker 不存在 RETRIEVAL_RERANKER_BACKEND；如需本地强制走自有 reranker API，
+   # 请显式设置 RETRIEVAL_RERANKER_ENABLED=true 与 RETRIEVAL_RERANKER_API_BASE/API_KEY/MODEL。
    # 注意：RETRIEVAL_*_API_BASE 可能已包含 /v1，避免再手动拼接 /v1
    # 用实际调用端点做健康检查更准确：
    curl -fsS -X POST <RETRIEVAL_EMBEDDING_API_BASE>/embeddings \
@@ -179,6 +200,11 @@
      -H "Content-Type: application/json" \
      -d '{"model":"<RETRIEVAL_RERANKER_MODEL>","query":"ping","documents":["pong"]}'
    ```
+
+   > **排障顺序建议**：
+   > - 本地开发先检查你是否在走“分别直配”口径：`RETRIEVAL_EMBEDDING_*`、`RETRIEVAL_RERANKER_*`、`WRITE_GUARD_LLM_* / COMPACT_GIST_LLM_*`。
+   > - 不要先假设 `router` 一定是最高优先级；当前仓库的本地联调场景里，`embedding` 常常会显式改为 `api` 主链路。
+   > - 只有在你明确按 C/D 发布模板回切 `router` 口径时，才优先把问题归到 `ROUTER_*` 配置或 router 服务本身。
 
 3. **重建索引**（通过 MCP 工具调用）：
 
@@ -197,6 +223,12 @@
    ```
 
 5. **检查配置参数**：确认 `RETRIEVAL_RERANKER_WEIGHT` 在合理范围（`.env.example` 注释建议 `0.20 ~ 0.40`，默认 `0.25`）
+
+6. **观测页里看到新增字段不要慌**：
+
+   - `scope_hint`：只是告诉检索“优先看哪个范围”
+   - `sm-lite`：是当前版本新增的一组轻量运行时状态，不是报错
+   - `Runtime Snapshot`：是帮助你排障的摘要，不是必须每项都有值
 
 ---
 
@@ -219,7 +251,15 @@ npm run build              # 构建产物
 
 ---
 
-## 7. 后端测试失败
+## 7. 完整开发仓测试失败（用户仓可跳过）
+
+如果你使用的是公开用户仓，通常**不会附带 `tests/` 目录**。这时不需要卡在 pytest，先做最小运行检查：
+
+```bash
+curl -fsS http://127.0.0.1:8000/health
+```
+
+如果你使用的是完整开发仓，再运行：
 
 ```bash
 cd backend
@@ -231,7 +271,7 @@ pytest tests -q
 
 > **Windows PowerShell 用户**：`source` 命令不可用，使用 `.venv\Scripts\Activate.ps1` 激活虚拟环境。
 
-**快速定位技巧**：优先查看最近改动文件对应的测试集，再扩大全量回归：
+**完整开发仓快速定位技巧**：优先查看最近改动文件对应的测试集，再扩大全量回归：
 
 ```bash
 # 只运行特定测试文件
@@ -274,7 +314,7 @@ pytest tests -k "test_search" -q
    rm -f /path/to/demo.db.migrate.lock
    ```
 
-**对应的测试用例**：`backend/tests/test_migration_runner.py` 包含完整的迁移锁与超时场景测试。
+**维护期验证锚点**：如果你使用的是完整开发仓，`backend/tests/test_migration_runner.py` 覆盖了迁移锁与超时场景。
 
 ---
 
@@ -296,12 +336,14 @@ pytest tests -k "test_search" -q
    |---|---|---|
    | Profile A | `none` | 纯关键字搜索，不使用 Embedding |
    | Profile B | `hash` | 本地 hash Embedding（默认值） |
-   | Profile C/D | `api` 或 `router` | 调用远程 Embedding API |
+   | Profile C/D | `api` 或 `router` | 本地开发优先用 `api` 直配排障；发布验证默认回到 `router` 主链路 |
 
 3. **确认有记忆内容**：
 
    ```bash
-   curl -fsS "http://127.0.0.1:8000/browse/node?domain=core&path="
+   curl -fsS \
+     -H "X-MCP-API-Key: ${MCP_API_KEY}" \
+     "http://127.0.0.1:8000/browse/node?domain=core&path="
    ```
 
 4. **尝试 Sleep Consolidation**（通过 MCP 工具）：
@@ -320,22 +362,30 @@ pytest tests -k "test_search" -q
 
 **现象**：前端请求后端 API 时浏览器报 CORS 错误。
 
-**说明**：开发环境下后端已配置允许所有 Origin（参见 `backend/main.py`）：
+**说明**：当前默认**不是允许所有 Origin**。后端在 `CORS_ALLOW_ORIGINS` 留空时，只放行本地常用来源：
 
 ```python
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+http://localhost:5173
+http://127.0.0.1:5173
+http://localhost:3000
+http://127.0.0.1:3000
 ```
 
 **如果仍然报错**，通常原因是：
 
 - 前端开发服务器的代理未正确配置（检查 `frontend/vite.config.js`）
 - Docker 部署时前端 Nginx 没有正确转发到后端（检查 `deploy/docker/nginx.conf`）
+- 你正在从一个**不在允许列表里的浏览器来源**访问后端
+
+**处理建议**：
+
+- 本地开发：
+  - 保持 `CORS_ALLOW_ORIGINS=` 留空即可
+- 生产浏览器访问：
+  - 把 `CORS_ALLOW_ORIGINS` 显式写成你的前端地址列表
+  - 例如：`CORS_ALLOW_ORIGINS=https://app.example.com,https://admin.example.com`
+- 不建议为了省事直接写 `*`
+  - 尤其是你还需要 credentials / cookie / auth 头的时候
 
 ---
 

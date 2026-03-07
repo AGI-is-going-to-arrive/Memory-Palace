@@ -22,6 +22,12 @@ const buildSummary = ({
   timestamp = '2026-01-01T00:00:00Z',
   queueDepth = recentJobs.length,
   lastError = null,
+  smLite = {
+    storage: 'runtime_ephemeral',
+    promotion_path: 'compact_context + auto_flush',
+    session_cache: { session_count: 0, total_hits: 0 },
+    flush_tracker: { session_count: 0, pending_events: 0 },
+  },
 } = {}) => ({
   status: 'ok',
   timestamp,
@@ -38,11 +44,22 @@ const buildSummary = ({
         last_error: lastError,
       },
       sleep_consolidation: {},
+      sm_lite: smLite,
     },
   },
   index_latency: {},
   cleanup_query_stats: {},
 });
+
+const createDeferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+};
 
 describe('ObservabilityPage', () => {
   const getJobCardById = async (jobId) => {
@@ -296,6 +313,31 @@ describe('ObservabilityPage', () => {
     expect(screen.getByText(/last worker error:\s*queue_full/i)).toBeInTheDocument();
   });
 
+  it('keeps latest summary state when refresh requests race', async () => {
+    const user = userEvent.setup();
+    const first = createDeferred();
+    const second = createDeferred();
+    api.getObservabilitySummary
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise);
+
+    render(<ObservabilityPage />);
+
+    await user.click(screen.getByRole('button', { name: 'Rebuild Index' }));
+    await waitFor(() => {
+      expect(api.getObservabilitySummary).toHaveBeenCalledTimes(2);
+    });
+
+    second.resolve(buildSummary({ queueDepth: 2, timestamp: '2026-01-01T00:00:02Z' }));
+    await screen.findByText(/queue depth:\s*2/i);
+
+    first.resolve(buildSummary({ queueDepth: 9, timestamp: '2026-01-01T00:00:01Z' }));
+    await waitFor(() => {
+      expect(screen.getByText(/queue depth:\s*2/i)).toBeInTheDocument();
+      expect(screen.queryByText(/queue depth:\s*9/i)).not.toBeInTheDocument();
+    });
+  });
+
   it('blocks diagnostic search when max priority is not an integer', async () => {
     const user = userEvent.setup();
     render(<ObservabilityPage />);
@@ -323,6 +365,42 @@ describe('ObservabilityPage', () => {
         }),
       );
     });
+  });
+
+  it('sends scope_hint when provided', async () => {
+    const user = userEvent.setup();
+    render(<ObservabilityPage />);
+
+    const input = await screen.findByLabelText('Scope hint');
+    await user.type(input, 'core://agent');
+    await user.click(screen.getByRole('button', { name: /Run Diagnostic Search/i }));
+
+    await waitFor(() => {
+      expect(api.runObservabilitySearch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope_hint: 'core://agent',
+        }),
+      );
+    });
+  });
+
+  it('renders sm-lite runtime metrics', async () => {
+    api.getObservabilitySummary.mockResolvedValue(
+      buildSummary({
+        smLite: {
+          storage: 'runtime_ephemeral',
+          promotion_path: 'compact_context + auto_flush',
+          session_cache: { session_count: 2, total_hits: 6 },
+          flush_tracker: { session_count: 1, pending_events: 3 },
+          degraded: false,
+        },
+      }),
+    );
+
+    render(<ObservabilityPage />);
+
+    expect(await screen.findByText(/sm-lite sessions:\s*2/i)).toBeInTheDocument();
+    expect(screen.getByText(/sm-lite pending events:\s*3/i)).toBeInTheDocument();
   });
 
   it('shows explicit message when cancel returns 404', async () => {

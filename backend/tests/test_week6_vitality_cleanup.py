@@ -431,6 +431,25 @@ async def test_vitality_cleanup_prepare_and_confirm_delete_flow(
     monkeypatch.setattr(
         maintenance_api.runtime_state, "vitality_decay", VitalityDecayCoordinator()
     )
+    write_lane_calls: list[Dict[str, Any]] = []
+
+    async def _run_write_lane_stub(
+        *, session_id: str | None, operation: str, task
+    ) -> Any:
+        write_lane_calls.append(
+            {
+                "session_id": session_id,
+                "operation": operation,
+            }
+        )
+        return await task()
+
+    monkeypatch.setattr(maintenance_api, "ENABLE_WRITE_LANE_QUEUE", True)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.write_lanes,
+        "run_write",
+        _run_write_lane_stub,
+    )
 
     query_payload = await client.get_vitality_cleanup_candidates(
         threshold=0.2,
@@ -469,6 +488,63 @@ async def test_vitality_cleanup_prepare_and_confirm_delete_flow(
     assert prepare_result["status"] == "pending_confirmation"
     assert confirm_result["ok"] is True
     assert confirm_result["deleted_count"] == 1
+    assert len(write_lane_calls) == 1
+    assert write_lane_calls[0]["operation"] == "maintenance.vitality.cleanup.confirm.delete"
+    assert str(write_lane_calls[0]["session_id"] or "").startswith("maintenance.cleanup:")
+
+
+@pytest.mark.asyncio
+async def test_delete_orphan_uses_write_lane(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "week6-delete-orphan-write-lane.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    created = await client.create_memory(
+        parent_path="",
+        content="Delete orphan write lane",
+        priority=1,
+        title="delete_orphan_lane",
+        domain="core",
+    )
+    await client.remove_path(path="delete_orphan_lane", domain="core")
+
+    write_lane_calls: list[Dict[str, Any]] = []
+
+    async def _run_write_lane_stub(
+        *, session_id: str | None, operation: str, task
+    ) -> Any:
+        write_lane_calls.append(
+            {
+                "session_id": session_id,
+                "operation": operation,
+            }
+        )
+        return await task()
+
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(maintenance_api, "ENABLE_WRITE_LANE_QUEUE", True)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.write_lanes,
+        "run_write",
+        _run_write_lane_stub,
+    )
+
+    result = await maintenance_api.delete_orphan(created["id"])
+
+    async with client.session() as session:
+        still_exists = await session.execute(
+            select(Memory.id).where(Memory.id == created["id"])
+        )
+        assert still_exists.scalar_one_or_none() is None
+
+    await client.close()
+    assert result["deleted_memory_id"] == created["id"]
+    assert len(write_lane_calls) == 1
+    assert write_lane_calls[0]["operation"] == "maintenance.delete_orphan"
+    assert write_lane_calls[0]["session_id"] == f"maintenance.orphan:{created['id']}"
 
 
 @pytest.mark.asyncio
@@ -1073,6 +1149,73 @@ async def test_observability_summary_includes_vitality_sections(
     assert payload["cleanup_reviews"]["pending_reviews"] == 0
     assert payload["cleanup_query_stats"]["total_queries"] == 0
     assert payload["cleanup_query_stats"]["index_hit_ratio"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_observability_summary_marks_degraded_when_vitality_stats_getter_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _DummyClientWithoutVitalityStats:
+        async def get_index_status(self) -> Dict[str, Any]:
+            return {"degraded": False, "index_available": True}
+
+        async def get_gist_stats(self) -> Dict[str, Any]:
+            return {"degraded": False, "total_rows": 0}
+
+    async def _ensure_started(_factory) -> None:
+        return None
+
+    async def _index_worker_status() -> Dict[str, Any]:
+        return {"enabled": True, "running": False, "recent_jobs": [], "stats": {}}
+
+    async def _write_lane_status() -> Dict[str, Any]:
+        return {
+            "global_concurrency": 1,
+            "global_active": 0,
+            "global_waiting": 0,
+            "session_waiting_count": 0,
+            "session_waiting_sessions": 0,
+            "max_session_waiting": 0,
+            "wait_warn_ms": 2000,
+        }
+
+    async def _decay_status() -> Dict[str, Any]:
+        return {"applied": True, "degraded": False}
+
+    async def _cleanup_summary() -> Dict[str, Any]:
+        return {"pending_reviews": 0}
+
+    monkeypatch.setattr(
+        maintenance_api,
+        "get_sqlite_client",
+        lambda: _DummyClientWithoutVitalityStats(),
+    )
+    monkeypatch.setattr(maintenance_api.runtime_state, "ensure_started", _ensure_started)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.index_worker, "status", _index_worker_status
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.write_lanes, "status", _write_lane_status
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.vitality_decay, "status", _decay_status
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.cleanup_reviews, "summary", _cleanup_summary
+    )
+
+    async with maintenance_api._search_events_guard:
+        maintenance_api._search_events.clear()
+    async with maintenance_api._cleanup_query_events_guard:
+        maintenance_api._cleanup_query_events.clear()
+    monkeypatch.setattr(maintenance_api, "_search_events_loaded", True)
+
+    payload = await maintenance_api.get_observability_summary()
+
+    assert payload["status"] == "degraded"
+    assert payload["vitality_stats"]["degraded"] is True
+    assert payload["vitality_stats"]["reason"] == "vitality_stats_unavailable"
+    assert payload["vitality_decay"]["degraded"] is False
 
 
 @pytest.mark.asyncio

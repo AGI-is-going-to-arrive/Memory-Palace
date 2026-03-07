@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 from pathlib import Path
 
 from helpers.profile_abcd_real_runner import (
     REAL_PROFILE_CD_MARKDOWN_ARTIFACT,
+    REAL_PROFILE_DEFAULT_CANDIDATE_MULTIPLIER,
+    REAL_PROFILE_DEFAULT_MAX_RESULTS,
     REAL_PROFILE_JSON_ARTIFACT,
     REAL_PROFILE_MARKDOWN_ARTIFACT,
     build_profile_abcd_real_metrics,
@@ -47,6 +50,24 @@ def parse_args() -> argparse.Namespace:
         help="Extra non-relevant corpus docs per dataset. Default: 200",
     )
     parser.add_argument(
+        "--max-results",
+        type=int,
+        default=REAL_PROFILE_DEFAULT_MAX_RESULTS,
+        help=(
+            "search_advanced max_results passed to each query. "
+            f"Default: {REAL_PROFILE_DEFAULT_MAX_RESULTS}"
+        ),
+    )
+    parser.add_argument(
+        "--candidate-multiplier",
+        type=int,
+        default=REAL_PROFILE_DEFAULT_CANDIDATE_MULTIPLIER,
+        help=(
+            "search_advanced candidate_multiplier passed to each query. "
+            f"Default: {REAL_PROFILE_DEFAULT_CANDIDATE_MULTIPLIER}"
+        ),
+    )
+    parser.add_argument(
         "--all-relevant",
         action="store_true",
         help="Use all relevant doc IDs from labels (default uses first relevant only).",
@@ -75,16 +96,52 @@ def parse_args() -> argparse.Namespace:
         default=_default_analysis_path(),
         help="Output analysis markdown path.",
     )
+    parser.add_argument(
+        "--workdir",
+        type=Path,
+        default=None,
+        help=(
+            "Optional benchmark cache dir for per-profile sqlite files. "
+            "Use this when default cache dir has filesystem constraints."
+        ),
+    )
+    parser.add_argument(
+        "--phase6-gate-mode",
+        type=str,
+        default=None,
+        help=(
+            "Optional phase6 gate mode override. "
+            "Supported: strict, api_tolerant."
+        ),
+    )
+    parser.add_argument(
+        "--phase6-invalid-rate-threshold",
+        type=float,
+        default=None,
+        help=(
+            "Optional phase6 invalid rate threshold (0~1). "
+            "Effective when gate mode is api_tolerant."
+        ),
+    )
     return parser.parse_args()
 
 
 async def _run(args: argparse.Namespace) -> None:
+    if args.phase6_gate_mode is not None:
+        os.environ["BENCHMARK_PHASE6_GATE_MODE"] = str(args.phase6_gate_mode)
+    if args.phase6_invalid_rate_threshold is not None:
+        os.environ["BENCHMARK_PHASE6_INVALID_RATE_THRESHOLD"] = str(
+            float(args.phase6_invalid_rate_threshold)
+        )
     dataset_keys = [item.strip() for item in args.datasets.split(",") if item.strip()]
     payload = await build_profile_abcd_real_metrics(
         sample_size=int(args.sample_size),
         dataset_keys=dataset_keys,
         first_relevant_only=not bool(args.all_relevant),
         extra_distractors=int(args.extra_distractors),
+        max_results=int(args.max_results),
+        candidate_multiplier=int(args.candidate_multiplier),
+        workdir=args.workdir,
     )
     artifact_paths = write_profile_abcd_real_artifacts(
         payload,

@@ -11,7 +11,7 @@ import {
 } from '../../lib/api';
 import SnapshotList from '../../components/SnapshotList';
 import { SimpleDiff } from '../../components/DiffViewer'; // Uses the Memory Palace styled diff
-import { 
+import {
   Activity, 
   Check, 
   ChevronRight, 
@@ -28,6 +28,28 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 
+const normalizeSessionList = (value) => {
+  if (!Array.isArray(value)) return [];
+  return value.map((session, index) => {
+    const normalizedSession = session && typeof session === 'object' ? session : {};
+    const rawSessionId = normalizedSession.session_id;
+    const sessionId =
+      (typeof rawSessionId === 'string' || typeof rawSessionId === 'number')
+        ? String(rawSessionId).trim()
+        : '';
+    return {
+      ...normalizedSession,
+      session_id: sessionId || `session-${index + 1}`,
+    };
+  });
+};
+
+const formatSnapshotTime = (value) => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return 'Unknown';
+  return format(parsed, 'HH:mm:ss');
+};
+
 function ReviewPage() {
   const [sessions, setSessions] = useState([]);
   const [currentSessionId, setCurrentSessionId] = useState(null);
@@ -38,6 +60,8 @@ function ReviewPage() {
   const [diffError, setDiffError] = useState(null);
   const [mutationInFlight, setMutationInFlight] = useState(false);
   
+  const sessionsRequestRef = useRef(0);
+  const currentSessionIdRef = useRef(null);
   const diffRequestRef = useRef(0);
   const snapshotsRequestRef = useRef(0);
   const mutationInFlightRef = useRef(false);
@@ -54,23 +78,37 @@ function ReviewPage() {
     setMutationInFlight(false);
   };
 
+  useEffect(() => {
+    currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
+
   // --- Data Loading Logic (Keep existing logic, refine UI) ---
   useEffect(() => { loadSessions(); }, []);
 
   const loadSessions = async () => {
+    const requestId = ++sessionsRequestRef.current;
     try {
-      const list = await getSessions();
+      const rawList = await getSessions();
+      const list = normalizeSessionList(rawList);
+      if (requestId !== sessionsRequestRef.current) return;
+      setDiffError(null);
       setSessions(list);
       // Logic to auto-select or maintain selection
-      if (currentSessionId && !list.find(s => s.session_id === currentSessionId)) {
-        setCurrentSessionId(list.length > 0 ? list[0].session_id : null);
+      const activeSessionId = currentSessionIdRef.current;
+      const hasActiveSession = Boolean(
+        activeSessionId && list.find((session) => session.session_id === activeSessionId)
+      );
+      if (hasActiveSession) return;
+      if (list.length === 0) {
         setSelectedSnapshot(null);
-      } else if (list.length > 0 && !currentSessionId) {
-        setSelectedSnapshot(null);
-        setCurrentSessionId(list[0].session_id);
+        setCurrentSessionId(null);
+        return;
       }
+      setSelectedSnapshot(null);
+      setCurrentSessionId(list[0].session_id);
     } catch (err) {
-      setDiffError("Disconnected from Neural Core (Backend offline).");
+      if (requestId !== sessionsRequestRef.current) return;
+      setDiffError(extractApiError(err, 'Failed to load review sessions.'));
     }
   };
 
@@ -84,6 +122,7 @@ function ReviewPage() {
   const loadSnapshots = async (sessionId) => {
     const requestId = ++snapshotsRequestRef.current;
     setLoading(true);
+    setDiffError(null);
     try {
       const list = await getSnapshots(sessionId);
       if (requestId !== snapshotsRequestRef.current) return;
@@ -99,6 +138,7 @@ function ReviewPage() {
         setSnapshots([]);
         setSelectedSnapshot(null);
         setDiffData(null);
+        setDiffError(null);
         return;
       }
       setSnapshots([]);
@@ -126,7 +166,7 @@ function ReviewPage() {
       if (requestId === diffRequestRef.current) setDiffData(data);
     } catch (err) {
       if (requestId === diffRequestRef.current) {
-        setDiffError(err.response?.data?.detail || "Failed to retrieve memory fragment.");
+        setDiffError(extractApiError(err, 'Failed to retrieve memory fragment.'));
         setDiffData(null);
       }
     }
@@ -145,10 +185,21 @@ function ReviewPage() {
       if (!rollbackResult?.success) {
         throw new Error(rollbackResult?.message || 'Rollback failed.');
       }
-      // Approving after rollback to clear it from the queue, logically "Processing" the rejection
-      await approveSnapshot(currentSessionId, selectedSnapshot.resource_id); 
+      // Rollback and snapshot cleanup are split calls; surface partial success explicitly.
+      let cleanupError = null;
+      try {
+        await approveSnapshot(currentSessionId, selectedSnapshot.resource_id);
+      } catch (err) {
+        cleanupError = err;
+      }
       await loadSnapshots(currentSessionId);
       await loadSessions();
+      if (cleanupError) {
+        alert(
+          "Rollback succeeded but snapshot cleanup failed: "
+            + extractApiError(cleanupError, cleanupError?.message || 'Approve request failed.')
+        );
+      }
     } catch (err) {
       alert("Rejection failed: " + extractApiError(err, err?.message || 'Rollback request failed.'));
     } finally {
@@ -194,8 +245,9 @@ function ReviewPage() {
     if (!selectedSnapshot || selectedSnapshot.operation_type !== 'delete') return null;
     if (!diffData?.current_data) return null;
     
-    const survivingPaths = diffData.current_data.surviving_paths;
-    if (survivingPaths === undefined) return null;  // Data not loaded yet
+    const survivingPathsRaw = diffData.current_data.surviving_paths;
+    if (survivingPathsRaw === undefined) return null;  // Data not loaded yet
+    const survivingPaths = Array.isArray(survivingPathsRaw) ? survivingPathsRaw : [];
     
     const isFullDeletion = survivingPaths.length === 0;
 
@@ -395,7 +447,7 @@ function ReviewPage() {
                         <span>•</span>
                         <span className="flex items-center gap-1 font-mono opacity-70">
                             <Clock size={10} />
-                            {format(new Date(selectedSnapshot.snapshot_time), 'HH:mm:ss')}
+                            {formatSnapshotTime(selectedSnapshot.snapshot_time)}
                         </span>
                     </div>
                  </div>
@@ -480,6 +532,7 @@ function ReviewPage() {
            <div className="flex-1 flex flex-col items-center justify-center text-rose-500 gap-4">
              <Activity size={48} className="opacity-20" />
              <p className="text-sm font-medium opacity-50">Connection Lost</p>
+             <p className="max-w-md px-6 text-center text-xs text-rose-400/80">{diffError}</p>
            </div>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-stone-700 gap-6 select-none">

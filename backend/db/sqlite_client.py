@@ -15,8 +15,9 @@ import hashlib
 import sqlite3
 import time
 import httpx
+from pathlib import Path as FilePath
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Sequence, Mapping
 from contextlib import asynccontextmanager
 
 from sqlalchemy import (
@@ -37,15 +38,19 @@ from sqlalchemy import (
     and_,
     or_,
     text,
+    event,
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base, relationship
-from dotenv import load_dotenv, find_dotenv
+from dotenv import load_dotenv
 from .migration_runner import apply_pending_migrations
 
-# Load environment variables
-_dotenv_path = find_dotenv(usecwd=True)
-if _dotenv_path:
+# Load environment variables from project root only.
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_backend_dir = os.path.dirname(_current_dir)
+_project_root = os.path.dirname(_backend_dir)
+_dotenv_path = os.path.join(_project_root, ".env")
+if os.path.exists(_dotenv_path):
     load_dotenv(_dotenv_path)
 
 Base = declarative_base()
@@ -273,6 +278,35 @@ class SQLiteClient:
         """
         self.database_url = database_url
         self.engine = create_async_engine(database_url, echo=False)
+        self._runtime_write_wal_enabled = self._env_bool("RUNTIME_WRITE_WAL_ENABLED", False)
+        self._runtime_write_journal_mode_requested = (
+            self._normalize_runtime_write_journal_mode(
+                os.getenv("RUNTIME_WRITE_JOURNAL_MODE", "delete"),
+                wal_enabled=self._runtime_write_wal_enabled,
+            )
+        )
+        self._runtime_write_wal_synchronous_requested = (
+            self._normalize_runtime_write_wal_synchronous(
+                os.getenv("RUNTIME_WRITE_WAL_SYNCHRONOUS", "normal")
+            )
+        )
+        self._runtime_write_busy_timeout_ms = max(
+            1, self._env_int("RUNTIME_WRITE_BUSY_TIMEOUT_MS", 120)
+        )
+        self._runtime_write_wal_autocheckpoint = max(
+            1, self._env_int("RUNTIME_WRITE_WAL_AUTOCHECKPOINT", 1000)
+        )
+        self._runtime_write_journal_mode_effective = "delete"
+        self._runtime_write_wal_synchronous_effective = "default"
+        self._runtime_write_busy_timeout_effective_ms = int(
+            self._runtime_write_busy_timeout_ms
+        )
+        self._runtime_write_wal_autocheckpoint_effective = int(
+            self._runtime_write_wal_autocheckpoint
+        )
+        self._runtime_write_pragma_status = "pending"
+        self._runtime_write_pragma_error = ""
+        self._register_runtime_write_pragma_hook()
         self.async_session = async_sessionmaker(
             self.engine, class_=AsyncSession, expire_on_commit=False
         )
@@ -290,12 +324,23 @@ class SQLiteClient:
             )
             or "hash-v1"
         )
+        self._embedding_provider_chain_enabled = self._env_bool(
+            "EMBEDDING_PROVIDER_CHAIN_ENABLED", False
+        )
+        self._embedding_provider_fail_open = self._env_bool(
+            "EMBEDDING_PROVIDER_FAIL_OPEN", False
+        )
+        self._embedding_provider_fallback = (
+            str(os.getenv("EMBEDDING_PROVIDER_FALLBACK") or "hash").strip().lower()
+            or "hash"
+        )
         self._embedding_api_base = self._resolve_embedding_api_base(
             self._embedding_backend
         )
         self._embedding_api_key = self._resolve_embedding_api_key(
             self._embedding_backend
         )
+        self._embedding_provider_candidates = self._build_embedding_provider_candidates()
         self._embedding_dim = max(16, self._env_int("RETRIEVAL_EMBEDDING_DIM", 64))
         self._remote_http_timeout_sec = max(
             1.0, self._env_float("RETRIEVAL_REMOTE_TIMEOUT_SEC", 8.0)
@@ -338,6 +383,39 @@ class SQLiteClient:
         self._recency_half_life_days = max(
             1.0, self._env_float("RETRIEVAL_RECENCY_HALF_LIFE_DAYS", 30.0)
         )
+        self._mmr_enabled = self._env_bool("RETRIEVAL_MMR_ENABLED", False)
+        self._mmr_lambda = min(1.0, max(0.0, self._env_float("RETRIEVAL_MMR_LAMBDA", 0.65)))
+        self._mmr_candidate_factor = max(
+            1, self._env_int("RETRIEVAL_MMR_CANDIDATE_FACTOR", 3)
+        )
+        self._intent_llm_enabled = self._env_bool("INTENT_LLM_ENABLED", False)
+        self._intent_llm_api_base = self._normalize_chat_api_base(
+            self._first_env(
+                [
+                    "INTENT_LLM_API_BASE",
+                    "LLM_RESPONSES_URL",
+                    "OPENAI_BASE_URL",
+                    "OPENAI_API_BASE",
+                    "ROUTER_API_BASE",
+                ]
+            )
+        )
+        self._intent_llm_api_key = self._first_env(
+            [
+                "INTENT_LLM_API_KEY",
+                "LLM_API_KEY",
+                "OPENAI_API_KEY",
+                "ROUTER_API_KEY",
+            ]
+        )
+        self._intent_llm_model = self._first_env(
+            [
+                "INTENT_LLM_MODEL",
+                "LLM_MODEL_NAME",
+                "OPENAI_MODEL",
+                "ROUTER_CHAT_MODEL",
+            ]
+        )
         self._vitality_max_score = max(
             0.1, self._env_float("VITALITY_MAX_SCORE", 3.0)
         )
@@ -364,6 +442,29 @@ class SQLiteClient:
             "false",
             "0",
         }
+        self._sqlite_vec_enabled = self._env_bool("RETRIEVAL_SQLITE_VEC_ENABLED", False)
+        self._sqlite_vec_extension_path = self._first_env(
+            ["RETRIEVAL_SQLITE_VEC_EXTENSION_PATH"]
+        )
+        self._vector_engine_requested = self._normalize_vector_engine(
+            os.getenv("RETRIEVAL_VECTOR_ENGINE", "legacy")
+        )
+        self._sqlite_vec_read_ratio = min(
+            100, max(0, self._env_int("RETRIEVAL_SQLITE_VEC_READ_RATIO", 0))
+        )
+        self._sqlite_vec_capability: Dict[str, Any] = {
+            "status": "disabled",
+            "sqlite_vec_readiness": "hold",
+            "diag_code": "sqlite_vec_disabled",
+            "extension_path_input": self._sqlite_vec_extension_path,
+            "extension_path": "",
+            "extension_loaded": False,
+            "extension_path_exists": False,
+        }
+        self._sqlite_vec_knn_table = "memory_chunks_vec0"
+        self._sqlite_vec_knn_ready = False
+        self._sqlite_vec_knn_dim = max(16, int(self._embedding_dim))
+        self._vector_engine_effective = "legacy"
 
     @staticmethod
     def _env_int(name: str, default: int) -> int:
@@ -402,6 +503,222 @@ class SQLiteClient:
             if candidate:
                 return candidate
         return default
+
+    @staticmethod
+    def _normalize_runtime_write_journal_mode(
+        value: Optional[str], *, wal_enabled: bool
+    ) -> str:
+        mode = str(value or "delete").strip().lower() or "delete"
+        if mode == "wal" and wal_enabled:
+            return "wal"
+        return "delete"
+
+    @staticmethod
+    def _normalize_runtime_write_wal_synchronous(value: Optional[str]) -> str:
+        mode = str(value or "normal").strip().lower() or "normal"
+        numeric_map = {
+            "0": "off",
+            "1": "normal",
+            "2": "full",
+            "3": "extra",
+        }
+        mode = numeric_map.get(mode, mode)
+        if mode in {"off", "normal", "full", "extra"}:
+            return mode
+        return "normal"
+
+    def _register_runtime_write_pragma_hook(self) -> None:
+        @event.listens_for(self.engine.sync_engine, "connect")
+        def _on_connect(dbapi_connection, _connection_record) -> None:
+            self._apply_runtime_write_pragmas(dbapi_connection)
+            self._load_sqlite_vec_extension_on_connect(dbapi_connection)
+
+    def _apply_runtime_write_pragmas(self, dbapi_connection) -> None:
+        status = "disabled"
+        error = ""
+        journal_mode_effective = "delete"
+        wal_synchronous_effective = "default"
+        busy_timeout_effective = int(self._runtime_write_busy_timeout_ms)
+        wal_autocheckpoint_effective = int(self._runtime_write_wal_autocheckpoint)
+
+        cursor = None
+        try:
+            cursor = dbapi_connection.cursor()
+            cursor.execute(f"PRAGMA busy_timeout={int(self._runtime_write_busy_timeout_ms)}")
+            cursor.execute("PRAGMA busy_timeout")
+            busy_timeout_row = cursor.fetchone()
+            if busy_timeout_row and busy_timeout_row[0] is not None:
+                busy_timeout_effective = max(1, int(busy_timeout_row[0]))
+
+            requested_mode = (
+                "wal"
+                if (
+                    self._runtime_write_wal_enabled
+                    and self._runtime_write_journal_mode_requested == "wal"
+                )
+                else "delete"
+            )
+            cursor.execute(f"PRAGMA journal_mode={requested_mode.upper()}")
+            journal_mode_row = cursor.fetchone()
+            if journal_mode_row and journal_mode_row[0] is not None:
+                journal_mode_effective = (
+                    str(journal_mode_row[0]).strip().lower() or "delete"
+                )
+            else:
+                journal_mode_effective = requested_mode
+
+            if requested_mode == "wal":
+                if journal_mode_effective != "wal":
+                    status = "fallback_delete"
+                    error = f"journal_mode_unavailable:{journal_mode_effective}"
+                    cursor.execute("PRAGMA journal_mode=DELETE")
+                    delete_mode_row = cursor.fetchone()
+                    if delete_mode_row and delete_mode_row[0] is not None:
+                        journal_mode_effective = (
+                            str(delete_mode_row[0]).strip().lower() or "delete"
+                        )
+                    else:
+                        journal_mode_effective = "delete"
+                else:
+                    status = "enabled"
+                    sync_target = self._runtime_write_wal_synchronous_requested
+                    cursor.execute(f"PRAGMA synchronous={sync_target.upper()}")
+                    cursor.execute("PRAGMA synchronous")
+                    sync_row = cursor.fetchone()
+                    if sync_row and sync_row[0] is not None:
+                        wal_synchronous_effective = (
+                            self._normalize_runtime_write_wal_synchronous(
+                                str(sync_row[0])
+                            )
+                        )
+                    else:
+                        wal_synchronous_effective = sync_target
+                    cursor.execute(
+                        "PRAGMA wal_autocheckpoint={}".format(
+                            int(self._runtime_write_wal_autocheckpoint)
+                        )
+                    )
+                    cursor.execute("PRAGMA wal_autocheckpoint")
+                    wal_checkpoint_row = cursor.fetchone()
+                    if wal_checkpoint_row and wal_checkpoint_row[0] is not None:
+                        wal_autocheckpoint_effective = max(
+                            1, int(wal_checkpoint_row[0])
+                        )
+            else:
+                status = "disabled"
+        except Exception as exc:
+            status = "fallback_delete"
+            error = f"pragma_apply_failed:{type(exc).__name__}"
+            try:
+                if cursor is None:
+                    cursor = dbapi_connection.cursor()
+                cursor.execute("PRAGMA journal_mode=DELETE")
+                delete_mode_row = cursor.fetchone()
+                if delete_mode_row and delete_mode_row[0] is not None:
+                    journal_mode_effective = (
+                        str(delete_mode_row[0]).strip().lower() or "delete"
+                    )
+                else:
+                    journal_mode_effective = "delete"
+            except Exception as rollback_exc:
+                status = "error"
+                suffix = f"journal_mode_reset_failed:{type(rollback_exc).__name__}"
+                error = f"{error};{suffix}" if error else suffix
+                journal_mode_effective = "unknown"
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+            self._runtime_write_journal_mode_effective = (
+                "wal" if journal_mode_effective == "wal" else "delete"
+            )
+            if self._runtime_write_journal_mode_effective == "wal":
+                self._runtime_write_wal_synchronous_effective = (
+                    self._normalize_runtime_write_wal_synchronous(
+                        wal_synchronous_effective
+                    )
+                )
+            else:
+                self._runtime_write_wal_synchronous_effective = "default"
+            self._runtime_write_busy_timeout_effective_ms = int(
+                max(1, busy_timeout_effective)
+            )
+            self._runtime_write_wal_autocheckpoint_effective = int(
+                max(1, wal_autocheckpoint_effective)
+            )
+            self._runtime_write_pragma_status = status
+            self._runtime_write_pragma_error = error
+
+    def _load_sqlite_vec_extension_on_connect(self, dbapi_connection) -> None:
+        """
+        Best-effort sqlite-vec extension loading for each SQLite connection.
+
+        This hook is intentionally fail-closed/safe: if loading is unavailable
+        or fails, retrieval will naturally fall back to legacy scoring.
+        """
+        if not self._sqlite_vec_enabled:
+            return
+
+        extension_input = str(self._sqlite_vec_extension_path or "").strip()
+        if not extension_input:
+            return
+
+        resolved_extension = self._resolve_sqlite_extension_file(extension_input)
+        if resolved_extension is None:
+            return
+        if not resolved_extension.is_file():
+            return
+        extension_path = str(resolved_extension)
+
+        enable_sync = getattr(dbapi_connection, "enable_load_extension", None)
+        load_sync = getattr(dbapi_connection, "load_extension", None)
+        if callable(enable_sync) and callable(load_sync):
+            try:
+                enable_sync(True)
+            except Exception:
+                return
+            try:
+                load_sync(extension_path)
+            except Exception:
+                # Keep safe degradation path to legacy vector scoring.
+                pass
+            finally:
+                try:
+                    enable_sync(False)
+                except Exception:
+                    pass
+            return
+
+        awaiter = getattr(dbapi_connection, "await_", None)
+        driver_connection = getattr(dbapi_connection, "driver_connection", None)
+        enable_async = (
+            getattr(driver_connection, "enable_load_extension", None)
+            if driver_connection is not None
+            else None
+        )
+        load_async = (
+            getattr(driver_connection, "load_extension", None)
+            if driver_connection is not None
+            else None
+        )
+        if not (callable(awaiter) and callable(enable_async) and callable(load_async)):
+            return
+
+        try:
+            awaiter(enable_async(True))
+        except Exception:
+            return
+        try:
+            awaiter(load_async(extension_path))
+        except Exception:
+            pass
+        finally:
+            try:
+                awaiter(enable_async(False))
+            except Exception:
+                pass
 
     def _resolve_embedding_api_base(self, backend: str) -> str:
         backend_value = (backend or "").strip().lower()
@@ -452,6 +769,81 @@ class SQLiteClient:
             ["RETRIEVAL_EMBEDDING_API_KEY", "RETRIEVAL_EMBEDDING_KEY", "ROUTER_API_KEY", "OPENAI_API_KEY"]
         )
 
+    def _resolve_embedding_model(self, backend: str) -> str:
+        backend_value = (backend or "").strip().lower()
+        if backend_value == "router":
+            return (
+                self._first_env(
+                    [
+                        "ROUTER_EMBEDDING_MODEL",
+                        "RETRIEVAL_EMBEDDING_MODEL",
+                        "OPENAI_EMBEDDING_MODEL",
+                    ],
+                    default=self._embedding_model,
+                )
+                or self._embedding_model
+            )
+        if backend_value == "openai":
+            return (
+                self._first_env(
+                    [
+                        "OPENAI_EMBEDDING_MODEL",
+                        "RETRIEVAL_EMBEDDING_MODEL",
+                        "ROUTER_EMBEDDING_MODEL",
+                    ],
+                    default=self._embedding_model,
+                )
+                or self._embedding_model
+            )
+        return (
+            self._first_env(
+                [
+                    "RETRIEVAL_EMBEDDING_MODEL",
+                    "OPENAI_EMBEDDING_MODEL",
+                    "ROUTER_EMBEDDING_MODEL",
+                ],
+                default=self._embedding_model,
+            )
+            or self._embedding_model
+        )
+
+    def _resolve_chain_fallback_backend(self) -> str:
+        value = (self._embedding_provider_fallback or "hash").strip().lower()
+        if value in {
+            "api",
+            "router",
+            "openai",
+            "hash",
+            "none",
+            "off",
+            "disabled",
+            "false",
+            "0",
+        }:
+            return value
+        return "hash"
+
+    def _build_embedding_provider_candidates(self) -> List[str]:
+        primary_backend = (self._embedding_backend or "hash").strip().lower() or "hash"
+        candidates: List[str] = [primary_backend]
+
+        if not self._embedding_provider_chain_enabled:
+            return candidates
+
+        if self._embedding_provider_fail_open:
+            for backend in ("api", "router", "openai"):
+                if backend not in candidates:
+                    candidates.append(backend)
+            return candidates
+
+        fallback_backend = self._resolve_chain_fallback_backend()
+        if (
+            fallback_backend in {"api", "router", "openai"}
+            and fallback_backend not in candidates
+        ):
+            candidates.append(fallback_backend)
+        return candidates
+
     async def init_db(self):
         """Create tables if they don't exist, and run migrations for schema changes."""
         async with self.engine.begin() as conn:
@@ -463,6 +855,13 @@ class SQLiteClient:
             capabilities = await conn.run_sync(self._setup_index_infra)
             self._fts_available = capabilities.get("fts_available", False)
             self._vector_available = capabilities.get("vector_available", True)
+            self._sqlite_vec_knn_ready = bool(
+                capabilities.get("sqlite_vec_knn_ready", False)
+            )
+            self._sqlite_vec_capability = self._probe_sqlite_vec_capability()
+            self._refresh_vector_engine_state()
+            await conn.run_sync(self._sync_set_vector_engine_meta)
+            await conn.run_sync(self._sync_set_write_lane_wal_meta)
         await self._bootstrap_indexes()
 
     @staticmethod
@@ -515,6 +914,8 @@ class SQLiteClient:
             # SQLite builds without FTS5 support should continue with LIKE fallback.
             fts_available = False
 
+        sqlite_vec_knn_ready = self._setup_sqlite_vec_knn_infra(connection)
+
         now = _utc_now_naive().isoformat()
         self._sync_set_index_meta(connection, "fts_available", "1" if fts_available else "0", now)
         self._sync_set_index_meta(
@@ -522,7 +923,208 @@ class SQLiteClient:
         )
         self._sync_set_index_meta(connection, "embedding_backend", self._embedding_backend, now)
         self._sync_set_index_meta(connection, "embedding_model", self._embedding_model, now)
-        return {"fts_available": fts_available, "vector_available": self._vector_available}
+        self._sync_set_index_meta(
+            connection,
+            "embedding_provider_chain_enabled",
+            "1" if self._embedding_provider_chain_enabled else "0",
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "embedding_provider_fail_open",
+            "1" if self._embedding_provider_fail_open else "0",
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "embedding_provider_fallback",
+            self._resolve_chain_fallback_backend(),
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "sqlite_vec_knn_ready",
+            "1" if sqlite_vec_knn_ready else "0",
+            now,
+        )
+        return {
+            "fts_available": fts_available,
+            "vector_available": self._vector_available,
+            "sqlite_vec_knn_ready": sqlite_vec_knn_ready,
+        }
+
+    def _setup_sqlite_vec_knn_infra(self, connection) -> bool:
+        """
+        Best-effort setup for vec0 KNN virtual table.
+
+        Failures are intentionally non-fatal and keep legacy fallback path intact.
+        """
+        self._sqlite_vec_knn_ready = False
+        if not self._sqlite_vec_enabled:
+            return False
+
+        vector_dim = max(16, int(self._embedding_dim))
+        try:
+            dim_rows = connection.execute(
+                text(
+                    "SELECT DISTINCT dim "
+                    "FROM memory_chunks_vec "
+                    "WHERE dim IS NOT NULL AND dim > 0 "
+                    "LIMIT 2"
+                )
+            ).fetchall()
+            if len(dim_rows) == 1 and dim_rows[0][0] is not None:
+                vector_dim = max(16, int(dim_rows[0][0]))
+        except Exception:
+            # Keep configured dim when probing existing vectors fails.
+            vector_dim = max(16, int(self._embedding_dim))
+        self._sqlite_vec_knn_dim = vector_dim
+        table_name = self._sqlite_vec_knn_table
+        try:
+            connection.execute(
+                text(
+                    f"CREATE VIRTUAL TABLE IF NOT EXISTS {table_name} "
+                    f"USING vec0(vector float[{vector_dim}] distance_metric=cosine)"
+                )
+            )
+            connection.execute(
+                text(
+                    f"DELETE FROM {table_name}"
+                )
+            )
+            connection.execute(
+                text(
+                    f"INSERT INTO {table_name}(rowid, vector) "
+                    "SELECT chunk_id, vec_f32(vector) "
+                    "FROM memory_chunks_vec "
+                    "WHERE dim = :vector_dim"
+                ),
+                {"vector_dim": vector_dim},
+            )
+            self._sqlite_vec_knn_ready = True
+            return True
+        except Exception:
+            self._sqlite_vec_knn_ready = False
+            return False
+
+    def _sync_set_vector_engine_meta(self, connection) -> None:
+        now = _utc_now_naive().isoformat()
+        sqlite_vec_status = str(self._sqlite_vec_capability.get("status", "disabled"))
+        sqlite_vec_diag_code = str(self._sqlite_vec_capability.get("diag_code", ""))
+        sqlite_vec_readiness = str(
+            self._sqlite_vec_capability.get("sqlite_vec_readiness", "hold")
+        )
+        self._sync_set_index_meta(
+            connection,
+            "sqlite_vec_enabled",
+            "1" if self._sqlite_vec_enabled else "0",
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "sqlite_vec_read_ratio",
+            str(int(self._sqlite_vec_read_ratio)),
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "sqlite_vec_status",
+            sqlite_vec_status,
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "sqlite_vec_readiness",
+            sqlite_vec_readiness,
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "sqlite_vec_diag_code",
+            sqlite_vec_diag_code,
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "vector_engine_requested",
+            self._vector_engine_requested,
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "vector_engine_effective",
+            self._vector_engine_effective,
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "sqlite_vec_knn_ready",
+            "1" if self._sqlite_vec_knn_ready else "0",
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "sqlite_vec_knn_dim",
+            str(int(self._sqlite_vec_knn_dim)),
+            now,
+        )
+
+    def _sync_set_write_lane_wal_meta(self, connection) -> None:
+        now = _utc_now_naive().isoformat()
+        self._sync_set_index_meta(
+            connection,
+            "runtime_write_wal_enabled",
+            "1" if self._runtime_write_wal_enabled else "0",
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "runtime_write_journal_mode_requested",
+            self._runtime_write_journal_mode_requested,
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "runtime_write_journal_mode_effective",
+            self._runtime_write_journal_mode_effective,
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "runtime_write_wal_synchronous_requested",
+            self._runtime_write_wal_synchronous_requested,
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "runtime_write_wal_synchronous_effective",
+            self._runtime_write_wal_synchronous_effective,
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "runtime_write_busy_timeout_ms",
+            str(int(self._runtime_write_busy_timeout_effective_ms)),
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "runtime_write_wal_autocheckpoint",
+            str(int(self._runtime_write_wal_autocheckpoint_effective)),
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "runtime_write_pragma_status",
+            self._runtime_write_pragma_status,
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "runtime_write_pragma_error",
+            self._runtime_write_pragma_error,
+            now,
+        )
 
     async def _bootstrap_indexes(self) -> None:
         """
@@ -894,6 +1496,140 @@ class SQLiteClient:
         return normalized
 
     @staticmethod
+    def _normalize_vector_engine(value: Optional[str]) -> str:
+        engine = str(value or "legacy").strip().lower() or "legacy"
+        if engine in {"legacy", "vec", "dual"}:
+            return engine
+        return "legacy"
+
+    @staticmethod
+    def _resolve_sqlite_extension_file(path_input: str) -> Optional[FilePath]:
+        raw_path = str(path_input or "").strip()
+        if not raw_path:
+            return None
+        try:
+            base = FilePath(raw_path).expanduser().resolve(strict=False)
+        except OSError:
+            return None
+        candidates = [base]
+        if base.suffix == "":
+            candidates.extend(
+                FilePath(str(base) + suffix) for suffix in (".dylib", ".so", ".dll")
+            )
+        for candidate in candidates:
+            try:
+                if candidate.is_file():
+                    return candidate
+            except OSError:
+                continue
+        for candidate in candidates:
+            try:
+                if candidate.exists():
+                    return candidate
+            except OSError:
+                continue
+        return None
+
+    def _probe_sqlite_vec_capability(self) -> Dict[str, Any]:
+        capability: Dict[str, Any] = {
+            "status": "disabled",
+            "sqlite_vec_readiness": "hold",
+            "diag_code": "",
+            "extension_path_input": self._sqlite_vec_extension_path,
+            "extension_path": "",
+            "extension_loaded": False,
+            "extension_path_exists": False,
+        }
+
+        if not self._sqlite_vec_enabled:
+            capability["diag_code"] = "sqlite_vec_disabled"
+            return capability
+
+        extension_input = str(self._sqlite_vec_extension_path or "").strip()
+        if not extension_input:
+            capability["status"] = "skipped_no_extension_path"
+            capability["diag_code"] = "path_not_provided"
+            return capability
+
+        resolved_extension = self._resolve_sqlite_extension_file(extension_input)
+        if resolved_extension is None:
+            capability["status"] = "invalid_extension_path"
+            capability["diag_code"] = "path_not_found"
+            return capability
+
+        capability["extension_path"] = str(resolved_extension)
+        capability["extension_path_exists"] = True
+        if not resolved_extension.is_file():
+            capability["status"] = "invalid_extension_path"
+            capability["diag_code"] = "path_not_file"
+            return capability
+
+        connection: Optional[sqlite3.Connection] = None
+        try:
+            connection = sqlite3.connect(":memory:")
+            try:
+                connection.enable_load_extension(True)
+            except (AttributeError, sqlite3.Error):
+                capability["status"] = "extension_loading_unavailable"
+                capability["diag_code"] = "enable_load_extension_failed"
+                return capability
+
+            try:
+                connection.load_extension(str(resolved_extension))
+            except sqlite3.Error:
+                capability["status"] = "extension_load_failed"
+                capability["diag_code"] = "load_extension_failed"
+                return capability
+            finally:
+                try:
+                    connection.enable_load_extension(False)
+                except sqlite3.Error:
+                    pass
+
+            capability["status"] = "ok"
+            capability["sqlite_vec_readiness"] = "ready"
+            capability["diag_code"] = ""
+            capability["extension_loaded"] = True
+            return capability
+        except sqlite3.Error:
+            capability["status"] = "sqlite_runtime_error"
+            capability["diag_code"] = "sqlite_runtime_error"
+            return capability
+        finally:
+            if connection is not None:
+                connection.close()
+
+    def _refresh_vector_engine_state(self) -> None:
+        requested = self._normalize_vector_engine(self._vector_engine_requested)
+        self._vector_engine_requested = requested
+        if requested == "legacy":
+            self._vector_engine_effective = "legacy"
+            return
+
+        capability_ready = (
+            str(self._sqlite_vec_capability.get("sqlite_vec_readiness", "hold")) == "ready"
+        )
+        if not self._sqlite_vec_enabled or not capability_ready:
+            self._vector_engine_effective = "legacy"
+            return
+        self._vector_engine_effective = requested
+
+    def _resolve_vector_engine_for_query(self, query: str) -> str:
+        effective = self._normalize_vector_engine(self._vector_engine_effective)
+        if effective in {"legacy", "vec"}:
+            return effective
+
+        if self._sqlite_vec_read_ratio <= 0:
+            return "legacy"
+        if self._sqlite_vec_read_ratio >= 100:
+            return "vec"
+
+        normalized_query = (query or "").strip().lower()
+        digest = hashlib.sha256(normalized_query.encode("utf-8")).digest()
+        bucket = int.from_bytes(digest[:2], byteorder="big") % 100
+        return "vec" if bucket < self._sqlite_vec_read_ratio else "legacy"
+
+    @staticmethod
     def _append_degrade_reason(
         degrade_reasons: Optional[List[str]], reason: str
     ) -> None:
@@ -1100,6 +1836,150 @@ class SQLiteClient:
         }
 
     @staticmethod
+    def _intent_strategy_template(intent: str) -> str:
+        mapping = {
+            "factual": "factual_high_precision",
+            "exploratory": "exploratory_high_recall",
+            "temporal": "temporal_time_filtered",
+            "causal": "causal_wide_pool",
+            "unknown": "default",
+        }
+        return mapping.get(intent, "default")
+
+    async def classify_intent_with_llm(
+        self, query: str, rewritten_query: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Experimental intent classifier with LLM routing and safe fallback.
+
+        Returns heuristic classification when LLM is disabled or fails.
+        """
+        fallback = self.classify_intent(query, rewritten_query)
+        if not self._intent_llm_enabled:
+            return fallback
+
+        degrade_reasons: List[str] = []
+        if not self._intent_llm_api_base or not self._intent_llm_model:
+            degrade_reasons.append("intent_llm_config_missing")
+            return {
+                **fallback,
+                "intent_llm_enabled": True,
+                "intent_llm_applied": False,
+                "degraded": True,
+                "degrade_reason": degrade_reasons[0],
+                "degrade_reasons": degrade_reasons,
+            }
+
+        system_prompt = (
+            "You classify retrieval intent for a memory search system. "
+            "Return strict JSON only with keys: intent, confidence, signals. "
+            "intent must be one of: factual, exploratory, temporal, causal, unknown."
+        )
+        user_prompt = (
+            "Original query:\n"
+            f"{query}\n\n"
+            "Rewritten query:\n"
+            f"{rewritten_query or query}\n\n"
+            "Decide intent for retrieval strategy."
+        )
+        payload = {
+            "model": self._intent_llm_model,
+            "temperature": 0,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        response = await self._post_json(
+            self._intent_llm_api_base,
+            "/chat/completions",
+            payload,
+            self._intent_llm_api_key,
+        )
+        if response is None:
+            degrade_reasons.append("intent_llm_request_failed")
+            return {
+                **fallback,
+                "intent_llm_enabled": True,
+                "intent_llm_applied": False,
+                "degraded": True,
+                "degrade_reason": degrade_reasons[0],
+                "degrade_reasons": degrade_reasons,
+            }
+
+        message_text = self._extract_chat_message_text(response)
+        if not message_text:
+            degrade_reasons.append("intent_llm_response_empty")
+            return {
+                **fallback,
+                "intent_llm_enabled": True,
+                "intent_llm_applied": False,
+                "degraded": True,
+                "degrade_reason": degrade_reasons[0],
+                "degrade_reasons": degrade_reasons,
+            }
+
+        parsed: Optional[Dict[str, Any]] = None
+        try:
+            loaded = json.loads(message_text)
+            if isinstance(loaded, dict):
+                parsed = loaded
+        except (TypeError, ValueError):
+            parsed = None
+
+        if parsed is None:
+            degrade_reasons.append("intent_llm_response_invalid")
+            return {
+                **fallback,
+                "intent_llm_enabled": True,
+                "intent_llm_applied": False,
+                "degraded": True,
+                "degrade_reason": degrade_reasons[0],
+                "degrade_reasons": degrade_reasons,
+            }
+
+        intent_value = str(parsed.get("intent") or "").strip().lower()
+        if intent_value not in {"factual", "exploratory", "temporal", "causal", "unknown"}:
+            degrade_reasons.append("intent_llm_intent_invalid")
+            return {
+                **fallback,
+                "intent_llm_enabled": True,
+                "intent_llm_applied": False,
+                "degraded": True,
+                "degrade_reason": degrade_reasons[0],
+                "degrade_reasons": degrade_reasons,
+            }
+
+        confidence_raw = parsed.get("confidence")
+        try:
+            confidence = float(confidence_raw)
+        except (TypeError, ValueError):
+            confidence = 0.62
+        confidence = round(max(0.0, min(1.0, confidence)), 2)
+
+        signals_raw = parsed.get("signals")
+        if isinstance(signals_raw, list):
+            signals = [
+                str(item).strip()
+                for item in signals_raw
+                if isinstance(item, str) and str(item).strip()
+            ][:6]
+        else:
+            signals = []
+        if not signals:
+            signals = [f"intent_llm:{intent_value}"]
+
+        return {
+            "intent": intent_value,
+            "strategy_template": self._intent_strategy_template(intent_value),
+            "method": "intent_llm",
+            "confidence": confidence,
+            "signals": signals,
+            "intent_llm_enabled": True,
+            "intent_llm_applied": True,
+        }
+
+    @staticmethod
     def _normalize_unit_score(value: Any) -> Optional[float]:
         try:
             numeric = float(value)
@@ -1255,6 +2135,101 @@ class SQLiteClient:
             self._append_degrade_reason(degrade_reasons, "embedding_response_invalid")
         return embedding
 
+    async def _fetch_remote_embedding_for_backend(
+        self,
+        *,
+        backend: str,
+        content: str,
+        degrade_reasons: Optional[List[str]] = None,
+    ) -> Optional[List[float]]:
+        backend_value = (backend or "").strip().lower()
+        if backend_value not in {"router", "api", "openai"}:
+            return None
+
+        api_base = self._resolve_embedding_api_base(backend_value)
+        model = self._resolve_embedding_model(backend_value)
+        api_key = self._resolve_embedding_api_key(backend_value)
+        if not api_base or not model:
+            self._append_degrade_reason(degrade_reasons, "embedding_config_missing")
+            self._append_degrade_reason(
+                degrade_reasons, f"embedding_config_missing:{backend_value}"
+            )
+            return None
+
+        payload = {"model": model, "input": content}
+        response = await self._post_json(
+            api_base,
+            "/embeddings",
+            payload,
+            api_key,
+        )
+        if response is None:
+            self._append_degrade_reason(degrade_reasons, "embedding_request_failed")
+            self._append_degrade_reason(
+                degrade_reasons, f"embedding_request_failed:{backend_value}"
+            )
+            return None
+
+        embedding = self._extract_embedding_from_response(response)
+        if embedding is None:
+            self._append_degrade_reason(degrade_reasons, "embedding_response_invalid")
+            self._append_degrade_reason(
+                degrade_reasons, f"embedding_response_invalid:{backend_value}"
+            )
+        return embedding
+
+    async def _get_embedding_via_provider_chain(
+        self,
+        *,
+        normalized: str,
+        degrade_reasons: Optional[List[str]] = None,
+    ) -> List[float]:
+        attempted_backends: set[str] = set()
+        for backend in self._embedding_provider_candidates:
+            backend_value = (backend or "").strip().lower()
+            if not backend_value:
+                continue
+            attempted_backends.add(backend_value)
+
+            if backend_value in {"hash", "none", "off", "disabled", "false", "0"}:
+                continue
+
+            embedding = await self._fetch_remote_embedding_for_backend(
+                backend=backend_value,
+                content=normalized,
+                degrade_reasons=degrade_reasons,
+            )
+            if embedding is not None:
+                return embedding
+            self._append_degrade_reason(
+                degrade_reasons, f"embedding_provider_failed:{backend_value}"
+            )
+            if not self._embedding_provider_fail_open:
+                break
+
+        fallback_backend = self._resolve_chain_fallback_backend()
+        if (
+            fallback_backend in {"api", "router", "openai"}
+            and fallback_backend not in attempted_backends
+        ):
+            embedding = await self._fetch_remote_embedding_for_backend(
+                backend=fallback_backend,
+                content=normalized,
+                degrade_reasons=degrade_reasons,
+            )
+            if embedding is not None:
+                return embedding
+            self._append_degrade_reason(
+                degrade_reasons, f"embedding_provider_failed:{fallback_backend}"
+            )
+
+        if fallback_backend in {"hash", "", "default"} or self._embedding_provider_fail_open:
+            self._append_degrade_reason(degrade_reasons, "embedding_fallback_hash")
+            return self._hash_embedding(normalized, self._embedding_dim)
+
+        self._append_degrade_reason(degrade_reasons, "embedding_provider_chain_blocked")
+        raise RuntimeError("embedding_provider_chain_blocked")
+
     async def _get_rerank_scores(
         self,
         query: str,
@@ -1363,24 +2338,30 @@ class SQLiteClient:
                 pass
 
         embedding: Optional[List[float]] = None
-        backend_value = (self._embedding_backend or "hash").strip().lower()
-
-        if backend_value in {"router", "api", "openai"}:
-            embedding = await self._fetch_remote_embedding(
-                normalized, degrade_reasons=degrade_reasons
+        if self._embedding_provider_chain_enabled:
+            embedding = await self._get_embedding_via_provider_chain(
+                normalized=normalized,
+                degrade_reasons=degrade_reasons,
             )
-            if embedding is None:
-                self._append_degrade_reason(degrade_reasons, "embedding_fallback_hash")
-        elif backend_value not in {
-            "hash",
-            "local",
-            "none",
-            "off",
-            "disabled",
-            "false",
-            "0",
-        }:
-            self._append_degrade_reason(degrade_reasons, "embedding_backend_unsupported")
+        else:
+            backend_value = (self._embedding_backend or "hash").strip().lower()
+
+            if backend_value in {"router", "api", "openai"}:
+                embedding = await self._fetch_remote_embedding(
+                    normalized, degrade_reasons=degrade_reasons
+                )
+                if embedding is None:
+                    self._append_degrade_reason(degrade_reasons, "embedding_fallback_hash")
+            elif backend_value not in {
+                "hash",
+                "local",
+                "none",
+                "off",
+                "disabled",
+                "false",
+                "0",
+            }:
+                self._append_degrade_reason(degrade_reasons, "embedding_backend_unsupported")
 
         if embedding is None:
             embedding = self._hash_embedding(normalized, self._embedding_dim)
@@ -1419,9 +2400,64 @@ class SQLiteClient:
         await session.execute(
             delete(MemoryChunkVec).where(MemoryChunkVec.memory_id == memory_id)
         )
+        await self._delete_vec_knn_rows(session, memory_id=memory_id)
         await session.execute(
             delete(MemoryChunk).where(MemoryChunk.memory_id == memory_id)
         )
+
+    async def _delete_vec_knn_rows(
+        self, session: AsyncSession, *, memory_id: int
+    ) -> None:
+        try:
+            await session.execute(
+                text(
+                    f"DELETE FROM {self._sqlite_vec_knn_table} "
+                    "WHERE rowid IN ("
+                    "  SELECT id FROM memory_chunks WHERE memory_id = :memory_id"
+                    ")"
+                ),
+                {"memory_id": int(memory_id)},
+            )
+        except Exception:
+            # vec0 table is optional; keep clear-index path robust.
+            self._sqlite_vec_knn_ready = False
+
+    async def _upsert_vec_knn_rows(
+        self, session: AsyncSession, rows: Sequence[Mapping[str, Any]]
+    ) -> None:
+        if not rows:
+            return
+        try:
+            await session.execute(
+                text(
+                    f"DELETE FROM {self._sqlite_vec_knn_table} "
+                    "WHERE rowid = :chunk_id"
+                ),
+                [
+                    {"chunk_id": int(row.get("chunk_id") or 0)}
+                    for row in rows
+                    if int(row.get("chunk_id") or 0) > 0
+                ],
+            )
+            await session.execute(
+                text(
+                    f"INSERT INTO {self._sqlite_vec_knn_table}("
+                    "rowid, vector"
+                    ") VALUES (:chunk_id, vec_f32(:vector))"
+                ),
+                [
+                    {
+                        "chunk_id": int(row.get("chunk_id") or 0),
+                        "vector": str(row.get("vector") or "[]"),
+                    }
+                    for row in rows
+                    if int(row.get("chunk_id") or 0) > 0
+                ],
+            )
+            self._sqlite_vec_knn_ready = True
+        except Exception:
+            # vec0 table is optional; writes continue through legacy table.
+            self._sqlite_vec_knn_ready = False
 
     async def _reindex_memory(self, session: AsyncSession, memory_id: int) -> int:
         await self._clear_memory_index(session, memory_id)
@@ -1457,17 +2493,25 @@ class SQLiteClient:
         await session.flush()
 
         vec_rows: List[MemoryChunkVec] = []
+        vec_knn_rows: List[Dict[str, Any]] = []
         for chunk in chunk_rows:
             if self._vector_available:
                 embedding = await self._get_embedding(session, chunk.chunk_text)
+                vector_payload = json.dumps(embedding, separators=(",", ":"))
                 vec_rows.append(
                     MemoryChunkVec(
                         chunk_id=chunk.id,
                         memory_id=memory_id,
-                        vector=json.dumps(embedding, separators=(",", ":")),
+                        vector=vector_payload,
                         model=self._embedding_model,
                         dim=len(embedding),
                     )
+                )
+                vec_knn_rows.append(
+                    {
+                        "chunk_id": int(chunk.id),
+                        "vector": vector_payload,
+                    }
                 )
             if self._fts_available:
                 try:
@@ -1490,6 +2534,7 @@ class SQLiteClient:
 
         if vec_rows:
             session.add_all(vec_rows)
+            await self._upsert_vec_knn_rows(session, vec_knn_rows)
         await self._set_index_meta(session, "last_indexed_memory_id", str(memory_id))
         await self._set_index_meta(session, "last_indexed_at", _utc_now_naive().isoformat())
         return len(chunk_rows)
@@ -1502,6 +2547,140 @@ class SQLiteClient:
         if length == 0:
             return 0.0
         return float(sum(v1[i] * v2[i] for i in range(length)))
+
+    async def _fetch_semantic_rows_python_scoring(
+        self,
+        session: AsyncSession,
+        *,
+        where_clause: str,
+        where_params: Dict[str, Any],
+        query_embedding: List[float],
+        semantic_pool_limit: int,
+        candidate_limit: int,
+    ) -> List[Dict[str, Any]]:
+        semantic_result = await session.execute(
+            text(
+                "SELECT "
+                "mc.id AS chunk_id, mc.memory_id AS memory_id, "
+                "mc.chunk_text AS chunk_text, mc.char_start AS char_start, mc.char_end AS char_end, "
+                "mcv.vector AS vector_json, "
+                "p.domain AS domain, p.path AS path, p.priority AS priority, p.disclosure AS disclosure, "
+                "m.created_at AS created_at "
+                "FROM memory_chunks_vec mcv "
+                "JOIN memory_chunks mc ON mc.id = mcv.chunk_id "
+                "JOIN memories m ON m.id = mc.memory_id "
+                "JOIN paths p ON p.memory_id = mc.memory_id "
+                f"WHERE {where_clause} "
+                "LIMIT :semantic_pool_limit"
+            ),
+            {**where_params, "semantic_pool_limit": semantic_pool_limit},
+        )
+
+        semantic_scored: List[Tuple[float, Dict[str, Any]]] = []
+        for row in semantic_result.mappings().all():
+            vector_payload = row.get("vector_json")
+            if not vector_payload:
+                continue
+            try:
+                chunk_vec = [float(v) for v in json.loads(vector_payload)]
+            except (TypeError, ValueError):
+                continue
+            similarity = self._cosine_similarity(query_embedding, chunk_vec)
+            semantic_scored.append((similarity, dict(row)))
+
+        semantic_scored.sort(key=lambda item: item[0], reverse=True)
+        semantic_rows: List[Dict[str, Any]] = []
+        for similarity, row in semantic_scored[:candidate_limit]:
+            row["vector_similarity"] = similarity
+            semantic_rows.append(row)
+        return semantic_rows
+
+    async def _fetch_semantic_rows_vec_native_topk(
+        self,
+        session: AsyncSession,
+        *,
+        where_clause: str,
+        where_params: Dict[str, Any],
+        query_embedding: List[float],
+        semantic_pool_limit: int,
+        candidate_limit: int,
+    ) -> List[Dict[str, Any]]:
+        if not self._sqlite_vec_knn_ready:
+            raise RuntimeError("sqlite_vec_knn_not_ready")
+        if len(query_embedding) != int(self._sqlite_vec_knn_dim):
+            raise RuntimeError(
+                f"sqlite_vec_knn_dim_mismatch:{len(query_embedding)}!={self._sqlite_vec_knn_dim}"
+            )
+
+        query_vector_json = json.dumps(
+            [float(value) for value in query_embedding],
+            separators=(",", ":"),
+        )
+        base_vec_k = max(1, int(candidate_limit))
+
+        async def _query_with_k(vec_k: int) -> List[Dict[str, Any]]:
+            semantic_result = await session.execute(
+                text(
+                    "WITH knn AS ("
+                    "  SELECT "
+                    "    rowid AS chunk_id, "
+                    "    CAST(distance AS REAL) AS vector_distance "
+                    f"  FROM {self._sqlite_vec_knn_table} "
+                    "  WHERE vector MATCH vec_f32(:query_vector_json) "
+                    "    AND k = :vec_k "
+                    "  ORDER BY distance ASC "
+                    "), "
+                    "semantic_scored AS ("
+                    "  SELECT "
+                    "    mc.id AS chunk_id, mc.memory_id AS memory_id, "
+                    "    mc.chunk_text AS chunk_text, mc.char_start AS char_start, mc.char_end AS char_end, "
+                    "    p.domain AS domain, p.path AS path, p.priority AS priority, p.disclosure AS disclosure, "
+                    "    m.created_at AS created_at, "
+                    "    knn.vector_distance AS vector_distance "
+                    "  FROM knn "
+                    "  JOIN memory_chunks mc ON mc.id = knn.chunk_id "
+                    "  JOIN memories m ON m.id = mc.memory_id "
+                    "  JOIN paths p ON p.memory_id = mc.memory_id "
+                    f"  WHERE {where_clause} "
+                    ") "
+                    "SELECT "
+                    "  chunk_id, memory_id, chunk_text, char_start, char_end, "
+                    "  domain, path, priority, disclosure, created_at, "
+                    "  vector_distance, (1.0 - vector_distance) AS vector_similarity "
+                    "FROM semantic_scored "
+                    "WHERE vector_distance IS NOT NULL "
+                    "ORDER BY vector_distance ASC "
+                    "LIMIT :candidate_limit"
+                ),
+                {
+                    **where_params,
+                    "query_vector_json": query_vector_json,
+                    "vec_k": int(max(1, vec_k)),
+                    "candidate_limit": candidate_limit,
+                },
+            )
+            semantic_rows = [dict(row) for row in semantic_result.mappings().all()]
+            for row in semantic_rows:
+                try:
+                    similarity = float(row.get("vector_similarity") or 0.0)
+                    if not math.isfinite(similarity):
+                        similarity = 0.0
+                    row["vector_similarity"] = similarity
+                except (TypeError, ValueError):
+                    row["vector_similarity"] = 0.0
+            return semantic_rows
+
+        semantic_rows = await _query_with_k(base_vec_k)
+        if (
+            len(semantic_rows) < int(candidate_limit)
+            and int(base_vec_k) < int(semantic_pool_limit)
+        ):
+            fallback_vec_k = min(
+                int(semantic_pool_limit),
+                max(int(base_vec_k) * 2, int(base_vec_k) + 16),
+            )
+            semantic_rows = await _query_with_k(int(fallback_vec_k))
+        return semantic_rows
 
     @staticmethod
     def _normalize_positive_int_ids(raw_ids: Optional[List[Any]]) -> List[int]:
@@ -2001,7 +3180,7 @@ class SQLiteClient:
     # =========================================================================
 
     async def get_memory_by_path(
-        self, path: str, domain: str = "core"
+        self, path: str, domain: str = "core", reinforce_access: bool = True
     ) -> Optional[Dict[str, Any]]:
         """
         Get a memory by its path.
@@ -2009,6 +3188,7 @@ class SQLiteClient:
         Args:
             path: The path to look up
             domain: The domain/namespace (e.g., "core", "writer", "game")
+            reinforce_access: Whether to reinforce access_count/vitality on read
 
         Returns:
             Memory dict with id, content, priority, disclosure, created_at
@@ -2028,7 +3208,8 @@ class SQLiteClient:
                 return None
 
             memory, path_obj = row
-            await self._reinforce_memory_access(session, [memory.id])
+            if reinforce_access:
+                await self._reinforce_memory_access(session, [memory.id])
             gist_map = await self._get_latest_gists_map(session, [memory.id])
             gist = gist_map.get(memory.id) or {}
             return {
@@ -2508,6 +3689,9 @@ class SQLiteClient:
         target_memory_id: int,
         domain: str = "core",
         index_now: bool = True,
+        restore_path_metadata: bool = False,
+        restore_priority: Optional[int] = None,
+        restore_disclosure: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Rollback a path to point to a specific memory version.
@@ -2523,13 +3707,15 @@ class SQLiteClient:
         async with self.session() as session:
             # 1. Get current memory_id
             result = await session.execute(
-                select(Path.memory_id)
+                select(Path.memory_id, Path)
                 .where(Path.domain == domain)
                 .where(Path.path == path)
             )
-            current_id = result.scalar_one_or_none()
+            row = result.first()
+            current_id = row[0] if row else None
+            path_obj = row[1] if row else None
 
-            if current_id is None:
+            if current_id is None or path_obj is None:
                 raise ValueError(f"Path '{domain}://{path}' not found")
 
             # 2. Verify target memory exists
@@ -2560,6 +3746,12 @@ class SQLiteClient:
                 .values(memory_id=target_memory_id)
             )
 
+            if restore_path_metadata:
+                if restore_priority is not None:
+                    path_obj.priority = restore_priority
+                path_obj.disclosure = restore_disclosure
+                session.add(path_obj)
+
             await self._clear_memory_index(session, current_id)
             if index_now:
                 await self._reindex_memory(session, target_memory_id)
@@ -2572,6 +3764,34 @@ class SQLiteClient:
                 "restored_memory_id": target_memory_id,
                 "index_pending": not index_now,
                 "index_targets": [target_memory_id],
+            }
+
+    async def restore_path_metadata(
+        self,
+        path: str,
+        *,
+        priority: int,
+        disclosure: Optional[str],
+        domain: str = "core",
+    ) -> Dict[str, Any]:
+        async with self.session() as session:
+            result = await session.execute(
+                select(Path).where(Path.domain == domain).where(Path.path == path)
+            )
+            path_obj = result.scalar_one_or_none()
+            if path_obj is None:
+                raise ValueError(f"Path '{domain}://{path}' not found")
+
+            path_obj.priority = priority
+            path_obj.disclosure = disclosure
+            session.add(path_obj)
+
+            return {
+                "domain": domain,
+                "path": path,
+                "uri": f"{domain}://{path}",
+                "priority": path_obj.priority,
+                "disclosure": path_obj.disclosure,
             }
 
     async def reindex_memory(
@@ -2817,6 +4037,10 @@ class SQLiteClient:
         Returns:
             Restored path info
         """
+        safe_path = (path or "").strip("/")
+        if not safe_path:
+            raise ValueError("Path cannot be empty")
+
         async with self.session() as session:
             # Check if memory exists
             memory_result = await session.execute(
@@ -2824,6 +4048,18 @@ class SQLiteClient:
             )
             if not memory_result.scalar_one_or_none():
                 raise ValueError(f"Memory ID {memory_id} not found")
+
+            if "/" in safe_path:
+                parent_path = safe_path.rsplit("/", 1)[0]
+                parent_result = await session.execute(
+                    select(Path.path)
+                    .where(Path.domain == domain)
+                    .where(Path.path == parent_path)
+                )
+                if parent_result.scalar_one_or_none() is None:
+                    raise ValueError(
+                        f"Parent path '{domain}://{parent_path}' not found"
+                    )
 
             # Ensure memory is not deprecated (un-deprecate if needed)
             # This is critical for rollback: if we restore a path to a memory that was
@@ -2834,22 +4070,22 @@ class SQLiteClient:
 
             # Check if path already exists (collision)
             existing = await session.execute(
-                select(Path).where(Path.domain == domain).where(Path.path == path)
+                select(Path).where(Path.domain == domain).where(Path.path == safe_path)
             )
             if existing.scalar_one_or_none():
-                raise ValueError(f"Path '{domain}://{path}' already exists")
+                raise ValueError(f"Path '{domain}://{safe_path}' already exists")
 
             # Create path
             path_obj = Path(
                 domain=domain,
-                path=path,
+                path=safe_path,
                 memory_id=memory_id,
                 priority=priority,
                 disclosure=disclosure,
             )
             session.add(path_obj)
 
-            return {"uri": f"{domain}://{path}", "memory_id": memory_id}
+            return {"uri": f"{domain}://{safe_path}", "memory_id": memory_id}
 
     # =========================================================================
     # Search Operations
@@ -2945,7 +4181,20 @@ class SQLiteClient:
             try:
                 parsed = json.loads(item)
             except (TypeError, ValueError):
-                continue
+                # Real-world model outputs may be JSON-like (e.g. unquoted keys).
+                # Try a conservative normalization before giving up.
+                normalized = item
+                normalized = re.sub(r"([{,]\s*)([A-Za-z_][A-Za-z0-9_\-]*)(\s*:)", r'\1"\2"\3', normalized)
+                normalized = re.sub(r",\s*([}\]])", r"\1", normalized)
+                if "'" in normalized and '"' not in normalized:
+                    normalized = normalized.replace("'", '"')
+                if normalized != item:
+                    try:
+                        parsed = json.loads(normalized)
+                    except (TypeError, ValueError):
+                        continue
+                else:
+                    continue
             if isinstance(parsed, dict):
                 return parsed
         return None
@@ -3310,6 +4559,8 @@ class SQLiteClient:
 
         semantic_payload: Dict[str, Any]
         keyword_payload: Dict[str, Any]
+        semantic_unavailable = False
+        keyword_unavailable = False
         try:
             semantic_payload = await self.search_advanced(
                 query=query,
@@ -3319,6 +4570,7 @@ class SQLiteClient:
                 filters=filters,
             )
         except Exception as exc:
+            semantic_unavailable = True
             self._append_degrade_reason(
                 degrade_reasons, f"write_guard_semantic_failed:{type(exc).__name__}"
             )
@@ -3332,6 +4584,7 @@ class SQLiteClient:
                 filters=filters,
             )
         except Exception as exc:
+            keyword_unavailable = True
             self._append_degrade_reason(
                 degrade_reasons, f"write_guard_keyword_failed:{type(exc).__name__}"
             )
@@ -3353,6 +4606,15 @@ class SQLiteClient:
             keyword_payload,
             exclude_memory_id=exclude_memory_id,
         )
+
+        # If both retrieval signals are unavailable, fail closed instead of allowing ADD.
+        if semantic_unavailable and keyword_unavailable:
+            return self._build_guard_decision(
+                action="NOOP",
+                reason="write_guard_unavailable",
+                method="exception",
+                degrade_reasons=degrade_reasons,
+            )
 
         semantic_top = (
             max(
@@ -3452,6 +4714,122 @@ class SQLiteClient:
             keyword_top=keyword_top,
         )
 
+    @staticmethod
+    def _mmr_tokens(row: Dict[str, Any]) -> set[str]:
+        snippet = str(row.get("snippet") or "")
+        metadata = row.get("metadata")
+        path = ""
+        if isinstance(metadata, dict):
+            path = str(metadata.get("path") or "")
+        source = f"{snippet} {path}".lower()
+        return set(re.findall(r"[a-z0-9_]+", source))
+
+    @staticmethod
+    def _jaccard_similarity(tokens_a: set[str], tokens_b: set[str]) -> float:
+        if not tokens_a or not tokens_b:
+            return 0.0
+        union = tokens_a | tokens_b
+        if not union:
+            return 0.0
+        return len(tokens_a & tokens_b) / len(union)
+
+    def _apply_mmr_rerank(
+        self, scored_results: List[Dict[str, Any]], max_results: int
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        if not scored_results:
+            return [], {
+                "mmr_applied": False,
+                "mmr_candidate_count": 0,
+                "mmr_selected_count": 0,
+            }
+
+        selection_limit = max(1, int(max_results))
+        candidate_limit = min(
+            len(scored_results), selection_limit * max(1, self._mmr_candidate_factor)
+        )
+        candidate_pool = list(scored_results[:candidate_limit])
+        if len(candidate_pool) <= 1:
+            selected = candidate_pool[:selection_limit]
+            return selected, {
+                "mmr_applied": False,
+                "mmr_candidate_count": len(candidate_pool),
+                "mmr_selected_count": len(selected),
+            }
+
+        max_final = max(
+            float(item.get("scores", {}).get("final", 0.0)) for item in candidate_pool
+        )
+        if max_final <= 0:
+            max_final = 1.0
+
+        token_cache = [self._mmr_tokens(item) for item in candidate_pool]
+        selected_indices: List[int] = []
+        remaining = set(range(len(candidate_pool)))
+
+        while remaining and len(selected_indices) < selection_limit:
+            best_idx: Optional[int] = None
+            best_score = float("-inf")
+            best_relevance = float("-inf")
+            best_diversity = float("inf")
+
+            for idx in remaining:
+                raw_final = float(candidate_pool[idx].get("scores", {}).get("final", 0.0))
+                relevance = max(0.0, raw_final) / max_final
+
+                if not selected_indices:
+                    diversity_penalty = 0.0
+                else:
+                    diversity_penalty = max(
+                        self._jaccard_similarity(token_cache[idx], token_cache[picked])
+                        for picked in selected_indices
+                    )
+                mmr_score = (self._mmr_lambda * relevance) - (
+                    (1.0 - self._mmr_lambda) * diversity_penalty
+                )
+
+                if best_idx is None or mmr_score > best_score + 1e-12:
+                    best_idx = idx
+                    best_score = mmr_score
+                    best_relevance = relevance
+                    best_diversity = diversity_penalty
+                    continue
+
+                if abs(mmr_score - best_score) <= 1e-12:
+                    if relevance > best_relevance + 1e-12:
+                        best_idx = idx
+                        best_relevance = relevance
+                        best_diversity = diversity_penalty
+                        continue
+                    if (
+                        abs(relevance - best_relevance) <= 1e-12
+                        and diversity_penalty < best_diversity - 1e-12
+                    ):
+                        best_idx = idx
+                        best_diversity = diversity_penalty
+                        continue
+                    if (
+                        abs(relevance - best_relevance) <= 1e-12
+                        and abs(diversity_penalty - best_diversity) <= 1e-12
+                    ):
+                        current_uri = str(candidate_pool[idx].get("uri") or "")
+                        best_uri = str(
+                            candidate_pool[best_idx].get("uri") or ""
+                        )
+                        if current_uri < best_uri:
+                            best_idx = idx
+
+            if best_idx is None:
+                break
+            selected_indices.append(best_idx)
+            remaining.discard(best_idx)
+
+        selected_results = [candidate_pool[idx] for idx in selected_indices]
+        return selected_results, {
+            "mmr_applied": True,
+            "mmr_candidate_count": len(candidate_pool),
+            "mmr_selected_count": len(selected_results),
+        }
+
     async def search_advanced(
         self,
         query: str,
@@ -3497,6 +4875,25 @@ class SQLiteClient:
             "strategy_template": strategy_template,
             "candidate_multiplier_applied": applied_candidate_multiplier,
         }
+        default_mmr_metadata = {
+            "mmr_applied": False,
+            "mmr_candidate_count": 0,
+            "mmr_selected_count": 0,
+        }
+        vector_engine_metadata = {
+            "vector_engine_requested": self._vector_engine_requested,
+            "vector_engine_effective": self._vector_engine_effective,
+            "vector_engine_selected": "legacy",
+            "vector_engine_path": "not_applicable",
+            "sqlite_vec_knn_ready": bool(self._sqlite_vec_knn_ready),
+            "sqlite_vec_knn_dim": int(self._sqlite_vec_knn_dim),
+            "sqlite_vec_enabled": self._sqlite_vec_enabled,
+            "sqlite_vec_read_ratio": int(self._sqlite_vec_read_ratio),
+            "sqlite_vec_status": str(self._sqlite_vec_capability.get("status", "disabled")),
+            "sqlite_vec_readiness": str(
+                self._sqlite_vec_capability.get("sqlite_vec_readiness", "hold")
+            ),
+        }
 
         if not query:
             degrade_reasons = ["empty_query"]
@@ -3511,6 +4908,8 @@ class SQLiteClient:
                     "degraded": True,
                     "degrade_reasons": degrade_reasons,
                     **strategy_metadata,
+                    **vector_engine_metadata,
+                    **default_mmr_metadata,
                 },
             }
 
@@ -3689,47 +5088,84 @@ class SQLiteClient:
                         )
 
             if mode_value in {"semantic", "hybrid"}:
+                requested_vector_engine = self._normalize_vector_engine(
+                    self._vector_engine_requested
+                )
+                selected_vector_engine = self._resolve_vector_engine_for_query(query)
+                vector_engine_metadata["vector_engine_selected"] = selected_vector_engine
+                if (
+                    requested_vector_engine != "legacy"
+                    and self._vector_engine_effective == "legacy"
+                ):
+                    self._append_degrade_reason(
+                        degrade_reasons, "sqlite_vec_fallback_legacy"
+                    )
+
                 query_embedding = await self._get_embedding(
                     session,
                     query,
                     degrade_reasons=degrade_reasons,
                 )
-                semantic_pool_limit = min(max(candidate_limit * 8, 64), 3000)
-                semantic_result = await session.execute(
-                    text(
-                        "SELECT "
-                        "mc.id AS chunk_id, mc.memory_id AS memory_id, "
-                        "mc.chunk_text AS chunk_text, mc.char_start AS char_start, mc.char_end AS char_end, "
-                        "mcv.vector AS vector_json, "
-                        "p.domain AS domain, p.path AS path, p.priority AS priority, p.disclosure AS disclosure, "
-                        "m.created_at AS created_at "
-                        "FROM memory_chunks_vec mcv "
-                        "JOIN memory_chunks mc ON mc.id = mcv.chunk_id "
-                        "JOIN memories m ON m.id = mc.memory_id "
-                        "JOIN paths p ON p.memory_id = mc.memory_id "
-                        f"WHERE {where_clause} "
-                        "LIMIT :semantic_pool_limit"
-                    ),
-                    {**where_params, "semantic_pool_limit": semantic_pool_limit},
+                semantic_pool_limit = min(
+                    max(candidate_limit * 12, max_results * 64, 128),
+                    5000,
                 )
-
-                semantic_scored: List[Tuple[float, Dict[str, Any]]] = []
-                for row in semantic_result.mappings().all():
-                    vector_payload = row.get("vector_json")
-                    if not vector_payload:
-                        continue
-                    try:
-                        chunk_vec = [float(v) for v in json.loads(vector_payload)]
-                    except (TypeError, ValueError):
-                        continue
-                    similarity = self._cosine_similarity(query_embedding, chunk_vec)
-                    semantic_scored.append((similarity, dict(row)))
-
-                semantic_scored.sort(key=lambda item: item[0], reverse=True)
-                semantic_rows = []
-                for similarity, row in semantic_scored[:candidate_limit]:
-                    row["vector_similarity"] = similarity
-                    semantic_rows.append(row)
+                if selected_vector_engine == "vec":
+                    if not self._sqlite_vec_knn_ready:
+                        self._append_degrade_reason(
+                            degrade_reasons, "sqlite_vec_knn_unavailable"
+                        )
+                        semantic_rows = await self._fetch_semantic_rows_python_scoring(
+                            session,
+                            where_clause=where_clause,
+                            where_params=where_params,
+                            query_embedding=query_embedding,
+                            semantic_pool_limit=semantic_pool_limit,
+                            candidate_limit=candidate_limit,
+                        )
+                        vector_engine_metadata["vector_engine_path"] = (
+                            "legacy_python_fallback"
+                        )
+                    else:
+                        try:
+                            semantic_rows = await self._fetch_semantic_rows_vec_native_topk(
+                                session,
+                                where_clause=where_clause,
+                                where_params=where_params,
+                                query_embedding=query_embedding,
+                                semantic_pool_limit=semantic_pool_limit,
+                                candidate_limit=candidate_limit,
+                            )
+                            vector_engine_metadata["vector_engine_path"] = (
+                                "vec_native_topk_sql"
+                            )
+                        except Exception:
+                            self._append_degrade_reason(
+                                degrade_reasons, "sqlite_vec_native_query_failed"
+                            )
+                            semantic_rows = await self._fetch_semantic_rows_python_scoring(
+                                session,
+                                where_clause=where_clause,
+                                where_params=where_params,
+                                query_embedding=query_embedding,
+                                semantic_pool_limit=semantic_pool_limit,
+                                candidate_limit=candidate_limit,
+                            )
+                            vector_engine_metadata["vector_engine_path"] = (
+                                "legacy_python_fallback"
+                            )
+                else:
+                    semantic_rows = await self._fetch_semantic_rows_python_scoring(
+                        session,
+                        where_clause=where_clause,
+                        where_params=where_params,
+                        query_embedding=query_embedding,
+                        semantic_pool_limit=semantic_pool_limit,
+                        candidate_limit=candidate_limit,
+                    )
+                    vector_engine_metadata["vector_engine_path"] = (
+                        "legacy_python_scoring"
+                    )
 
             candidates: Dict[Tuple[str, str, Any], Dict[str, Any]] = {}
 
@@ -3787,6 +5223,8 @@ class SQLiteClient:
                         "degraded": degraded,
                         "degrade_reasons": list(degrade_reasons),
                         **strategy_metadata,
+                        **vector_engine_metadata,
+                        **default_mmr_metadata,
                     },
                 }
 
@@ -3926,7 +5364,31 @@ class SQLiteClient:
                 )
 
             scored_results.sort(key=lambda row: row["scores"]["final"], reverse=True)
-            top_results = scored_results[:max_results]
+            mmr_metadata: Dict[str, Any] = {
+                "mmr_applied": False,
+                "mmr_candidate_count": 0,
+                "mmr_selected_count": 0,
+            }
+            if self._mmr_enabled and mode_value == "hybrid":
+                try:
+                    top_results, mmr_metadata = self._apply_mmr_rerank(
+                        scored_results,
+                        max_results=max_results,
+                    )
+                except Exception:
+                    self._append_degrade_reason(degrade_reasons, "mmr_rerank_failed")
+                    top_results = scored_results[:max_results]
+                    mmr_metadata = {
+                        "mmr_applied": False,
+                        "mmr_candidate_count": min(
+                            len(scored_results),
+                            max(1, max_results * max(1, self._mmr_candidate_factor)),
+                        ),
+                        "mmr_selected_count": len(top_results),
+                    }
+            else:
+                top_results = scored_results[:max_results]
+                mmr_metadata["mmr_selected_count"] = len(top_results)
             await self._reinforce_memory_access(
                 session,
                 [
@@ -3947,6 +5409,8 @@ class SQLiteClient:
                     "degraded": degraded,
                     "degrade_reasons": list(degrade_reasons),
                     **strategy_metadata,
+                    **vector_engine_metadata,
+                    **mmr_metadata,
                 },
             }
 
@@ -4170,6 +5634,36 @@ class SQLiteClient:
                     "embedding_backend": self._embedding_backend,
                     "embedding_model": self._embedding_model,
                     "embedding_dim": self._embedding_dim,
+                    "embedding_provider_chain_enabled": self._embedding_provider_chain_enabled,
+                    "embedding_provider_fail_open": self._embedding_provider_fail_open,
+                    "embedding_provider_fallback": self._resolve_chain_fallback_backend(),
+                    "embedding_provider_candidates": list(self._embedding_provider_candidates),
+                    "sqlite_vec_enabled": self._sqlite_vec_enabled,
+                    "sqlite_vec_read_ratio": int(self._sqlite_vec_read_ratio),
+                    "sqlite_vec_status": str(self._sqlite_vec_capability.get("status", "disabled")),
+                    "sqlite_vec_readiness": str(
+                        self._sqlite_vec_capability.get("sqlite_vec_readiness", "hold")
+                    ),
+                    "sqlite_vec_diag_code": str(
+                        self._sqlite_vec_capability.get("diag_code", "")
+                    ),
+                    "sqlite_vec_knn_ready": bool(self._sqlite_vec_knn_ready),
+                    "sqlite_vec_knn_dim": int(self._sqlite_vec_knn_dim),
+                    "vector_engine_requested": self._vector_engine_requested,
+                    "vector_engine_effective": self._vector_engine_effective,
+                    "runtime_write_wal_enabled": self._runtime_write_wal_enabled,
+                    "runtime_write_journal_mode_requested": self._runtime_write_journal_mode_requested,
+                    "runtime_write_journal_mode_effective": self._runtime_write_journal_mode_effective,
+                    "runtime_write_wal_synchronous_requested": self._runtime_write_wal_synchronous_requested,
+                    "runtime_write_wal_synchronous_effective": self._runtime_write_wal_synchronous_effective,
+                    "runtime_write_busy_timeout_ms": int(
+                        self._runtime_write_busy_timeout_effective_ms
+                    ),
+                    "runtime_write_wal_autocheckpoint": int(
+                        self._runtime_write_wal_autocheckpoint_effective
+                    ),
+                    "runtime_write_pragma_status": self._runtime_write_pragma_status,
+                    "runtime_write_pragma_error": self._runtime_write_pragma_error,
                     "reranker_enabled": self._reranker_enabled,
                     "reranker_model": self._reranker_model,
                     "rerank_weight": self._rerank_weight,

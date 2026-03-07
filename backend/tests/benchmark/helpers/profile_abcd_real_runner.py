@@ -23,6 +23,7 @@ import os
 import random
 import shutil
 import sys
+import tempfile
 import zipfile
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -45,9 +46,17 @@ REAL_PROFILE_JSON_ARTIFACT = BENCHMARK_DIR / "profile_abcd_real_metrics.json"
 REAL_PROFILE_MARKDOWN_ARTIFACT = BENCHMARK_DIR / "benchmark_results_profile_abcd_real.md"
 REAL_PROFILE_CD_MARKDOWN_ARTIFACT = BENCHMARK_DIR / "benchmark_results_profile_cd_real.md"
 REAL_PROFILE_WORKDIR = BENCHMARK_DIR / ".real_profile_cache"
+REAL_PROFILE_WORKDIR_ENV = "BENCHMARK_REAL_PROFILE_WORKDIR"
+REAL_PROFILE_METRIC_TOP_K = 10
+REAL_PROFILE_DEFAULT_MAX_RESULTS = 10
+REAL_PROFILE_DEFAULT_CANDIDATE_MULTIPLIER = 8
 
 PROFILE_D_INVALID_GATE_REASONS = {
     "embedding_fallback_hash",
+    "embedding_request_failed",
+    "reranker_request_failed",
+}
+PROFILE_D_REQUEST_FAILED_REASONS = {
     "embedding_request_failed",
     "reranker_request_failed",
 }
@@ -59,6 +68,16 @@ DATASET_LABELS = {
 
 REAL_DATASET_DEFAULTS = ("squad_v2_dev", "beir_nfcorpus")
 REAL_RANDOM_SEED = 20260219
+
+PHASE6_GATE_MODE_ENV = "BENCHMARK_PHASE6_GATE_MODE"
+PHASE6_INVALID_RATE_THRESHOLD_ENV = "BENCHMARK_PHASE6_INVALID_RATE_THRESHOLD"
+PHASE6_GATE_MODE_STRICT = "strict"
+PHASE6_GATE_MODE_API_TOLERANT = "api_tolerant"
+PHASE6_SUPPORTED_GATE_MODES = {
+    PHASE6_GATE_MODE_STRICT,
+    PHASE6_GATE_MODE_API_TOLERANT,
+}
+PHASE6_DEFAULT_INVALID_RATE_THRESHOLD = 0.05
 
 
 @dataclass(frozen=True)
@@ -109,6 +128,9 @@ PROFILE_CONFIGS: Sequence[ProfileConfig] = (
         key="profile_c",
         mode="hybrid",
         env_overrides={
+            # Dev benchmark default: force API path for C/D real-run validation.
+            # Release/deploy templates still keep router defaults and should be
+            # re-validated before final delivery.
             "RETRIEVAL_EMBEDDING_BACKEND": "api",
             "RETRIEVAL_RERANKER_ENABLED": "false",
         },
@@ -138,6 +160,40 @@ SOTA_BENCHMARK_REFERENCES_2026_02 = {
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _sanitize_report_path(raw_path: Path | str) -> str:
+    path_obj = Path(raw_path).expanduser()
+    if not path_obj.is_absolute():
+        return path_obj.as_posix()
+    try:
+        return path_obj.resolve(strict=False).relative_to(BACKEND_ROOT).as_posix()
+    except Exception:
+        pass
+    try:
+        return path_obj.resolve(strict=False).relative_to(BACKEND_ROOT.parent).as_posix()
+    except Exception:
+        pass
+    try:
+        return "<tmp>/" + path_obj.resolve(strict=False).relative_to(Path("/tmp")).as_posix()
+    except Exception:
+        pass
+    return f"<abs>/{path_obj.name}"
+
+
+def resolve_real_profile_workdir(workdir: Optional[Path] = None) -> Path:
+    if workdir is not None:
+        return Path(workdir).expanduser()
+    env_value = str(os.getenv(REAL_PROFILE_WORKDIR_ENV, "")).strip()
+    if env_value:
+        return Path(env_value).expanduser()
+    REAL_PROFILE_WORKDIR.mkdir(parents=True, exist_ok=True)
+    return Path(
+        tempfile.mkdtemp(
+            prefix="run-",
+            dir=str(REAL_PROFILE_WORKDIR),
+        )
+    )
 
 
 def _slugify(value: str) -> str:
@@ -477,9 +533,70 @@ def _round_metric(value: float) -> float:
     return round(float(value), 6)
 
 
-def build_phase6_gate(profile_d_rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+def _normalize_phase6_gate_mode(raw_mode: str) -> str:
+    mode = str(raw_mode).strip().lower()
+    if mode not in PHASE6_SUPPORTED_GATE_MODES:
+        supported = ", ".join(sorted(PHASE6_SUPPORTED_GATE_MODES))
+        raise ValueError(f"unsupported phase6 gate mode: {raw_mode!r} (supported: {supported})")
+    return mode
+
+
+def resolve_phase6_gate_config() -> Dict[str, Any]:
+    mode = _normalize_phase6_gate_mode(
+        os.getenv(PHASE6_GATE_MODE_ENV, PHASE6_GATE_MODE_STRICT)
+    )
+    raw_threshold = os.getenv(
+        PHASE6_INVALID_RATE_THRESHOLD_ENV,
+        str(PHASE6_DEFAULT_INVALID_RATE_THRESHOLD),
+    )
+    try:
+        invalid_rate_threshold = float(raw_threshold)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"invalid {PHASE6_INVALID_RATE_THRESHOLD_ENV}: {raw_threshold!r}"
+        ) from exc
+    if invalid_rate_threshold < 0.0 or invalid_rate_threshold > 1.0:
+        raise ValueError(
+            f"invalid {PHASE6_INVALID_RATE_THRESHOLD_ENV}: {invalid_rate_threshold!r} "
+            "(expected between 0 and 1)"
+        )
+    return {
+        "mode": mode,
+        "invalid_rate_threshold": _round_metric(invalid_rate_threshold),
+    }
+
+
+def _coerce_reason_count_map(raw: Any) -> Dict[str, int]:
+    if not isinstance(raw, Mapping):
+        return {}
+    parsed: Dict[str, int] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str):
+            continue
+        try:
+            parsed_value = int(value)
+        except (TypeError, ValueError):
+            continue
+        if parsed_value > 0:
+            parsed[key] = parsed_value
+    return parsed
+
+
+def build_phase6_gate(
+    profile_d_rows: Sequence[Mapping[str, Any]],
+    *,
+    mode: str = PHASE6_GATE_MODE_STRICT,
+    invalid_rate_threshold: float = 0.0,
+) -> Dict[str, Any]:
+    gate_mode = _normalize_phase6_gate_mode(mode)
+    threshold = _round_metric(float(invalid_rate_threshold))
     gate_rows: List[Dict[str, Any]] = []
     invalid_union: Set[str] = set()
+    invalid_reason_counts_total: Dict[str, int] = {}
+    request_failed_reason_counts_total: Dict[str, int] = {}
+    query_count_total = 0
+    invalid_count_total = 0
+    request_failed_count_total = 0
     for row in profile_d_rows:
         degradation = row.get("degradation", {})
         invalid_reasons = [
@@ -487,18 +604,78 @@ def build_phase6_gate(profile_d_rows: Sequence[Mapping[str, Any]]) -> Dict[str, 
             for reason in degradation.get("invalid_reasons", [])
             if isinstance(reason, str)
         ]
+        query_count = int(degradation.get("queries", 0) or 0)
+        invalid_count = int(degradation.get("invalid_count", 0) or 0)
+        request_failed_count = int(degradation.get("request_failed_count", 0) or 0)
+        invalid_rate = float(degradation.get("invalid_rate", 0.0) or 0.0)
+        request_failed_rate = float(degradation.get("request_failed_rate", 0.0) or 0.0)
+        invalid_reason_counts = _coerce_reason_count_map(
+            degradation.get("invalid_reason_counts")
+        )
+        request_failed_reason_counts = _coerce_reason_count_map(
+            degradation.get("request_failed_reason_counts")
+        )
+
+        if query_count > 0:
+            if invalid_count <= 0 and invalid_reasons:
+                invalid_count = len(invalid_reasons)
+            if invalid_rate <= 0 and invalid_count > 0:
+                invalid_rate = float(invalid_count) / float(query_count)
+            if request_failed_count <= 0 and request_failed_reason_counts:
+                request_failed_count = sum(request_failed_reason_counts.values())
+            if request_failed_rate <= 0 and request_failed_count > 0:
+                request_failed_rate = float(request_failed_count) / float(query_count)
+
+        if gate_mode == PHASE6_GATE_MODE_STRICT:
+            row_valid = len(invalid_reasons) == 0
+        else:
+            row_valid = invalid_rate <= threshold
+
         invalid_union.update(invalid_reasons)
+        query_count_total += max(0, query_count)
+        invalid_count_total += max(0, invalid_count)
+        request_failed_count_total += max(0, request_failed_count)
+        for reason, count in invalid_reason_counts.items():
+            invalid_reason_counts_total[reason] = invalid_reason_counts_total.get(reason, 0) + count
+        for reason, count in request_failed_reason_counts.items():
+            request_failed_reason_counts_total[reason] = (
+                request_failed_reason_counts_total.get(reason, 0) + count
+            )
         gate_rows.append(
             {
                 "dataset": row.get("dataset"),
                 "dataset_label": row.get("dataset_label"),
-                "valid": len(invalid_reasons) == 0,
+                "valid": row_valid,
                 "invalid_reasons": invalid_reasons,
+                "query_count": query_count,
+                "invalid_count": invalid_count,
+                "invalid_rate": _round_metric(invalid_rate),
+                "invalid_reason_counts": invalid_reason_counts,
+                "request_failed_count": request_failed_count,
+                "request_failed_rate": _round_metric(request_failed_rate),
+                "request_failed_reason_counts": request_failed_reason_counts,
             }
         )
+    overall_invalid_rate = (
+        float(invalid_count_total) / float(query_count_total) if query_count_total > 0 else 0.0
+    )
+    overall_request_failed_rate = (
+        float(request_failed_count_total) / float(query_count_total)
+        if query_count_total > 0
+        else 0.0
+    )
     return {
-        "valid": len(invalid_union) == 0,
+        "mode": gate_mode,
+        "invalid_rate_threshold": threshold,
+        "valid": all(bool(row.get("valid")) for row in gate_rows),
         "invalid_reasons": sorted(invalid_union),
+        "invalid_reason_counts": dict(sorted(invalid_reason_counts_total.items())),
+        "query_count": int(query_count_total),
+        "invalid_count": int(invalid_count_total),
+        "invalid_rate": _round_metric(overall_invalid_rate),
+        "request_failed_count": int(request_failed_count_total),
+        "request_failed_rate": _round_metric(overall_request_failed_rate),
+        "request_failed_reason_counts": dict(sorted(request_failed_reason_counts_total.items())),
         "rows": gate_rows,
     }
 
@@ -547,20 +724,29 @@ async def _evaluate_dataset(
     bundle: DatasetBundle,
     profile_mode: str,
     memory_to_doc: Mapping[int, str],
+    max_results: int,
+    candidate_multiplier: int,
 ) -> Dict[str, Any]:
+    effective_max_results = max(REAL_PROFILE_METRIC_TOP_K, int(max_results))
+    effective_candidate_multiplier = max(1, int(candidate_multiplier))
+
     metric_rows: List[Dict[str, float]] = []
     latencies_ms: List[float] = []
     degrade_count = 0
     degrade_reasons_union: Set[str] = set()
     invalid_reasons_union: Set[str] = set()
+    invalid_count = 0
+    invalid_reason_counts: Dict[str, int] = {}
+    request_failed_count = 0
+    request_failed_reason_counts: Dict[str, int] = {}
 
     for case in bundle.queries:
         start = perf_counter()
         payload = await client.search_advanced(
             query=case.query,
             mode=profile_mode,
-            max_results=10,
-            candidate_multiplier=4,
+            max_results=effective_max_results,
+            candidate_multiplier=effective_candidate_multiplier,
             filters={"domain": bundle.domain},
         )
         elapsed_ms = (perf_counter() - start) * 1000.0
@@ -576,15 +762,29 @@ async def _evaluate_dataset(
             if isinstance(raw_reasons, list)
             else []
         )
-        degrade_reasons_union.update(reasons)
-        invalid_reasons_union.update(
-            reason for reason in reasons if reason in PROFILE_D_INVALID_GATE_REASONS
+        query_invalid_reasons = sorted(
+            {reason for reason in reasons if reason in PROFILE_D_INVALID_GATE_REASONS}
         )
+        query_request_failed_reasons = sorted(
+            {reason for reason in query_invalid_reasons if reason in PROFILE_D_REQUEST_FAILED_REASONS}
+        )
+        degrade_reasons_union.update(reasons)
+        invalid_reasons_union.update(query_invalid_reasons)
+        if query_invalid_reasons:
+            invalid_count += 1
+            for reason in query_invalid_reasons:
+                invalid_reason_counts[reason] = invalid_reason_counts.get(reason, 0) + 1
+        if query_request_failed_reasons:
+            request_failed_count += 1
+            for reason in query_request_failed_reasons:
+                request_failed_reason_counts[reason] = (
+                    request_failed_reason_counts.get(reason, 0) + 1
+                )
 
         results = payload.get("results")
         result_rows = results if isinstance(results, list) else []
         retrieved_doc_ids: List[str] = []
-        for item in result_rows[:10]:
+        for item in result_rows[:REAL_PROFILE_METRIC_TOP_K]:
             if not isinstance(item, Mapping):
                 continue
             memory_id = item.get("memory_id")
@@ -602,7 +802,7 @@ async def _evaluate_dataset(
             compute_retrieval_metrics(
                 retrieved_doc_ids=retrieved_doc_ids,
                 relevant_doc_ids=case.relevant_doc_ids,
-                k=10,
+                k=REAL_PROFILE_METRIC_TOP_K,
             )
         )
 
@@ -635,6 +835,11 @@ async def _evaluate_dataset(
         "query_count_raw": bundle.query_count_raw,
         "sample_bucket_size": bundle.sample_bucket_size,
         "corpus_doc_count": len(bundle.docs),
+        "retrieval_depth": {
+            "max_results": int(effective_max_results),
+            "candidate_multiplier": int(effective_candidate_multiplier),
+            "metric_top_k": int(REAL_PROFILE_METRIC_TOP_K),
+        },
         "quality": quality,
         "latency_ms": {
             "p50": _round_metric(compute_percentile(latencies_ms, 0.50)),
@@ -647,6 +852,16 @@ async def _evaluate_dataset(
             "degrade_rate": _round_metric(float(degrade_count) / float(query_count)),
             "degrade_reasons": sorted(degrade_reasons_union),
             "invalid_reasons": sorted(invalid_reasons_union),
+            "invalid_count": int(invalid_count),
+            "invalid_rate": _round_metric(float(invalid_count) / float(query_count)),
+            "invalid_reason_counts": dict(sorted(invalid_reason_counts.items())),
+            "request_failed_count": int(request_failed_count),
+            "request_failed_rate": _round_metric(
+                float(request_failed_count) / float(query_count)
+            ),
+            "request_failed_reason_counts": dict(
+                sorted(request_failed_reason_counts.items())
+            ),
             "valid": len(invalid_reasons_union) == 0,
         },
     }
@@ -658,6 +873,8 @@ async def _run_profile(
     config: ProfileConfig,
     bundles: Sequence[DatasetBundle],
     db_path: Path,
+    max_results: int,
+    candidate_multiplier: int,
     existing_mapping: Optional[Mapping[str, Mapping[int, str]]] = None,
     populate: bool,
 ) -> tuple[Dict[str, Any], Dict[str, Dict[int, str]]]:
@@ -690,6 +907,8 @@ async def _run_profile(
                         bundle=bundle,
                         profile_mode=config.mode,
                         memory_to_doc=profile_mapping[bundle.key],
+                        max_results=int(max_results),
+                        candidate_multiplier=int(candidate_multiplier),
                     )
                 )
             return (
@@ -710,10 +929,20 @@ async def build_profile_abcd_real_metrics(
     dataset_keys: Sequence[str] = REAL_DATASET_DEFAULTS,
     first_relevant_only: bool = True,
     extra_distractors: int = 200,
+    max_results: int = REAL_PROFILE_DEFAULT_MAX_RESULTS,
+    candidate_multiplier: int = REAL_PROFILE_DEFAULT_CANDIDATE_MULTIPLIER,
     seed: int = REAL_RANDOM_SEED,
+    workdir: Optional[Path] = None,
 ) -> Dict[str, Any]:
     if int(sample_size) <= 0:
         raise ValueError("sample_size must be > 0")
+    if int(max_results) <= 0:
+        raise ValueError("max_results must be > 0")
+    if int(candidate_multiplier) <= 0:
+        raise ValueError("candidate_multiplier must be > 0")
+
+    effective_max_results = max(REAL_PROFILE_METRIC_TOP_K, int(max_results))
+    effective_candidate_multiplier = max(1, int(candidate_multiplier))
 
     selected_keys = [key for key in dataset_keys if key in DATASET_LABELS]
     if not selected_keys:
@@ -734,9 +963,10 @@ async def build_profile_abcd_real_metrics(
     profile_results: Dict[str, Dict[str, Any]] = {}
     profile_doc_mappings: Dict[str, Dict[str, Dict[int, str]]] = {}
 
-    REAL_PROFILE_WORKDIR.mkdir(parents=True, exist_ok=True)
+    real_profile_workdir = resolve_real_profile_workdir(workdir)
+    real_profile_workdir.mkdir(parents=True, exist_ok=True)
     db_paths = {
-        config.key: REAL_PROFILE_WORKDIR / f"{config.key}.db"
+        config.key: real_profile_workdir / f"{config.key}.db"
         for config in PROFILE_CONFIGS
     }
 
@@ -760,13 +990,20 @@ async def build_profile_abcd_real_metrics(
             config=config,
             bundles=bundles,
             db_path=db_paths[config.key],
+            max_results=effective_max_results,
+            candidate_multiplier=effective_candidate_multiplier,
             existing_mapping=existing_mapping,
             populate=populate,
         )
         profile_results[config.key] = profile_payload
         profile_doc_mappings[config.key] = mapping
 
-    phase6_gate = build_phase6_gate(profile_results["profile_d"]["rows"])
+    phase6_config = resolve_phase6_gate_config()
+    phase6_gate = build_phase6_gate(
+        profile_results["profile_d"]["rows"],
+        mode=str(phase6_config["mode"]),
+        invalid_rate_threshold=float(phase6_config["invalid_rate_threshold"]),
+    )
     phase6_comparison = _build_comparison_rows(profile_results)
 
     return {
@@ -778,13 +1015,18 @@ async def build_profile_abcd_real_metrics(
         "real_run_strategy": {
             "first_relevant_only": bool(first_relevant_only),
             "extra_distractors": int(extra_distractors),
+            "max_results": int(effective_max_results),
+            "candidate_multiplier": int(effective_candidate_multiplier),
+            "metric_top_k": int(REAL_PROFILE_METRIC_TOP_K),
             "seed": int(seed),
+            "workdir": _sanitize_report_path(real_profile_workdir),
         },
         "profiles": profile_results,
         "phase6": {
             "gate": phase6_gate,
             "comparison_rows": phase6_comparison,
             "invalid_gate_reasons": sorted(PROFILE_D_INVALID_GATE_REASONS),
+            "gate_config": phase6_config,
         },
     }
 
@@ -827,6 +1069,9 @@ def render_profile_abcd_real_markdown(payload: Mapping[str, Any]) -> str:
         f"- sample_size_requested: {payload.get('sample_size_requested')}",
         f"- first_relevant_only: {payload['real_run_strategy']['first_relevant_only']}",
         f"- extra_distractors: {payload['real_run_strategy']['extra_distractors']}",
+        f"- max_results: {payload['real_run_strategy'].get('max_results')}",
+        f"- candidate_multiplier: {payload['real_run_strategy'].get('candidate_multiplier')}",
+        f"- metric_top_k: {payload['real_run_strategy'].get('metric_top_k')}",
         "",
     ]
 
@@ -851,21 +1096,43 @@ def render_profile_abcd_real_markdown(payload: Mapping[str, Any]) -> str:
             (
                 f"- overall_valid: {'true' if payload['phase6']['gate']['valid'] else 'false'}"
             ),
+            f"- gate_mode: `{payload['phase6']['gate'].get('mode', PHASE6_GATE_MODE_STRICT)}`",
+            "- invalid_rate_threshold: "
+            + "{:.2%}".format(
+                float(payload["phase6"]["gate"].get("invalid_rate_threshold", 0.0))
+            ),
             (
                 "- invalid_reasons: "
                 + ", ".join(payload["phase6"]["gate"]["invalid_reasons"])
                 if payload["phase6"]["gate"]["invalid_reasons"]
                 else "- invalid_reasons: (none)"
             ),
+            (
+                f"- invalid_count: {int(payload['phase6']['gate'].get('invalid_count', 0))} "
+                f"/ {int(payload['phase6']['gate'].get('query_count', 0))} "
+                f"({float(payload['phase6']['gate'].get('invalid_rate', 0.0)):.2%})"
+            ),
+            (
+                f"- request_failed_count: {int(payload['phase6']['gate'].get('request_failed_count', 0))} "
+                f"({float(payload['phase6']['gate'].get('request_failed_rate', 0.0)):.2%})"
+            ),
             "",
-            "| Dataset | Valid | Invalid Reasons |",
-            "|---|---|---|",
+            "| Dataset | Valid | Invalid Reasons | Invalid Count | Invalid Rate | RequestFailed Count | RequestFailed Rate |",
+            "|---|---|---|---:|---:|---:|---:|",
         ]
     )
     for row in payload["phase6"]["gate"]["rows"]:
         reasons = ",".join(row["invalid_reasons"]) if row["invalid_reasons"] else "-"
         lines.append(
-            f"| {row['dataset_label']} | {'PASS' if row['valid'] else 'INVALID'} | {reasons} |"
+            "| {dataset} | {valid} | {reasons} | {invalid_count} | {invalid_rate:.2%} | {request_failed_count} | {request_failed_rate:.2%} |".format(
+                dataset=row["dataset_label"],
+                valid="PASS" if row["valid"] else "INVALID",
+                reasons=reasons,
+                invalid_count=int(row.get("invalid_count", 0)),
+                invalid_rate=float(row.get("invalid_rate", 0.0)),
+                request_failed_count=int(row.get("request_failed_count", 0)),
+                request_failed_rate=float(row.get("request_failed_rate", 0.0)),
+            )
         )
 
     lines.extend(
@@ -929,11 +1196,25 @@ def render_profile_cd_real_markdown(payload: Mapping[str, Any]) -> str:
             "## Phase 6 Gate",
             "",
             f"- overall_valid: {'true' if payload['phase6']['gate']['valid'] else 'false'}",
+            f"- gate_mode: `{payload['phase6']['gate'].get('mode', PHASE6_GATE_MODE_STRICT)}`",
+            "- invalid_rate_threshold: "
+            + "{:.2%}".format(
+                float(payload["phase6"]["gate"].get("invalid_rate_threshold", 0.0))
+            ),
             (
                 "- invalid_reasons: "
                 + ", ".join(payload["phase6"]["gate"]["invalid_reasons"])
                 if payload["phase6"]["gate"]["invalid_reasons"]
                 else "- invalid_reasons: (none)"
+            ),
+            (
+                f"- invalid_count: {int(payload['phase6']['gate'].get('invalid_count', 0))} "
+                f"/ {int(payload['phase6']['gate'].get('query_count', 0))} "
+                f"({float(payload['phase6']['gate'].get('invalid_rate', 0.0)):.2%})"
+            ),
+            (
+                f"- request_failed_count: {int(payload['phase6']['gate'].get('request_failed_count', 0))} "
+                f"({float(payload['phase6']['gate'].get('request_failed_rate', 0.0)):.2%})"
             ),
             "",
         ]

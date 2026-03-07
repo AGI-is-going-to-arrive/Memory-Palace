@@ -12,6 +12,7 @@ URI-based addressing with domain prefixes:
 Multiple paths can point to the same memory (aliases).
 """
 
+import asyncio
 import os
 import re
 import sys
@@ -21,7 +22,7 @@ import inspect
 import hashlib
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
-from dotenv import load_dotenv, find_dotenv
+from dotenv import load_dotenv
 
 # Ensure we can import from backend modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -39,11 +40,6 @@ dotenv_path = os.path.join(root_dir, ".env")
 
 if os.path.exists(dotenv_path):
     load_dotenv(dotenv_path)
-else:
-    # Fallback to find_dotenv
-    _dotenv_path = find_dotenv(usecwd=True)
-    if _dotenv_path:
-        load_dotenv(_dotenv_path)
 
 # Initialize FastMCP server
 mcp = FastMCP("Memory Palace Interface")
@@ -53,10 +49,17 @@ mcp = FastMCP("Memory Palace Interface")
 # =============================================================================
 # Valid domains (protocol prefixes)
 # =============================================================================
-VALID_DOMAINS = [
-    d.strip()
-    for d in os.getenv("VALID_DOMAINS", "core,writer,game,notes,system").split(",")
-]
+READ_ONLY_DOMAINS = {"system"}
+VALID_DOMAINS = list(
+    dict.fromkeys(
+        [
+            d.strip().lower()
+            for d in os.getenv("VALID_DOMAINS", "core,writer,game,notes,system").split(",")
+            if d.strip()
+        ]
+        + sorted(READ_ONLY_DOMAINS)
+    )
+)
 DEFAULT_DOMAIN = "core"
 
 # =============================================================================
@@ -92,6 +95,16 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on", "enabled"}
 
 
+def _env_csv(name: str, default: str = "") -> List[str]:
+    raw = os.getenv(name, default)
+    values: List[str] = []
+    for item in str(raw or "").split(","):
+        value = item.strip().lower()
+        if value and value not in values:
+            values.append(value)
+    return values
+
+
 def _utc_now_naive() -> datetime:
     """Return current UTC time without tzinfo (compat with legacy utcnow formatting)."""
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -125,13 +138,104 @@ AUTO_FLUSH_ENABLED = _env_bool("RUNTIME_AUTO_FLUSH_ENABLED", True)
 AUTO_FLUSH_PRIORITY = _env_int("RUNTIME_AUTO_FLUSH_PRIORITY", 2, minimum=0)
 AUTO_FLUSH_SUMMARY_LINES = _env_int("RUNTIME_AUTO_FLUSH_SUMMARY_LINES", 12, minimum=3)
 AUTO_FLUSH_PARENT_URI = os.getenv("RUNTIME_AUTO_FLUSH_PARENT_URI", "notes://").strip() or "notes://"
+INDEX_LITE_ENABLED = _env_bool("INDEX_LITE_ENABLED", False)
+AUDIT_VERBOSE = _env_bool("AUDIT_VERBOSE", False)
+INTENT_LLM_ENABLED = _env_bool("INTENT_LLM_ENABLED", False)
+
+
+def _auto_learn_explicit_enabled() -> bool:
+    return _env_bool("AUTO_LEARN_EXPLICIT_ENABLED", False)
+
+
+def _auto_learn_require_reason() -> bool:
+    return _env_bool("AUTO_LEARN_REQUIRE_REASON", True)
+
+
+def _auto_learn_allowed_domains() -> List[str]:
+    domains = _env_csv("AUTO_LEARN_ALLOWED_DOMAINS", "notes")
+    return domains or ["notes"]
+
+
+IMPORT_LEARN_AUDIT_META_KEY = "audit.import_learn.summary.v1"
+_IMPORT_LEARN_META_PERSIST_LOCK = asyncio.Lock()
 
 # Session ID for this MCP server instance
 _SESSION_ID = f"mcp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+_SESSION_ID_SAFE_PATTERN = re.compile(r"[^a-zA-Z0-9_-]+")
+
+
+def _safe_context_attr(value: Any, name: str) -> Any:
+    """Read a context attribute without propagating request-scope errors."""
+    try:
+        return getattr(value, name)
+    except Exception:
+        return None
+
+
+def _normalize_session_fragment(
+    value: Any,
+    *,
+    default: str,
+    max_len: int = 24,
+) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return default
+    safe = _SESSION_ID_SAFE_PATTERN.sub("-", text).strip("-")
+    if not safe:
+        return default
+    return safe[:max_len]
+
+
+def _build_context_session_id() -> Optional[str]:
+    """Build a request-aware session id from FastMCP context when available."""
+    try:
+        ctx = mcp.get_context()
+    except Exception:
+        return None
+
+    if ctx is None:
+        return None
+
+    client_id = _safe_context_attr(ctx, "client_id")
+    request_id = _safe_context_attr(ctx, "request_id")
+    session_obj = _safe_context_attr(ctx, "session")
+    request_context = _safe_context_attr(ctx, "request_context")
+    request_obj = None
+    if request_context is not None:
+        if session_obj is None:
+            session_obj = _safe_context_attr(request_context, "session")
+        request_obj = _safe_context_attr(request_context, "request")
+
+    if (
+        not client_id
+        and not request_id
+        and session_obj is None
+        and request_obj is None
+    ):
+        return None
+
+    client_fragment = _normalize_session_fragment(client_id, default="client")
+    session_seed = ""
+    if session_obj is not None:
+        session_seed = f"{type(session_obj).__name__}-{id(session_obj):x}"
+    session_fragment = _normalize_session_fragment(session_seed, default="session")
+    request_seed = request_id
+    if not request_seed and request_obj is not None:
+        request_seed = f"{type(request_obj).__name__}-{id(request_obj):x}"
+    request_fragment = _normalize_session_fragment(
+        request_seed,
+        default="request",
+        max_len=32,
+    )
+    return f"mcp_ctx_{client_fragment}_{session_fragment}_{request_fragment}"
 
 
 def get_session_id() -> str:
     """Get the current session ID for snapshot tracking."""
+    context_session_id = _build_context_session_id()
+    if context_session_id:
+        return context_session_id
     return _SESSION_ID
 
 
@@ -193,6 +297,18 @@ def make_uri(domain: str, path: str) -> str:
         Full URI (e.g., "core://agent")
     """
     return f"{domain}://{path}"
+
+
+def _validate_writable_domain(
+    domain: str, *, operation: str, uri: Optional[str] = None
+) -> None:
+    normalized = str(domain or "").strip().lower()
+    if normalized in READ_ONLY_DOMAINS:
+        target = str(uri or f"{normalized}://").strip()
+        raise ValueError(
+            f"{operation} does not allow writes to '{target}'. "
+            "system:// is read-only and reserved for built-in views."
+        )
 
 
 # =============================================================================
@@ -421,6 +537,23 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on", "enabled"}:
+            return True
+        if lowered in {"0", "false", "no", "off", "disabled"}:
+            return False
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return default
+
+
 def _event_preview(text: str, max_chars: int = 220) -> str:
     cleaned = re.sub(r"\s+", " ", (text or "").strip())
     if len(cleaned) <= max_chars:
@@ -455,14 +588,24 @@ async def _record_flush_event(message: str) -> None:
     )
 
 
-def _normalize_guard_decision(decision: Any) -> Dict[str, Any]:
+def _normalize_guard_decision(
+    decision: Any, *, allow_bypass: bool = False
+) -> Dict[str, Any]:
     if not isinstance(decision, dict):
         decision = {}
-    action = str(decision.get("action") or "ADD").strip().upper()
-    if action not in {"ADD", "UPDATE", "NOOP", "DELETE", "BYPASS"}:
-        action = "ADD"
-    method = str(decision.get("method") or "none").strip().lower() or "none"
     reason = str(decision.get("reason") or "").strip()
+    has_action = "action" in decision
+    raw_action = str(decision.get("action") or "").strip().upper() if has_action else ""
+    action = raw_action
+    valid_actions = {"ADD", "UPDATE", "NOOP", "DELETE"}
+    if allow_bypass:
+        valid_actions.add("BYPASS")
+    if action not in valid_actions:
+        action = "NOOP"
+        marker_value = raw_action or ("EMPTY" if has_action else "MISSING")
+        marker = f"invalid_guard_action:{marker_value}"
+        reason = marker if not reason else f"{marker}; {reason}"
+    method = str(decision.get("method") or "none").strip().lower() or "none"
     target_id = decision.get("target_id")
     if not isinstance(target_id, int) or target_id <= 0:
         target_id = None
@@ -520,40 +663,522 @@ async def _record_guard_event(
     )
 
 
-def _merge_session_global_results(
-    *, session_results: List[Dict[str, Any]], global_results: List[Dict[str, Any]]
-) -> List[Dict[str, Any]]:
-    merged: List[Dict[str, Any]] = []
-    seen = set()
+def _normalize_path_prefix(path_prefix: Optional[str]) -> str:
+    raw = str(path_prefix or "").strip().strip("/")
+    if not raw:
+        return "corrections"
+    parts = [part for part in raw.split("/") if part]
+    return "/".join(parts) if parts else "corrections"
 
-    for item in session_results + global_results:
-        uri = item.get("uri")
-        key = uri or (
-            item.get("domain"),
-            item.get("path"),
-            item.get("memory_id"),
-            item.get("chunk_id"),
+
+async def _record_import_learn_event(
+    *,
+    event_type: str,
+    operation: str,
+    decision: str,
+    reason: str,
+    source: str,
+    session_id: Optional[str],
+    actor_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    persist_runtime_meta: bool = True,
+) -> None:
+    await runtime_state.import_learn_tracker.record_event(
+        event_type=event_type,
+        operation=operation,
+        decision=decision,
+        reason=reason,
+        source=source,
+        session_id=session_id,
+        actor_id=actor_id,
+        batch_id=batch_id,
+        metadata=metadata,
+    )
+    if not persist_runtime_meta:
+        return
+    try:
+        client = get_sqlite_client()
+        set_runtime_meta = getattr(client, "set_runtime_meta", None)
+        if callable(set_runtime_meta):
+            # Serialize summary persistence to avoid stale snapshots overwriting newer values.
+            async with _IMPORT_LEARN_META_PERSIST_LOCK:
+                summary_payload = await runtime_state.import_learn_tracker.summary()
+                await set_runtime_meta(
+                    IMPORT_LEARN_AUDIT_META_KEY,
+                    _to_json(summary_payload),
+                )
+    except Exception:
+        # Keep audit recording non-blocking for primary workflows.
+        pass
+
+
+def _safe_non_negative_int(value: Any) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _sanitize_import_learn_summary(payload: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return None
+    return {
+        "window_size": _safe_non_negative_int(payload.get("window_size")),
+        "total_events": _safe_non_negative_int(payload.get("total_events")),
+        "event_type_breakdown": payload.get("event_type_breakdown")
+        if isinstance(payload.get("event_type_breakdown"), dict)
+        else {},
+        "operation_breakdown": payload.get("operation_breakdown")
+        if isinstance(payload.get("operation_breakdown"), dict)
+        else {},
+        "decision_breakdown": payload.get("decision_breakdown")
+        if isinstance(payload.get("decision_breakdown"), dict)
+        else {},
+        "rejected_events": _safe_non_negative_int(payload.get("rejected_events")),
+        "rollback_events": _safe_non_negative_int(payload.get("rollback_events")),
+        "top_reasons": payload.get("top_reasons")
+        if isinstance(payload.get("top_reasons"), list)
+        else [],
+        "last_event_at": payload.get("last_event_at"),
+        "recent_events": payload.get("recent_events")
+        if isinstance(payload.get("recent_events"), list)
+        else [],
+    }
+
+
+async def _load_persisted_import_learn_summary(client: Any) -> Optional[Dict[str, Any]]:
+    get_runtime_meta = getattr(client, "get_runtime_meta", None)
+    if not callable(get_runtime_meta):
+        return None
+    try:
+        raw_value = await get_runtime_meta(IMPORT_LEARN_AUDIT_META_KEY)
+    except Exception:
+        return None
+    if not isinstance(raw_value, str) or not raw_value.strip():
+        return None
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return None
+    return _sanitize_import_learn_summary(parsed)
+
+
+def _merge_import_learn_summaries(
+    runtime_summary: Dict[str, Any], persisted_summary: Dict[str, Any]
+) -> Dict[str, Any]:
+    merged = dict(runtime_summary)
+    if _safe_non_negative_int(merged.get("total_events")) <= 0:
+        merged["total_events"] = _safe_non_negative_int(
+            persisted_summary.get("total_events")
         )
-        if key in seen:
-            continue
-        seen.add(key)
-        merged.append(item)
+    if _safe_non_negative_int(merged.get("rejected_events")) <= 0:
+        merged["rejected_events"] = _safe_non_negative_int(
+            persisted_summary.get("rejected_events")
+        )
+    if _safe_non_negative_int(merged.get("rollback_events")) <= 0:
+        merged["rollback_events"] = _safe_non_negative_int(
+            persisted_summary.get("rollback_events")
+        )
+    if not isinstance(merged.get("event_type_breakdown"), dict) or not merged.get(
+        "event_type_breakdown"
+    ):
+        merged["event_type_breakdown"] = dict(
+            persisted_summary.get("event_type_breakdown") or {}
+        )
+    if not merged.get("last_event_at"):
+        merged["last_event_at"] = persisted_summary.get("last_event_at")
+    merged["persisted_snapshot"] = persisted_summary
     return merged
 
 
-async def _ensure_parent_path_exists(client: Any, parent_uri: str) -> Tuple[str, str]:
+async def run_explicit_learn_service(
+    *,
+    content: str,
+    source: str,
+    reason: Optional[str],
+    session_id: str,
+    actor_id: Optional[str] = None,
+    domain: str = "notes",
+    path_prefix: str = "corrections",
+    execute: bool = False,
+    client: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Internal explicit learn service for H1/H3 rollout.
+
+    This function is intentionally not exposed as an HTTP route or MCP tool.
+    It enforces source/reason/session_id contracts and evaluates write_guard
+    before any write. By default it runs in prepare-only mode (execute=False).
+    For H3, execute=True performs explicit write and returns rollback metadata.
+    """
+    operation = "learn_explicit"
+    normalized_source = str(source or "").strip()
+    normalized_reason = str(reason or "").strip()
+    normalized_session_id = str(session_id or "").strip()
+    normalized_actor_id = (str(actor_id).strip() if actor_id is not None else None) or None
+    normalized_domain = str(domain or "").strip().lower() or "notes"
+    normalized_path_prefix = _normalize_path_prefix(path_prefix)
+    target_parent_path = f"{normalized_path_prefix}/{normalized_session_id}".strip("/")
+    target_parent_uri = make_uri(normalized_domain, target_parent_path)
+
+    payload: Dict[str, Any] = {
+        "ok": True,
+        "accepted": False,
+        "operation": operation,
+        "source": normalized_source,
+        "reason_text": normalized_reason,
+        "session_id": normalized_session_id,
+        "actor_id": normalized_actor_id,
+        "domain": normalized_domain,
+        "path_prefix": normalized_path_prefix,
+        "target_parent_uri": target_parent_uri,
+        "execute": bool(execute),
+        "reason": "rejected",
+    }
+
+    if not _auto_learn_explicit_enabled():
+        payload["reason"] = "auto_learn_explicit_disabled"
+        await _record_import_learn_event(
+            event_type="reject",
+            operation=operation,
+            decision="rejected",
+            reason="auto_learn_explicit_disabled",
+            source=normalized_source or "learn",
+            session_id=normalized_session_id,
+            actor_id=normalized_actor_id,
+            metadata={"domain": normalized_domain},
+            persist_runtime_meta=False,
+        )
+        return payload
+
+    if not normalized_source:
+        payload["reason"] = "source_required"
+        await _record_import_learn_event(
+            event_type="reject",
+            operation=operation,
+            decision="rejected",
+            reason="source_required",
+            source="learn",
+            session_id=normalized_session_id,
+            actor_id=normalized_actor_id,
+        )
+        return payload
+
+    if _auto_learn_require_reason() and not normalized_reason:
+        payload["reason"] = "reason_required"
+        await _record_import_learn_event(
+            event_type="reject",
+            operation=operation,
+            decision="rejected",
+            reason="reason_required",
+            source=normalized_source,
+            session_id=normalized_session_id,
+            actor_id=normalized_actor_id,
+        )
+        return payload
+
+    if not normalized_session_id:
+        payload["reason"] = "session_id_required"
+        await _record_import_learn_event(
+            event_type="reject",
+            operation=operation,
+            decision="rejected",
+            reason="session_id_required",
+            source=normalized_source,
+            session_id=None,
+            actor_id=normalized_actor_id,
+        )
+        return payload
+
+    normalized_content = str(content or "").strip()
+    if not normalized_content:
+        payload["reason"] = "content_required"
+        await _record_import_learn_event(
+            event_type="reject",
+            operation=operation,
+            decision="rejected",
+            reason="content_required",
+            source=normalized_source,
+            session_id=normalized_session_id,
+            actor_id=normalized_actor_id,
+        )
+        return payload
+
+    allowed_domains = _auto_learn_allowed_domains()
+    payload["allowed_domains"] = allowed_domains
+    if normalized_domain not in allowed_domains:
+        payload["reason"] = "domain_not_allowed"
+        await _record_import_learn_event(
+            event_type="reject",
+            operation=operation,
+            decision="rejected",
+            reason="domain_not_allowed",
+            source=normalized_source,
+            session_id=normalized_session_id,
+            actor_id=normalized_actor_id,
+            metadata={"domain": normalized_domain, "allowed_domains": allowed_domains},
+        )
+        return payload
+
+    learn_client = client or get_sqlite_client()
+    try:
+        guard_decision = _normalize_guard_decision(
+            await learn_client.write_guard(
+                content=normalized_content,
+                domain=normalized_domain,
+                path_prefix=target_parent_path,
+            )
+        )
+    except Exception as guard_exc:
+        payload["reason"] = "write_guard_unavailable"
+        payload.update(
+            {
+                "guard_action": "ERROR",
+                "guard_reason": f"write_guard_unavailable:{type(guard_exc).__name__}",
+                "guard_method": "exception",
+                "guard_target_id": None,
+                "guard_target_uri": None,
+                "degraded": True,
+                "degrade_reasons": ["write_guard_exception"],
+            }
+        )
+        await _record_import_learn_event(
+            event_type="reject",
+            operation=operation,
+            decision="rejected",
+            reason="write_guard_unavailable",
+            source=normalized_source,
+            session_id=normalized_session_id,
+            actor_id=normalized_actor_id,
+            metadata={
+                "domain": normalized_domain,
+                "guard_error": type(guard_exc).__name__,
+            },
+        )
+        return payload
+
+    payload.update(_guard_fields(guard_decision))
+    guard_action = str(guard_decision.get("action") or "ADD").upper()
+    if guard_action != "ADD":
+        payload["reason"] = f"write_guard_blocked:{guard_action.lower()}"
+        await _record_import_learn_event(
+            event_type="reject",
+            operation=operation,
+            decision="rejected",
+            reason=payload["reason"],
+            source=normalized_source,
+            session_id=normalized_session_id,
+            actor_id=normalized_actor_id,
+            metadata={
+                "guard_action": guard_action,
+                "guard_method": guard_decision.get("method"),
+            },
+        )
+        return payload
+
+    payload["accepted"] = True
+    payload["reason"] = "prepared"
+    source_hash = _build_source_hash(
+        f"{normalized_source}\n{normalized_reason}\n{normalized_content}"
+    )
+    payload["source_hash"] = source_hash
+
+    safe_session_id = re.sub(r"[^a-zA-Z0-9_-]+", "-", normalized_session_id).strip("-")
+    if not safe_session_id:
+        safe_session_id = "session"
+    batch_id = f"learn-{safe_session_id[:24]}-{source_hash[:8]}-{uuid.uuid4().hex[:6]}"
+    payload["batch_id"] = batch_id
+
+    if not execute:
+        await _record_import_learn_event(
+            event_type="learn",
+            operation=operation,
+            decision="accepted",
+            reason="prepared",
+            source=normalized_source,
+            session_id=normalized_session_id,
+            actor_id=normalized_actor_id,
+            batch_id=batch_id,
+            metadata={
+                "domain": normalized_domain,
+                "path_prefix": normalized_path_prefix,
+                "target_parent_uri": target_parent_uri,
+            },
+        )
+        return payload
+
+    learn_title = f"learn-{source_hash[:8]}-{uuid.uuid4().hex[:8]}"
+    created_namespace_memories: List[Dict[str, Any]] = []
+    try:
+        (
+            created_domain,
+            created_parent_path,
+            created_namespace_memories,
+        ) = await _ensure_parent_path_exists(
+            learn_client,
+            target_parent_uri,
+        )
+        created = await learn_client.create_memory(
+            parent_path=created_parent_path,
+            content=normalized_content,
+            priority=max(1, AUTO_FLUSH_PRIORITY),
+            title=learn_title,
+            disclosure="Explicit learn trigger",
+            domain=created_domain,
+        )
+    except Exception as exec_exc:
+        payload["accepted"] = False
+        payload["reason"] = "create_memory_failed"
+        payload["error"] = str(exec_exc) or type(exec_exc).__name__
+        if created_namespace_memories:
+            payload["created_namespace_memories"] = created_namespace_memories
+            namespace_memory_ids = [
+                _safe_int(item.get("memory_id"), default=0)
+                for item in created_namespace_memories
+                if isinstance(item, dict)
+            ]
+            namespace_memory_ids = [item for item in namespace_memory_ids if item > 0]
+            payload["rollback"] = {
+                "enabled": True,
+                "mode": "namespace_cleanup_only",
+                "memory_id": 0,
+                "batch_id": batch_id,
+                "namespace_memory_ids": namespace_memory_ids,
+                "side_effects_audit_required": True,
+                "residual_artifacts_review_required": True,
+                "side_effects_note": "execute_failed_namespace_cleanup_required",
+            }
+        await _record_import_learn_event(
+            event_type="reject",
+            operation=operation,
+            decision="rejected",
+            reason="create_memory_failed",
+            source=normalized_source,
+            session_id=normalized_session_id,
+            actor_id=normalized_actor_id,
+            batch_id=batch_id,
+            metadata={
+                "domain": normalized_domain,
+                "path_prefix": normalized_path_prefix,
+                "target_parent_uri": target_parent_uri,
+                "error": type(exec_exc).__name__,
+                "created_namespace_count": len(created_namespace_memories),
+            },
+        )
+        return payload
+
+    created_memory_payload = {
+        "id": int(created.get("id") or 0),
+        "uri": str(created.get("uri") or ""),
+        "domain": str(created.get("domain") or created_domain),
+        "path": str(created.get("path") or ""),
+    }
+    payload["reason"] = "executed"
+    payload["executed"] = True
+    payload["created_memory"] = created_memory_payload
+    payload["created_namespace_memories"] = created_namespace_memories
+    namespace_memory_ids = [
+        _safe_int(item.get("memory_id"), default=0)
+        for item in created_namespace_memories
+        if isinstance(item, dict)
+    ]
+    namespace_memory_ids = [item for item in namespace_memory_ids if item > 0]
+    payload["rollback"] = {
+        "enabled": True,
+        "mode": "delete_memory_id",
+        "memory_id": created_memory_payload["id"],
+        "batch_id": batch_id,
+        "namespace_memory_ids": namespace_memory_ids,
+        "side_effects_audit_required": True,
+        "residual_artifacts_review_required": True,
+        "side_effects_note": (
+            "rollback_covers_created_memory_ids_and_best_effort_namespace_cleanup"
+            if namespace_memory_ids
+            else "rollback_only_covers_created_memory_ids"
+        ),
+    }
+    await _record_import_learn_event(
+        event_type="learn",
+        operation=operation,
+        decision="executed",
+        reason="executed",
+        source=normalized_source,
+        session_id=normalized_session_id,
+        actor_id=normalized_actor_id,
+        batch_id=batch_id,
+        metadata={
+            "domain": normalized_domain,
+            "path_prefix": normalized_path_prefix,
+            "target_parent_uri": target_parent_uri,
+            "created_memory_id": created_memory_payload["id"],
+            "created_uri": created_memory_payload["uri"],
+            "created_namespace_count": len(namespace_memory_ids),
+        },
+    )
+    return payload
+
+
+def _merge_session_global_results(
+    *, session_results: List[Dict[str, Any]], global_results: List[Dict[str, Any]]
+) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+    merged: List[Dict[str, Any]] = []
+    seen = set()
+    dedup_dropped = 0
+    session_contributed = 0
+    global_contributed = 0
+
+    for index, item in enumerate(session_results + global_results):
+        source_bucket = "session" if index < len(session_results) else "global"
+        key = _search_result_identity(item)
+        if key in seen:
+            dedup_dropped += 1
+            continue
+        seen.add(key)
+        merged.append(item)
+        if source_bucket == "session":
+            session_contributed += 1
+        else:
+            global_contributed += 1
+    return merged, {
+        "session_candidates": len(session_results),
+        "global_candidates": len(global_results),
+        "merged_candidates": len(merged),
+        "dedup_dropped": dedup_dropped,
+        "session_contributed": session_contributed,
+        "global_contributed": global_contributed,
+    }
+
+
+def _search_result_identity(item: Dict[str, Any]) -> Any:
+    uri = item.get("uri")
+    if uri:
+        return ("uri", str(uri))
+    return (
+        "fallback",
+        item.get("domain"),
+        item.get("path"),
+        item.get("memory_id"),
+        item.get("chunk_id"),
+    )
+
+
+async def _ensure_parent_path_exists(
+    client: Any, parent_uri: str
+) -> Tuple[str, str, List[Dict[str, Any]]]:
     domain, parent_path = parse_uri(parent_uri)
     if not parent_path:
-        return domain, parent_path
+        return domain, parent_path, []
 
     # Ensure all intermediate nodes exist for nested flush paths.
     segments = [segment for segment in parent_path.split("/") if segment]
     current_path = ""
+    created_nodes: List[Dict[str, Any]] = []
     for segment in segments:
         next_path = f"{current_path}/{segment}" if current_path else segment
         exists = await client.get_memory_by_path(next_path, domain)
         if not exists:
-            await client.create_memory(
+            created = await client.create_memory(
                 parent_path=current_path,
                 content=f"[runtime] auto-created flush namespace: {make_uri(domain, next_path)}",
                 priority=max(1, AUTO_FLUSH_PRIORITY),
@@ -561,8 +1186,16 @@ async def _ensure_parent_path_exists(client: Any, parent_uri: str) -> Tuple[str,
                 disclosure="Runtime flush namespace",
                 domain=domain,
             )
+            created_nodes.append(
+                {
+                    "memory_id": _safe_int(created.get("id"), default=0),
+                    "domain": domain,
+                    "path": next_path,
+                    "uri": make_uri(domain, next_path),
+                }
+            )
         current_path = next_path
-    return domain, parent_path
+    return domain, parent_path, created_nodes
 
 
 _AUTO_FLUSH_IN_PROGRESS: set[str] = set()
@@ -691,6 +1324,7 @@ async def generate_gist(
 async def _flush_session_summary_to_memory(
     *,
     client: Any,
+    source: str,
     reason: str,
     force: bool,
     max_lines: int,
@@ -718,7 +1352,9 @@ async def _flush_session_summary_to_memory(
         gist_quality = 0.0
     source_hash = _build_source_hash(summary)
 
-    domain, parent_path = await _ensure_parent_path_exists(client, AUTO_FLUSH_PARENT_URI)
+    domain, parent_path, _ = await _ensure_parent_path_exists(
+        client, AUTO_FLUSH_PARENT_URI
+    )
     flush_title = f"auto_flush_{_utc_now_naive().strftime('%Y%m%d_%H%M%S')}"
     content = (
         f"# Runtime Session Flush\n"
@@ -733,6 +1369,70 @@ async def _flush_session_summary_to_memory(
         f"## Trace\n"
         f"{summary}"
     )
+    guard_decision = _normalize_guard_decision(
+        {"action": "ADD", "method": "none", "reason": "guard_not_evaluated"}
+    )
+    try:
+        guard_decision = _normalize_guard_decision(
+            await client.write_guard(
+                content=content,
+                domain=domain,
+                path_prefix=parent_path if parent_path else None,
+            )
+        )
+    except Exception as guard_exc:
+        guard_decision = _normalize_guard_decision(
+            {
+                "action": "NOOP",
+                "method": "exception",
+                "reason": f"write_guard_unavailable: {guard_exc}",
+                "degraded": True,
+                "degrade_reasons": ["write_guard_exception"],
+            }
+        )
+    guard_action = str(guard_decision.get("action") or "NOOP").upper()
+    guard_blocked = guard_action != "ADD"
+    try:
+        await _record_guard_event(
+            operation="compact_context",
+            decision=guard_decision,
+            blocked=guard_blocked,
+        )
+    except Exception:
+        pass
+    if guard_blocked:
+        guard_is_degraded = bool(guard_decision.get("degraded"))
+        guard_reason = str(guard_decision.get("reason") or "")
+        guard_is_invalid = guard_reason.startswith("invalid_guard_action:")
+        if (
+            guard_action in {"NOOP", "UPDATE"}
+            and not guard_is_degraded
+            and not guard_is_invalid
+        ):
+            # Dedup/merge decisions mean this summary is already represented;
+            # clear pending events to avoid infinite flush retries.
+            await runtime_state.flush_tracker.mark_flushed(session_id=session_id)
+            payload: Dict[str, Any] = {
+                "flushed": True,
+                "reason": "write_guard_deduped",
+                **_guard_fields(guard_decision),
+            }
+            guard_target_uri = guard_decision.get("target_uri")
+            if isinstance(guard_target_uri, str) and guard_target_uri.strip():
+                payload["uri"] = guard_target_uri
+            return payload
+
+        payload: Dict[str, Any] = {
+            "flushed": False,
+            "reason": "write_guard_blocked",
+            **_guard_fields(guard_decision),
+        }
+        if bool(guard_decision.get("degraded")):
+            payload["degraded"] = True
+            degrade_reasons = guard_decision.get("degrade_reasons")
+            if isinstance(degrade_reasons, list) and degrade_reasons:
+                payload["degrade_reasons"] = list(dict.fromkeys(degrade_reasons))
+        return payload
     defer_index = await _should_defer_index_on_write()
     result = await client.create_memory(
         parent_path=parent_path,
@@ -776,6 +1476,7 @@ async def _flush_session_summary_to_memory(
     payload: Dict[str, Any] = {
         "flushed": True,
         "uri": created_uri,
+        **_guard_fields(guard_decision),
         "gist_method": gist_method,
         "quality": round(gist_quality, 3),
         "source_hash": source_hash,
@@ -797,6 +1498,23 @@ async def _flush_session_summary_to_memory(
         degrade_reasons = payload.setdefault("degrade_reasons", [])
         if "index_enqueue_dropped" not in degrade_reasons:
             degrade_reasons.append("index_enqueue_dropped")
+    try:
+        await runtime_state.promotion_tracker.record_event(
+            session_id=session_id,
+            source=source,
+            trigger_reason=reason,
+            uri=str(created_uri),
+            memory_id=created_memory_id if created_memory_id > 0 else None,
+            gist_method=gist_method,
+            quality=gist_quality,
+            degraded=bool(payload.get("degrade_reasons")) or bool(gist_store_error),
+            degrade_reasons=payload.get("degrade_reasons"),
+            index_queued=payload.get("index_queued", 0),
+            index_dropped=payload.get("index_dropped", 0),
+            index_deduped=payload.get("index_deduped", 0),
+        )
+    except Exception:
+        pass
     return payload
 
 
@@ -810,6 +1528,7 @@ async def _maybe_auto_flush(client: Any, *, reason: str) -> Optional[Dict[str, A
     try:
         return await _flush_session_summary_to_memory(
             client=client,
+            source="auto_flush",
             reason=reason,
             force=False,
             max_lines=AUTO_FLUSH_SUMMARY_LINES,
@@ -889,7 +1608,11 @@ def _is_signature_mismatch(exc: TypeError) -> bool:
 
 
 async def _try_client_method_variants(
-    client: Any, method_names: List[str], kwargs_variants: List[Dict[str, Any]]
+    client: Any,
+    method_names: List[str],
+    kwargs_variants: List[Dict[str, Any]],
+    *,
+    continue_on_none: bool = False,
 ) -> Tuple[Optional[str], Optional[Dict[str, Any]], Any]:
     """
     Try multiple sqlite_client methods/kwargs combinations.
@@ -907,6 +1630,8 @@ async def _try_client_method_variants(
                 result = method(**kwargs)
                 if inspect.isawaitable(result):
                     result = await result
+                if continue_on_none and result is None:
+                    continue
                 return method_name, kwargs, result
             except TypeError as exc:
                 if _is_signature_mismatch(exc):
@@ -992,6 +1717,134 @@ def _normalize_search_filters(filters: Optional[Dict[str, Any]]) -> Dict[str, An
             normalized["updated_after"] = parsed.isoformat()
 
     return normalized
+
+
+def _normalize_scope_hint(scope_hint: Optional[Any]) -> Dict[str, Any]:
+    """Normalize scope hint from query side without changing schema contracts."""
+    if scope_hint is None:
+        return {
+            "provided": False,
+            "raw": None,
+            "domain": None,
+            "path_prefix": None,
+            "strategy": "none",
+        }
+
+    raw_value = str(scope_hint).strip()
+    if not raw_value:
+        return {
+            "provided": False,
+            "raw": raw_value,
+            "domain": None,
+            "path_prefix": None,
+            "strategy": "none",
+        }
+
+    if "://" in raw_value:
+        parsed_domain, parsed_path = parse_uri(raw_value)
+        return {
+            "provided": True,
+            "raw": raw_value,
+            "domain": parsed_domain,
+            "path_prefix": parsed_path or None,
+            "strategy": "uri_prefix" if parsed_path else "domain_uri",
+        }
+
+    lowered = raw_value.lower()
+    if lowered in VALID_DOMAINS:
+        return {
+            "provided": True,
+            "raw": raw_value,
+            "domain": lowered,
+            "path_prefix": None,
+            "strategy": "domain",
+        }
+
+    prefix = raw_value.strip("/")
+    return {
+        "provided": bool(prefix),
+        "raw": raw_value,
+        "domain": None,
+        "path_prefix": prefix or None,
+        "strategy": "path_prefix" if prefix else "none",
+    }
+
+
+def _merge_scope_hint_with_filters(
+    *,
+    normalized_filters: Dict[str, Any],
+    scope_hint: Dict[str, Any],
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Merge scope hint into filters with filter-first conflict handling."""
+    merged = dict(normalized_filters)
+    provided = bool(scope_hint.get("provided"))
+    hint_domain = scope_hint.get("domain")
+    hint_path_prefix = scope_hint.get("path_prefix")
+    conflicts: List[str] = []
+    applied = False
+    domain_conflict = False
+
+    if provided and isinstance(hint_domain, str) and hint_domain:
+        existing_domain = merged.get("domain")
+        if existing_domain is None:
+            merged["domain"] = hint_domain
+            applied = True
+        elif str(existing_domain) != hint_domain:
+            conflicts.append("domain_conflict")
+            domain_conflict = True
+
+    if provided and isinstance(hint_path_prefix, str) and hint_path_prefix:
+        if domain_conflict:
+            resolution = {
+                "provided": provided,
+                "raw": scope_hint.get("raw"),
+                "strategy": "filters_preferred",
+                "applied": applied,
+                "effective": {
+                    "domain": merged.get("domain"),
+                    "path_prefix": merged.get("path_prefix"),
+                },
+                "conflicts": conflicts,
+            }
+            return merged, resolution
+        existing_prefix = merged.get("path_prefix")
+        hint_prefix_norm = hint_path_prefix.strip("/")
+        if existing_prefix is None:
+            merged["path_prefix"] = hint_prefix_norm
+            applied = True
+        else:
+            existing_prefix_norm = str(existing_prefix).strip("/")
+            if not existing_prefix_norm:
+                merged["path_prefix"] = hint_prefix_norm
+                applied = True
+            elif existing_prefix_norm == hint_prefix_norm:
+                pass
+            elif existing_prefix_norm.startswith(hint_prefix_norm):
+                # Existing filter is narrower, keep filter as source of truth.
+                pass
+            elif hint_prefix_norm.startswith(existing_prefix_norm):
+                # Hint is narrower than existing filter, apply hint.
+                merged["path_prefix"] = hint_prefix_norm
+                applied = True
+            else:
+                conflicts.append("path_prefix_conflict")
+
+    resolution = {
+        "provided": provided,
+        "raw": scope_hint.get("raw"),
+        "strategy": (
+            str(scope_hint.get("strategy") or "none")
+            if applied
+            else ("filters_preferred" if provided else "none")
+        ),
+        "applied": applied,
+        "effective": {
+            "domain": merged.get("domain"),
+            "path_prefix": merged.get("path_prefix"),
+        },
+        "conflicts": conflicts,
+    }
+    return merged, resolution
 
 
 def _normalize_search_item(item: Any) -> Dict[str, Any]:
@@ -1251,6 +2104,10 @@ async def _resolve_system_uri(uri: str) -> Optional[str]:
         return await _generate_boot_memory_view()
     if stripped == "system://index":
         return await _generate_memory_index_view()
+    if stripped == "system://index-lite":
+        return await _generate_index_lite_memory_view()
+    if stripped == "system://audit":
+        return await _generate_audit_memory_view()
     if stripped == "system://recent" or stripped.startswith("system://recent/"):
         limit = 10
         suffix = stripped[len("system://recent") :].strip("/")
@@ -1315,7 +2172,67 @@ async def _build_index_status_payload(client: Any) -> Dict[str, Any]:
     }
 
 
-async def _fetch_and_format_memory(client, uri: str) -> str:
+async def _build_sm_lite_stats() -> Dict[str, Any]:
+    """Collect runtime short-memory stats without introducing persistent storage."""
+    session_cache_stats = await runtime_state.session_cache.summary()
+    flush_tracker_stats = await runtime_state.flush_tracker.summary()
+    promotion_stats = await runtime_state.promotion_tracker.summary()
+    return {
+        "storage": "runtime_ephemeral",
+        "promotion_path": "compact_context + auto_flush",
+        "session_cache": session_cache_stats,
+        "flush_tracker": flush_tracker_stats,
+        "promotion": promotion_stats,
+    }
+
+
+async def _collect_ancestor_memories(
+    client: Any, *, domain: str, path: str, max_hops: int = 64
+) -> List[Dict[str, Any]]:
+    """Collect ancestor memories from parent path to root, deduplicated."""
+    path_value = (path or "").strip().strip("/")
+    if not path_value:
+        return []
+
+    segments = [segment for segment in path_value.split("/") if segment]
+    if len(segments) <= 1:
+        return []
+
+    ancestors: List[Dict[str, Any]] = []
+    seen_keys: set[Tuple[Any, str]] = set()
+    for depth in range(len(segments) - 1, 0, -1):
+        if len(ancestors) >= max_hops:
+            break
+        candidate_path = "/".join(segments[:depth])
+        memory = await client.get_memory_by_path(candidate_path, domain)
+        if not memory:
+            continue
+        ancestor_uri = make_uri(domain, candidate_path)
+        key = (
+            memory.get("id"),
+            ancestor_uri,
+        )
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        ancestors.append(
+            {
+                "uri": ancestor_uri,
+                "memory_id": memory.get("id"),
+                "priority": memory.get("priority", 0),
+                "disclosure": memory.get("disclosure"),
+                "content_snippet": _event_preview(str(memory.get("content", "")), 160),
+            }
+        )
+    return ancestors
+
+
+async def _fetch_and_format_memory(
+    client,
+    uri: str,
+    *,
+    include_ancestors: bool = False,
+) -> str:
     """
     Internal helper to fetch memory data and return formatted string.
     Used by read_memory tool.
@@ -1328,18 +2245,31 @@ async def _fetch_and_format_memory(client, uri: str) -> str:
     if not memory:
         raise ValueError(f"URI '{make_uri(domain, path)}' not found.")
 
-    # Get children across ALL paths (aliases) of this memory.
-    # Once you reach a memory, the sub-memories you see depend on
-    # what the memory IS, not which path you used to get here.
-    children = await client.get_children(memory["id"])
-
-    # Format output
-    lines = []
-
     # Build URI from domain and path
     disp_domain = memory.get("domain", DEFAULT_DOMAIN)
     disp_path = memory.get("path", "unknown")
     disp_uri = make_uri(disp_domain, disp_path)
+
+    # Get children across ALL paths (aliases) of this memory.
+    # Once you reach a memory, the sub-memories you see depend on
+    # what the memory IS, not which path you used to get here.
+    children = await client.get_children(memory["id"])
+    ancestors: List[Dict[str, Any]] = []
+    ancestors_lookup_failed = False
+    if include_ancestors:
+        try:
+            ancestors = await _collect_ancestor_memories(
+                client,
+                domain=disp_domain,
+                path=disp_path,
+            )
+        except Exception:
+            # Keep legacy read output usable even if ancestor expansion fails.
+            ancestors = []
+            ancestors_lookup_failed = True
+
+    # Format output
+    lines = []
 
     # Header Block
     lines.append("=" * 60)
@@ -1361,6 +2291,35 @@ async def _fetch_and_format_memory(client, uri: str) -> str:
     # Content - directly, no header
     lines.append(memory.get("content", "(empty)"))
     lines.append("")
+
+    if include_ancestors:
+        lines.append("=" * 60)
+        lines.append("")
+        lines.append("ANCESTOR MEMORIES (Nearest Parent -> Root)")
+        lines.append("")
+        lines.append("=" * 60)
+        lines.append("")
+        if ancestors_lookup_failed:
+            lines.append("(Ancestor lookup degraded: include_ancestors_lookup_failed.)")
+            lines.append("")
+        elif ancestors:
+            for ancestor in ancestors:
+                lines.append(
+                    f"- URI: {ancestor.get('uri')} [#{ancestor.get('memory_id')}]"
+                )
+                lines.append(f"  Priority: {ancestor.get('priority', 0)}")
+                disclosure = ancestor.get("disclosure")
+                if disclosure:
+                    lines.append(f"  When to recall: {disclosure}")
+                else:
+                    lines.append("  When to recall: (not set)")
+                lines.append(
+                    f"  Snippet: {ancestor.get('content_snippet') or '(empty)'}"
+                )
+                lines.append("")
+        else:
+            lines.append("(No ancestor memories found.)")
+            lines.append("")
 
     if children:
         lines.append("=" * 60)
@@ -1389,6 +2348,331 @@ async def _fetch_and_format_memory(client, uri: str) -> str:
                 lines.append(f"  Snippet: {snippet}  ")
 
             lines.append("")
+
+    return "\n".join(lines)
+
+
+def _should_expose_index_lite_in_boot() -> bool:
+    """Gate index-lite entry point in boot output with a conservative default."""
+    return INDEX_LITE_ENABLED
+
+
+async def _generate_index_lite_memory_view(limit: int = 20) -> str:
+    """
+    Generate a lightweight gist-backed index summary.
+
+    This view intentionally stays compact and only surfaces entries that have
+    materialized gist rows.
+    """
+    client = get_sqlite_client()
+    generated_at = _utc_iso_now()
+    target_limit = max(1, min(100, int(limit)))
+    degrade_reasons: List[str] = []
+
+    gist_stats: Dict[str, Any] = {}
+    gist_stats_getter = getattr(client, "get_gist_stats", None)
+    if callable(gist_stats_getter):
+        try:
+            raw_stats = await gist_stats_getter()
+            if isinstance(raw_stats, dict):
+                gist_stats = raw_stats
+            else:
+                degrade_reasons.append("invalid_gist_stats_payload")
+        except Exception:
+            degrade_reasons.append("gist_stats_error")
+    else:
+        degrade_reasons.append("gist_stats_unavailable")
+
+    recent_entries: List[Dict[str, Any]] = []
+    recent_getter = getattr(client, "get_recent_memories", None)
+    if callable(recent_getter):
+        try:
+            raw_recent = await recent_getter(limit=max(target_limit * 3, 20))
+            if isinstance(raw_recent, list):
+                recent_entries = [row for row in raw_recent if isinstance(row, dict)]
+            else:
+                degrade_reasons.append("invalid_recent_memories_payload")
+        except Exception:
+            degrade_reasons.append("recent_memories_error")
+    else:
+        degrade_reasons.append("recent_memories_unavailable")
+
+    gist_lookup = getattr(client, "get_latest_memory_gist", None)
+    index_items: List[Dict[str, Any]] = []
+    if callable(gist_lookup):
+        for row in recent_entries:
+            memory_id = _safe_int(row.get("memory_id"), default=-1)
+            if memory_id <= 0:
+                continue
+            uri = str(row.get("uri") or "").strip()
+            if not uri:
+                continue
+            try:
+                gist_row = await gist_lookup(memory_id)
+            except Exception:
+                gist_row = None
+                if "latest_gist_lookup_error" not in degrade_reasons:
+                    degrade_reasons.append("latest_gist_lookup_error")
+            if not isinstance(gist_row, dict):
+                continue
+            gist_text = str(gist_row.get("gist_text") or "").strip()
+            if not gist_text:
+                continue
+            quality_raw = gist_row.get("quality_score")
+            try:
+                quality_value = round(float(quality_raw), 3)
+            except (TypeError, ValueError):
+                quality_value = None
+            index_items.append(
+                {
+                    "uri": uri,
+                    "memory_id": memory_id,
+                    "gist_method": str(gist_row.get("gist_method") or "unknown"),
+                    "quality_score": quality_value,
+                    "gist_preview": _trim_sentence(gist_text, limit=96),
+                    "updated_at": row.get("created_at"),
+                }
+            )
+            if len(index_items) >= target_limit:
+                break
+    else:
+        degrade_reasons.append("latest_gist_lookup_unavailable")
+
+    lines: List[str] = []
+    lines.append("# Memory Index Lite")
+    lines.append(f"# Generated: {generated_at}")
+    lines.append(f"# Entry count: {len(index_items)}")
+    if isinstance(gist_stats.get("total_rows"), int):
+        lines.append(f"# Gist rows: {gist_stats.get('total_rows')}")
+    if isinstance(gist_stats.get("active_coverage"), (int, float)):
+        lines.append(f"# Gist active coverage: {gist_stats.get('active_coverage')}")
+    if degrade_reasons:
+        lines.append("# Status: degraded")
+        lines.append(f"# degrade_reason: {', '.join(sorted(set(degrade_reasons)))}")
+    else:
+        lines.append("# Status: ok")
+    lines.append("")
+
+    if not index_items:
+        lines.append("(No gist-backed entries found.)")
+    else:
+        for idx, item in enumerate(index_items, 1):
+            quality_value = item.get("quality_score")
+            quality_text = (
+                "n/a" if quality_value is None else f"{float(quality_value):.3f}"
+            )
+            lines.append(
+                f"{idx}. {item['uri']} [#{item['memory_id']}] "
+                f"(method={item['gist_method']}, quality={quality_text})"
+            )
+            lines.append(f"   gist: {item['gist_preview']}")
+            if item.get("updated_at"):
+                lines.append(f"   updated_at: {item['updated_at']}")
+            lines.append("")
+
+    return "\n".join(lines)
+
+
+async def _generate_audit_memory_view() -> str:
+    """Generate a consolidated audit view for index/guard/gist/vitality and SM-Lite."""
+    client = get_sqlite_client()
+    await runtime_state.ensure_started(get_sqlite_client)
+
+    generated_at = _utc_iso_now()
+    degrade_reasons: List[str] = []
+
+    try:
+        index_status = await _build_index_status_payload(client)
+    except Exception as exc:
+        index_status = {"degraded": True, "reason": str(exc), "index_available": False}
+        degrade_reasons.append("index_status_error")
+    if bool(index_status.get("degraded")):
+        degrade_reasons.append(
+            f"index:{str(index_status.get('reason') or 'degraded')}"
+        )
+
+    try:
+        guard_stats = await runtime_state.guard_tracker.summary()
+    except Exception as exc:
+        guard_stats = {"degraded": True, "reason": str(exc)}
+        degrade_reasons.append("guard_stats_error")
+
+    try:
+        import_learn_stats = await runtime_state.import_learn_tracker.summary()
+    except Exception as exc:
+        import_learn_stats = {"degraded": True, "reason": str(exc)}
+        degrade_reasons.append("import_learn:error")
+    if bool(import_learn_stats.get("degraded")):
+        degrade_reasons.append(
+            f"import_learn:{str(import_learn_stats.get('reason') or 'degraded')}"
+        )
+    persisted_import_learn_stats = await _load_persisted_import_learn_summary(client)
+    if isinstance(import_learn_stats, dict) and isinstance(
+        persisted_import_learn_stats, dict
+    ):
+        runtime_total = _safe_non_negative_int(import_learn_stats.get("total_events"))
+        if runtime_total <= 0:
+            import_learn_stats = _merge_import_learn_summaries(
+                runtime_summary=import_learn_stats,
+                persisted_summary=persisted_import_learn_stats,
+            )
+
+    gist_stats_getter = getattr(client, "get_gist_stats", None)
+    if callable(gist_stats_getter):
+        try:
+            gist_stats = await gist_stats_getter()
+            if not isinstance(gist_stats, dict):
+                gist_stats = {"degraded": True, "reason": "invalid_gist_stats_payload"}
+                degrade_reasons.append("gist:invalid_payload")
+        except Exception as exc:
+            gist_stats = {"degraded": True, "reason": str(exc)}
+            degrade_reasons.append("gist:error")
+    else:
+        gist_stats = {"degraded": True, "reason": "gist_stats_unavailable"}
+        degrade_reasons.append("gist:unavailable")
+    if bool(gist_stats.get("degraded")):
+        degrade_reasons.append(f"gist:{str(gist_stats.get('reason') or 'degraded')}")
+
+    vitality_stats_getter = getattr(client, "get_vitality_stats", None)
+    if callable(vitality_stats_getter):
+        try:
+            vitality_stats = await vitality_stats_getter()
+            if not isinstance(vitality_stats, dict):
+                vitality_stats = {
+                    "degraded": True,
+                    "reason": "invalid_vitality_stats_payload",
+                }
+                degrade_reasons.append("vitality:invalid_payload")
+        except Exception as exc:
+            vitality_stats = {"degraded": True, "reason": str(exc)}
+            degrade_reasons.append("vitality:error")
+    else:
+        vitality_stats = {"degraded": True, "reason": "vitality_stats_unavailable"}
+        degrade_reasons.append("vitality:unavailable")
+    if bool(vitality_stats.get("degraded")):
+        degrade_reasons.append(
+            f"vitality:{str(vitality_stats.get('reason') or 'degraded')}"
+        )
+
+    try:
+        sm_lite = await _build_sm_lite_stats()
+    except Exception as exc:
+        sm_lite = {"degraded": True, "reason": str(exc)}
+        degrade_reasons.append("sm_lite:error")
+    if bool(sm_lite.get("degraded")):
+        degrade_reasons.append(f"sm_lite:{str(sm_lite.get('reason') or 'degraded')}")
+
+    lines: List[str] = []
+    lines.append("# System Audit")
+    lines.append(f"# Generated: {generated_at}")
+    lines.append(f"# Status: {'degraded' if degrade_reasons else 'ok'}")
+    if degrade_reasons:
+        lines.append(f"# degrade_reason: {', '.join(sorted(set(degrade_reasons)))}")
+    lines.append("")
+
+    lines.append("## Index")
+    lines.append(
+        f"- index_available: {bool(index_status.get('index_available', False))}"
+    )
+    lines.append(f"- degraded: {bool(index_status.get('degraded', False))}")
+    if index_status.get("reason"):
+        lines.append(f"- reason: {index_status.get('reason')}")
+    lines.append(f"- source: {index_status.get('source', 'unknown')}")
+    lines.append("")
+
+    lines.append("## Guard")
+    lines.append(f"- total_events: {guard_stats.get('total_events', 0)}")
+    lines.append(f"- blocked_events: {guard_stats.get('blocked_events', 0)}")
+    lines.append(f"- degraded_events: {guard_stats.get('degraded_events', 0)}")
+    lines.append(f"- last_event_at: {guard_stats.get('last_event_at') or 'n/a'}")
+    lines.append("")
+
+    lines.append("## Import/Learn")
+    lines.append(f"- total_events: {import_learn_stats.get('total_events', 0)}")
+    lines.append(f"- rejected_events: {import_learn_stats.get('rejected_events', 0)}")
+    lines.append(f"- rollback_events: {import_learn_stats.get('rollback_events', 0)}")
+    lines.append(
+        f"- learn_events: {import_learn_stats.get('event_type_breakdown', {}).get('learn', 0)}"
+    )
+    lines.append(
+        f"- import_events: {import_learn_stats.get('event_type_breakdown', {}).get('import', 0)}"
+    )
+    lines.append(
+        f"- last_event_at: {import_learn_stats.get('last_event_at') or 'n/a'}"
+    )
+    if isinstance(import_learn_stats.get("persisted_snapshot"), dict):
+        persisted = import_learn_stats["persisted_snapshot"]
+        lines.append("- persisted_snapshot: true")
+        lines.append(
+            f"- persisted_total_events: {_safe_non_negative_int(persisted.get('total_events'))}"
+        )
+        lines.append(f"- persisted_last_event_at: {persisted.get('last_event_at') or 'n/a'}")
+    else:
+        lines.append("- persisted_snapshot: false")
+    lines.append("")
+
+    lines.append("## Gist")
+    lines.append(f"- degraded: {bool(gist_stats.get('degraded', False))}")
+    if gist_stats.get("reason"):
+        lines.append(f"- reason: {gist_stats.get('reason')}")
+    if gist_stats.get("total_rows") is not None:
+        lines.append(f"- total_rows: {gist_stats.get('total_rows')}")
+    if gist_stats.get("active_coverage") is not None:
+        lines.append(f"- active_coverage: {gist_stats.get('active_coverage')}")
+    lines.append("")
+
+    lines.append("## Vitality")
+    lines.append(f"- degraded: {bool(vitality_stats.get('degraded', False))}")
+    if vitality_stats.get("reason"):
+        lines.append(f"- reason: {vitality_stats.get('reason')}")
+    if vitality_stats.get("total_memories") is not None:
+        lines.append(f"- total_memories: {vitality_stats.get('total_memories')}")
+    if vitality_stats.get("low_vitality_count") is not None:
+        lines.append(f"- low_vitality_count: {vitality_stats.get('low_vitality_count')}")
+    lines.append("")
+
+    lines.append("## SM-Lite (Runtime Working Set)")
+    session_cache = sm_lite.get("session_cache", {}) if isinstance(sm_lite, dict) else {}
+    flush_tracker = sm_lite.get("flush_tracker", {}) if isinstance(sm_lite, dict) else {}
+    promotion = sm_lite.get("promotion", {}) if isinstance(sm_lite, dict) else {}
+    lines.append(f"- storage: {sm_lite.get('storage', 'runtime_ephemeral')}")
+    lines.append(
+        f"- promotion_path: {sm_lite.get('promotion_path', 'compact_context + auto_flush')}"
+    )
+    lines.append(f"- session_cache.session_count: {session_cache.get('session_count', 0)}")
+    lines.append(f"- session_cache.total_hits: {session_cache.get('total_hits', 0)}")
+    lines.append(f"- flush_tracker.session_count: {flush_tracker.get('session_count', 0)}")
+    lines.append(f"- flush_tracker.pending_events: {flush_tracker.get('pending_events', 0)}")
+    lines.append(
+        f"- promotion.total_promotions: {promotion.get('total_promotions', 0)}"
+    )
+    lines.append(
+        f"- promotion.degraded_promotions: {promotion.get('degraded_promotions', 0)}"
+    )
+    lines.append(f"- promotion.avg_quality: {promotion.get('avg_quality', 0.0)}")
+    lines.append("")
+
+    if AUDIT_VERBOSE:
+        lines.append("## Verbose Payloads")
+        lines.append("")
+        lines.append("### index_status")
+        lines.append(_to_json(index_status))
+        lines.append("")
+        lines.append("### guard_stats")
+        lines.append(_to_json(guard_stats))
+        lines.append("")
+        lines.append("### import_learn_audit_stats")
+        lines.append(_to_json(import_learn_stats))
+        lines.append("")
+        lines.append("### gist_stats")
+        lines.append(_to_json(gist_stats))
+        lines.append("")
+        lines.append("### vitality_stats")
+        lines.append(_to_json(vitality_stats))
+        lines.append("")
+        lines.append("### sm_lite")
+        lines.append(_to_json(sm_lite))
+        lines.append("")
 
     return "\n".join(lines)
 
@@ -1429,6 +2713,8 @@ async def _generate_boot_memory_view() -> str:
         output_parts.append("")
         output_parts.append("For full memory index, use: system://index")
         output_parts.append("For recent memories, use: system://recent")
+        if _should_expose_index_lite_in_boot():
+            output_parts.append("For gist-backed lightweight index, use: system://index-lite")
         output_parts.extend(results)
     else:
         output_parts.append("(No core memories loaded yet.)")
@@ -1567,6 +2853,7 @@ async def read_memory(
     chunk_id: Optional[int] = None,
     range: Optional[str] = None,
     max_chars: Optional[int] = None,
+    include_ancestors: Optional[bool] = False,
 ) -> str:
     """
     Reads a memory by its URI.
@@ -1576,6 +2863,8 @@ async def read_memory(
     Special System URIs:
     - system://boot   : [Startup Only] Loads your core memories.
     - system://index  : Loads a full index of all available memories.
+    - system://index-lite : Loads gist-backed lightweight index summary.
+    - system://audit  : Loads consolidated observability/audit summary.
     - system://recent : Shows recently modified memories (default: 10).
     - system://recent/N : Shows the N most recently modified memories (e.g. system://recent/20).
 
@@ -1586,6 +2875,7 @@ async def read_memory(
         chunk_id: Optional chunk index for partial reads (0-based).
         range: Optional char range (`start:end` or `start-end`).
         max_chars: Optional hard cap for returned characters.
+        include_ancestors: Optional parent-chain expansion for non-system URIs.
 
     Returns:
         - Default (no chunk/range/max_chars): legacy formatted memory text.
@@ -1596,6 +2886,7 @@ async def read_memory(
         read_memory("core://agent/my_user")
         read_memory("writer://chapter_1/scene_1")
     """
+    include_ancestors_flag = _coerce_bool(include_ancestors, default=False)
     partial_mode = any(v is not None for v in (chunk_id, range, max_chars))
 
     def _partial_error(message: str) -> str:
@@ -1612,10 +2903,22 @@ async def read_memory(
 
         client = get_sqlite_client()
         try:
-            rendered = await _fetch_and_format_memory(client, uri)
+            rendered = await _fetch_and_format_memory(
+                client,
+                uri,
+                include_ancestors=include_ancestors_flag,
+            )
             try:
                 domain, path = parse_uri(uri)
-                memory = await client.get_memory_by_path(path, domain)
+                try:
+                    memory = await client.get_memory_by_path(
+                        path,
+                        domain,
+                        reinforce_access=False,
+                    )
+                except TypeError:
+                    # Backward compatibility for test doubles/clients without reinforce_access.
+                    memory = await client.get_memory_by_path(path, domain)
                 if memory:
                     full_uri = make_uri(domain, path)
                     await _record_session_hit(
@@ -1678,6 +2981,7 @@ async def read_memory(
             "backend_method": backend_method,
             "selection": selection_meta,
             "content": selected,
+            "include_ancestors": False,
             "degraded": False,
         }
         return _to_json(payload)
@@ -1703,6 +3007,7 @@ async def read_memory(
             {
                 "uri": make_uri(domain, path),
                 "chunk_id": chunk_id,
+                "chunk_index": chunk_id,
                 "start": parsed_range[0] if parsed_range is not None else None,
                 "end": parsed_range[1] if parsed_range is not None else None,
                 "max_chars": max_chars,
@@ -1729,6 +3034,7 @@ async def read_memory(
                 "max_chars": max_chars,
             },
         ],
+        continue_on_none=True,
     )
 
     sqlite_selected_range = None
@@ -1805,6 +3111,17 @@ async def read_memory(
             max_chars=max_chars,
         )
 
+    ancestors_payload: List[Dict[str, Any]] = []
+    if include_ancestors_flag:
+        try:
+            ancestors_payload = await _collect_ancestor_memories(
+                client,
+                domain=domain,
+                path=path,
+            )
+        except Exception:
+            degraded_reasons.append("include_ancestors_lookup_failed")
+
     payload = {
         "ok": True,
         "uri": make_uri(domain, path),
@@ -1813,8 +3130,11 @@ async def read_memory(
         "backend_method": backend_method,
         "selection": selection_meta,
         "content": selected,
+        "include_ancestors": include_ancestors_flag,
         "degraded": bool(degraded_reasons),
     }
+    if include_ancestors_flag:
+        payload["ancestors"] = ancestors_payload
     if degraded_reasons:
         payload["degrade_reasons"] = list(dict.fromkeys(degraded_reasons))
 
@@ -1884,6 +3204,11 @@ async def create_memory(
 
         # Parse parent URI
         domain, parent_path = parse_uri(parent_uri)
+        _validate_writable_domain(
+            domain,
+            operation="create_memory",
+            uri=parent_uri,
+        )
         try:
             guard_decision = _normalize_guard_decision(
                 await client.write_guard(
@@ -1895,16 +3220,16 @@ async def create_memory(
         except Exception as guard_exc:
             guard_decision = _normalize_guard_decision(
                 {
-                    "action": "ADD",
-                    "method": "fallback",
+                    "action": "NOOP",
+                    "method": "exception",
                     "reason": f"write_guard_unavailable: {guard_exc}",
                     "degraded": True,
                     "degrade_reasons": ["write_guard_exception"],
                 }
             )
 
-        guard_action = str(guard_decision.get("action") or "ADD").upper()
-        blocked = guard_action in {"NOOP", "UPDATE", "DELETE"}
+        guard_action = str(guard_decision.get("action") or "NOOP").upper()
+        blocked = guard_action != "ADD"
         try:
             await _record_guard_event(
                 operation="create_memory",
@@ -1922,9 +3247,10 @@ async def create_memory(
             if isinstance(target_uri, str) and target_uri:
                 message += f" suggested_target={target_uri}"
             return _tool_response(
-                ok=True,
+                ok=False,
                 message=message,
                 created=False,
+                reason="write_guard_blocked",
                 uri=target_uri,
                 **_guard_fields(guard_decision),
             )
@@ -2059,15 +3385,20 @@ async def update_memory(
         update_memory("core://agent", append="\\n## New Section\\nNew content...")
         update_memory("writer://chapter_1", priority=5)
     """
-    client = get_sqlite_client()
     guard_decision = _normalize_guard_decision(
-        {"action": "BYPASS", "method": "none", "reason": "guard_not_evaluated"}
+        {"action": "BYPASS", "method": "none", "reason": "guard_not_evaluated"},
+        allow_bypass=True,
     )
 
     try:
         # Parse URI
         domain, path = parse_uri(uri)
         full_uri = make_uri(domain, path)
+        _validate_writable_domain(
+            domain,
+            operation="update_memory",
+            uri=full_uri,
+        )
         current_memory_id: Optional[int] = None
 
         # --- Validate mutually exclusive content-editing modes ---
@@ -2107,6 +3438,8 @@ async def update_memory(
                 **_guard_fields(guard_decision),
             )
 
+        client = None
+
         # --- Resolve content for patch/append modes ---
         content = None
 
@@ -2124,6 +3457,8 @@ async def update_memory(
                     **_guard_fields(guard_decision),
                 )
 
+            if client is None:
+                client = get_sqlite_client()
             memory = await client.get_memory_by_path(path, domain)
             if not memory:
                 return _tool_response(
@@ -2194,6 +3529,8 @@ async def update_memory(
                     **_guard_fields(guard_decision),
                 )
             # Append mode: add to end of existing content
+            if client is None:
+                client = get_sqlite_client()
             memory = await client.get_memory_by_path(path, domain)
             if not memory:
                 return _tool_response(
@@ -2224,6 +3561,9 @@ async def update_memory(
                 **_guard_fields(guard_decision),
             )
 
+        if client is None:
+            client = get_sqlite_client()
+
         if content is not None:
             try:
                 guard_decision = _normalize_guard_decision(
@@ -2237,8 +3577,8 @@ async def update_memory(
             except Exception as guard_exc:
                 guard_decision = _normalize_guard_decision(
                     {
-                        "action": "ADD",
-                        "method": "fallback",
+                        "action": "NOOP",
+                        "method": "exception",
                         "reason": f"write_guard_unavailable: {guard_exc}",
                         "degraded": True,
                         "degrade_reasons": ["write_guard_exception"],
@@ -2250,22 +3590,25 @@ async def update_memory(
                     "action": "BYPASS",
                     "method": "none",
                     "reason": "metadata_only_update",
-                }
+                },
+                allow_bypass=True,
             )
 
-        guard_action = str(guard_decision.get("action") or "BYPASS").upper()
+        guard_action = str(guard_decision.get("action") or "NOOP").upper()
         blocked = False
         if content is not None:
-            if guard_action in {"NOOP", "DELETE"}:
-                blocked = True
+            if guard_action == "ADD":
+                blocked = False
             elif guard_action == "UPDATE":
                 target_id = guard_decision.get("target_id")
                 if (
-                    isinstance(target_id, int)
-                    and isinstance(current_memory_id, int)
-                    and target_id != current_memory_id
+                    not isinstance(target_id, int)
+                    or not isinstance(current_memory_id, int)
+                    or target_id != current_memory_id
                 ):
                     blocked = True
+            else:
+                blocked = True
         try:
             await _record_guard_event(
                 operation="update_memory",
@@ -2276,12 +3619,13 @@ async def update_memory(
             pass
         if blocked:
             return _tool_response(
-                ok=True,
+                ok=False,
                 message=(
                     "Skipped: write_guard blocked update_memory "
                     f"(action={guard_action}, method={guard_decision.get('method')})."
                 ),
                 updated=False,
+                reason="write_guard_blocked",
                 uri=full_uri,
                 **_guard_fields(guard_decision),
             )
@@ -2410,6 +3754,11 @@ async def delete_memory(uri: str) -> str:
         # Parse URI
         domain, path = parse_uri(uri)
         full_uri = make_uri(domain, path)
+        _validate_writable_domain(
+            domain,
+            operation="delete_memory",
+            uri=full_uri,
+        )
 
         # Check if it exists first
         memory = await client.get_memory_by_path(path, domain)
@@ -2472,6 +3821,16 @@ async def add_alias(
     try:
         new_domain, new_path = parse_uri(new_uri)
         target_domain, target_path = parse_uri(target_uri)
+        _validate_writable_domain(
+            new_domain,
+            operation="add_alias",
+            uri=new_uri,
+        )
+        _validate_writable_domain(
+            target_domain,
+            operation="add_alias",
+            uri=target_uri,
+        )
 
         async def _write_task():
             result = await client.add_path(
@@ -2523,6 +3882,7 @@ async def search_memory(
     candidate_multiplier: Optional[int] = None,
     include_session: Optional[bool] = None,
     filters: Optional[Dict[str, Any]] = None,
+    scope_hint: Optional[str] = None,
 ) -> str:
     """
     Search memories using keyword/semantic/hybrid retrieval.
@@ -2538,6 +3898,7 @@ async def search_memory(
             - path_prefix: path prefix scope
             - max_priority: keep priority <= max_priority
             - updated_after: ISO datetime filter (e.g. 2026-01-31T12:00:00Z)
+        scope_hint: Optional query-side scope hint (domain/path prefix/URI prefix).
 
     Returns:
         Structured JSON string.
@@ -2552,7 +3913,6 @@ async def search_memory(
             filters={"domain": "writer", "path_prefix": "chapter_1"}
         )
     """
-    client = get_sqlite_client()
     degraded_reasons: List[str] = []
 
     try:
@@ -2561,56 +3921,6 @@ async def search_memory(
         query_value = query.strip()
         if not query_value:
             return _to_json({"ok": False, "error": "query must not be empty."})
-
-        query_preprocess: Dict[str, Any] = {
-            "original_query": query_value,
-            "normalized_query": query_value,
-            "rewritten_query": query_value,
-            "tokens": [],
-            "changed": False,
-        }
-        intent_profile: Dict[str, Any] = {
-            "intent": None,
-            "strategy_template": "default",
-            "method": "fallback",
-            "confidence": 0.0,
-            "signals": ["fallback_default"],
-        }
-
-        preprocess_fn = getattr(client, "preprocess_query", None)
-        if callable(preprocess_fn):
-            try:
-                preprocess_payload = preprocess_fn(query_value)
-                if isinstance(preprocess_payload, dict):
-                    query_preprocess.update(preprocess_payload)
-            except Exception:
-                degraded_reasons.append("query_preprocess_failed")
-        else:
-            degraded_reasons.append("query_preprocess_unavailable")
-
-        query_effective = (
-            str(query_preprocess.get("rewritten_query") or "").strip() or query_value
-        )
-
-        classify_fn = getattr(client, "classify_intent", None)
-        if callable(classify_fn):
-            try:
-                classify_payload = classify_fn(query_value, query_effective)
-                if isinstance(classify_payload, dict):
-                    intent_profile.update(classify_payload)
-            except Exception:
-                degraded_reasons.append("intent_classification_failed")
-        else:
-            degraded_reasons.append("intent_classification_unavailable")
-
-        intent_for_search: Optional[Dict[str, Any]] = None
-        if intent_profile.get("intent") in {
-            "factual",
-            "exploratory",
-            "temporal",
-            "causal",
-        }:
-            intent_for_search = intent_profile
 
         mode_requested = (mode or DEFAULT_SEARCH_MODE).strip().lower()
         if mode_requested not in ALLOWED_SEARCH_MODES:
@@ -2645,7 +3955,115 @@ async def search_memory(
             resolved_candidate_multiplier, SEARCH_HARD_MAX_CANDIDATE_MULTIPLIER
         )
 
-        normalized_filters = _normalize_search_filters(filters)
+        raw_filters = filters
+        scope_hint_value: Optional[Any] = scope_hint
+        if isinstance(raw_filters, dict):
+            raw_filters = dict(raw_filters)
+            if "scope_hint" in raw_filters:
+                if scope_hint_value is None:
+                    scope_hint_value = raw_filters.get("scope_hint")
+                raw_filters.pop("scope_hint", None)
+
+        normalized_filters = _normalize_search_filters(raw_filters)
+        normalized_scope_hint = _normalize_scope_hint(scope_hint_value)
+        normalized_filters, scope_resolution = _merge_scope_hint_with_filters(
+            normalized_filters=normalized_filters,
+            scope_hint=normalized_scope_hint,
+        )
+        for conflict in scope_resolution.get("conflicts", []):
+            degraded_reasons.append(f"scope_hint_{conflict}")
+
+        client = get_sqlite_client()
+
+        query_preprocess: Dict[str, Any] = {
+            "original_query": query_value,
+            "normalized_query": query_value,
+            "rewritten_query": query_value,
+            "tokens": [],
+            "changed": False,
+        }
+        intent_profile: Dict[str, Any] = {
+            "intent": None,
+            "strategy_template": "default",
+            "method": "fallback",
+            "confidence": 0.0,
+            "signals": ["fallback_default"],
+        }
+
+        preprocess_fn = getattr(client, "preprocess_query", None)
+        if callable(preprocess_fn):
+            try:
+                preprocess_payload = preprocess_fn(query_value)
+                if isinstance(preprocess_payload, dict):
+                    query_preprocess.update(preprocess_payload)
+            except Exception:
+                degraded_reasons.append("query_preprocess_failed")
+        else:
+            degraded_reasons.append("query_preprocess_unavailable")
+
+        query_effective = (
+            str(query_preprocess.get("rewritten_query") or "").strip() or query_value
+        )
+
+        classify_fn = None
+        fallback_classify_fn = getattr(client, "classify_intent", None)
+        classify_with_intent_llm = False
+        if INTENT_LLM_ENABLED:
+            classify_fn = getattr(client, "classify_intent_with_llm", None)
+            classify_with_intent_llm = callable(classify_fn)
+            if not callable(classify_fn):
+                degraded_reasons.append("intent_llm_unavailable")
+                classify_fn = fallback_classify_fn
+        else:
+            classify_fn = fallback_classify_fn
+        if callable(classify_fn):
+            try:
+                classify_payload = classify_fn(query_value, query_effective)
+                if inspect.isawaitable(classify_payload):
+                    classify_payload = await classify_payload
+                if isinstance(classify_payload, dict):
+                    intent_profile.update(classify_payload)
+                    classify_degrade_reasons = classify_payload.get("degrade_reasons")
+                    if isinstance(classify_degrade_reasons, list):
+                        for reason in classify_degrade_reasons:
+                            if isinstance(reason, str) and reason.strip():
+                                degraded_reasons.append(reason.strip())
+            except Exception:
+                degraded_reasons.append("intent_classification_failed")
+                if classify_with_intent_llm and callable(fallback_classify_fn):
+                    try:
+                        fallback_payload = fallback_classify_fn(
+                            query_value,
+                            query_effective,
+                        )
+                        if inspect.isawaitable(fallback_payload):
+                            fallback_payload = await fallback_payload
+                        if isinstance(fallback_payload, dict):
+                            intent_profile.update(fallback_payload)
+                            degraded_reasons.append("intent_llm_fallback_rule_applied")
+                            fallback_degrade_reasons = fallback_payload.get(
+                                "degrade_reasons"
+                            )
+                            if isinstance(fallback_degrade_reasons, list):
+                                for reason in fallback_degrade_reasons:
+                                    if isinstance(reason, str) and reason.strip():
+                                        degraded_reasons.append(reason.strip())
+                    except Exception:
+                        degraded_reasons.append(
+                            "intent_classification_fallback_failed"
+                        )
+        else:
+            degraded_reasons.append("intent_classification_unavailable")
+
+        intent_for_search: Optional[Dict[str, Any]] = None
+        if intent_profile.get("intent") in {
+            "factual",
+            "exploratory",
+            "temporal",
+            "causal",
+        }:
+            intent_for_search = intent_profile
+
         candidate_pool_size = min(
             SEARCH_HARD_MAX_RESULTS,
             resolved_max_results * resolved_candidate_multiplier,
@@ -2764,11 +4182,35 @@ async def search_memory(
                     "session queue lookup failed; continued with global retrieval only."
                 )
 
-        merged_results = _merge_session_global_results(
+        merged_results, session_first_metrics = _merge_session_global_results(
             session_results=session_results,
             global_results=filtered_results,
         )
         final_results = merged_results[:resolved_max_results]
+        session_before = int(session_first_metrics.get("session_contributed") or 0)
+        global_before = int(session_first_metrics.get("global_contributed") or 0)
+        merged_before = int(session_first_metrics.get("merged_candidates") or 0)
+        session_identities = {
+            _search_result_identity(item)
+            for item in session_results
+            if isinstance(item, dict)
+        }
+        session_after = 0
+        global_after = 0
+        for item in final_results:
+            if not isinstance(item, dict):
+                continue
+            if _search_result_identity(item) in session_identities:
+                session_after += 1
+            else:
+                global_after += 1
+        session_first_metrics["session_contributed_before_truncation"] = session_before
+        session_first_metrics["global_contributed_before_truncation"] = global_before
+        session_first_metrics["merged_candidates_before_truncation"] = merged_before
+        session_first_metrics["session_contributed"] = session_after
+        session_first_metrics["global_contributed"] = global_after
+        session_first_metrics["merged_candidates"] = len(final_results)
+        session_first_metrics["returned_candidates"] = len(final_results)
         payload: Dict[str, Any] = {
             "ok": True,
             "query": query_value,
@@ -2776,6 +4218,8 @@ async def search_memory(
             "query_preprocess": query_preprocess,
             "intent": intent_profile.get("intent") or "unknown",
             "intent_profile": intent_profile,
+            "intent_llm_enabled": INTENT_LLM_ENABLED,
+            "intent_llm_applied": bool(intent_profile.get("intent_llm_applied")),
             "strategy_template": intent_profile.get(
                 "strategy_template", "default"
             ),
@@ -2787,12 +4231,19 @@ async def search_memory(
             "session_first_enabled": include_session_queue,
             "session_queue_count": len(session_results),
             "global_queue_count": len(filtered_results),
+            "session_first_metrics": session_first_metrics,
             "filters": normalized_filters,
+            "scope_hint": scope_resolution.get("raw"),
+            "scope_hint_applied": bool(scope_resolution.get("applied")),
+            "scope_strategy_applied": scope_resolution.get("strategy"),
+            "scope_effective": scope_resolution.get("effective", {}),
             "count": len(final_results),
             "results": final_results,
             "backend_method": f"sqlite_client.{method_name}",
             "degraded": bool(degraded_reasons) or bool(backend_metadata.get("degraded")),
         }
+        if scope_resolution.get("conflicts"):
+            payload["scope_conflicts"] = scope_resolution.get("conflicts")
 
         if backend_metadata:
             payload["backend_metadata"] = backend_metadata
@@ -2879,6 +4330,7 @@ async def compact_context(
         async def _write_task():
             return await _flush_session_summary_to_memory(
                 client=client,
+                source="compact_context",
                 reason=(reason or "manual"),
                 force=bool(force),
                 max_lines=lines,
@@ -3072,6 +4524,27 @@ async def index_status() -> str:
             "index_worker": worker_status,
             "sleep_consolidation": await runtime_state.sleep_consolidation.status(),
         }
+        try:
+            sm_lite_payload = await _build_sm_lite_stats()
+        except Exception as exc:
+            sm_lite_payload = {
+                "degraded": True,
+                "reason": str(exc),
+                "storage": "runtime_ephemeral",
+                "promotion_path": "compact_context + auto_flush",
+                "session_cache": {},
+                "flush_tracker": {},
+            }
+        payload["runtime"]["sm_lite"] = sm_lite_payload
+        if bool(sm_lite_payload.get("degraded")):
+            payload["degraded"] = True
+            existing_reasons = payload.get("degrade_reasons")
+            if not isinstance(existing_reasons, list):
+                existing_reasons = []
+            existing_reasons.append(
+                f"sm_lite:{str(sm_lite_payload.get('reason') or 'degraded')}"
+            )
+            payload["degrade_reasons"] = list(dict.fromkeys(existing_reasons))
         payload.setdefault("ok", True)
         payload.setdefault("timestamp", _utc_iso_now())
         return _to_json(payload)
@@ -3101,7 +4574,6 @@ async def startup():
     """Initialize the database on startup."""
     client = get_sqlite_client()
     await client.init_db()
-    await runtime_state.ensure_started(get_sqlite_client)
 
 
 if __name__ == "__main__":

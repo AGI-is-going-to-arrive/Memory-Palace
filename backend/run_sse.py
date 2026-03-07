@@ -1,6 +1,7 @@
 import os
 import sys
 import hmac
+import asyncio
 import uvicorn
 from typing import Optional, Callable, Awaitable
 
@@ -11,13 +12,24 @@ from starlette.types import ASGIApp
 # Ensure we can import from backend dir
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from mcp_server import mcp
+from mcp_server import mcp, startup as mcp_startup
 
 _MCP_API_KEY_ENV = "MCP_API_KEY"
 _MCP_API_KEY_HEADER = "X-MCP-API-Key"
 _MCP_API_KEY_ALLOW_INSECURE_LOCAL_ENV = "MCP_API_KEY_ALLOW_INSECURE_LOCAL"
-_TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
+_TRUTHY_ENV_VALUES = {"1", "true", "yes", "on", "enabled"}
 _LOOPBACK_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost"}
+_FORWARDED_HEADER_NAMES = {
+    "forwarded",
+    "x-forwarded-for",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+    "x-forwarded-port",
+    "x-real-ip",
+    "x-client-ip",
+    "true-client-ip",
+    "cf-connecting-ip",
+}
 
 
 def _get_configured_mcp_api_key() -> str:
@@ -32,7 +44,16 @@ def _allow_insecure_local_without_api_key() -> bool:
 def _is_loopback_request(request: Request) -> bool:
     client = getattr(request, "client", None)
     host = str(getattr(client, "host", "") or "").strip().lower()
-    return host in _LOOPBACK_CLIENT_HOSTS
+    if host not in _LOOPBACK_CLIENT_HOSTS:
+        return False
+    headers = getattr(request, "headers", None)
+    if headers is None:
+        return True
+    for header_name in _FORWARDED_HEADER_NAMES:
+        header_value = headers.get(header_name)
+        if isinstance(header_value, str) and header_value.strip():
+            return False
+    return True
 
 
 def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
@@ -98,6 +119,7 @@ def main():
     This is required for clients that don't support stdio (like some web-based tools).
     """
     print("Initializing Memory Palace SSE Server...")
+    asyncio.run(mcp_startup())
     
     # Create the Starlette app for SSE with optional API key guard.
     app = create_sse_app()

@@ -81,15 +81,67 @@ class WriteLaneCoordinator:
         self._session_waiting: Dict[str, int] = {}
         self._global_waiting = 0
         self._global_active = 0
+        self._writes_total = 0
+        self._writes_failed = 0
+        self._writes_success = 0
+        self._last_error: Optional[str] = None
+        self._session_wait_samples: Deque[int] = deque(maxlen=200)
+        self._global_wait_samples: Deque[int] = deque(maxlen=200)
+        self._duration_samples: Deque[int] = deque(maxlen=200)
         self._guard = asyncio.Lock()
 
-    async def _get_session_lock(self, session_id: str) -> asyncio.Lock:
+    @staticmethod
+    def _p95(values: Deque[int]) -> int:
+        if not values:
+            return 0
+        ranked = sorted(values)
+        idx = max(0, math.ceil(len(ranked) * 0.95) - 1)
+        return int(ranked[idx])
+
+    async def _record_write_metrics(
+        self,
+        *,
+        success: bool,
+        session_wait_ms: int,
+        global_wait_ms: int,
+        duration_ms: int,
+        error: Optional[str] = None,
+    ) -> None:
+        async with self._guard:
+            self._writes_total += 1
+            if success:
+                self._writes_success += 1
+            else:
+                self._writes_failed += 1
+                self._last_error = error or "unknown_error"
+            self._session_wait_samples.append(max(0, int(session_wait_ms)))
+            self._global_wait_samples.append(max(0, int(global_wait_ms)))
+            self._duration_samples.append(max(0, int(duration_ms)))
+
+    async def _get_session_lock_and_mark_waiting(self, session_id: str) -> asyncio.Lock:
         async with self._guard:
             lock = self._session_locks.get(session_id)
             if lock is None:
                 lock = asyncio.Lock()
                 self._session_locks[session_id] = lock
+            self._session_waiting[session_id] = self._session_waiting.get(session_id, 0) + 1
             return lock
+
+    def _decrement_session_waiting_unlocked(self, lane: str) -> None:
+        current = max(0, int(self._session_waiting.get(lane, 0)))
+        next_value = max(0, current - 1)
+        if next_value <= 0:
+            self._session_waiting.pop(lane, None)
+            return
+        self._session_waiting[lane] = next_value
+
+    async def _maybe_cleanup_session_lane(self, lane: str, lock: asyncio.Lock) -> None:
+        async with self._guard:
+            waiting = max(0, int(self._session_waiting.get(lane, 0)))
+            current_lock = self._session_locks.get(lane)
+            if current_lock is lock and waiting <= 0 and not lock.locked():
+                self._session_locks.pop(lane, None)
+                self._session_waiting.pop(lane, None)
 
     async def run_write(
         self,
@@ -98,38 +150,91 @@ class WriteLaneCoordinator:
         operation: str,
         task: Callable[[], Awaitable[Any]],
     ) -> Any:
+        write_start = time.monotonic()
         lane = _normalize_session_id(session_id)
-        session_lock = await self._get_session_lock(lane)
-
         session_wait_start = time.monotonic()
-        async with self._guard:
-            self._session_waiting[lane] = self._session_waiting.get(lane, 0) + 1
-
-        async with session_lock:
-            waited_session_ms = int((time.monotonic() - session_wait_start) * 1000)
-            async with self._guard:
-                self._session_waiting[lane] = max(
-                    0, self._session_waiting.get(lane, 1) - 1
-                )
-                self._global_waiting += 1
-
-            global_wait_start = time.monotonic()
-            await self._global_sem.acquire()
-            waited_global_ms = int((time.monotonic() - global_wait_start) * 1000)
-            async with self._guard:
-                self._global_waiting = max(0, self._global_waiting - 1)
-                self._global_active += 1
-
-            try:
-                # Keep this as a metric hook, even when no logger is attached yet.
-                _ = operation
-                _ = waited_session_ms
-                _ = waited_global_ms
-                return await task()
-            finally:
+        session_lock = await self._get_session_lock_and_mark_waiting(lane)
+        session_waiting_counted = True
+        try:
+            async with session_lock:
+                waited_session_ms = int((time.monotonic() - session_wait_start) * 1000)
                 async with self._guard:
-                    self._global_active = max(0, self._global_active - 1)
-                self._global_sem.release()
+                    if session_waiting_counted:
+                        self._decrement_session_waiting_unlocked(lane)
+                        session_waiting_counted = False
+
+                waited_global_ms = 0
+                global_wait_start = time.monotonic()
+                global_waiting_counted = True
+                global_acquired = False
+                global_active_counted = False
+
+                async with self._guard:
+                    self._global_waiting += 1
+
+                try:
+                    await self._global_sem.acquire()
+                    global_acquired = True
+                    waited_global_ms = int((time.monotonic() - global_wait_start) * 1000)
+
+                    async with self._guard:
+                        if global_waiting_counted:
+                            self._global_waiting = max(0, self._global_waiting - 1)
+                            global_waiting_counted = False
+                        self._global_active += 1
+                        global_active_counted = True
+
+                    # Keep this as a metric hook, even when no logger is attached yet.
+                    _ = operation
+                    _ = waited_session_ms
+                    _ = waited_global_ms
+                    result = await task()
+                    duration_ms = int((time.monotonic() - write_start) * 1000)
+                    await self._record_write_metrics(
+                        success=True,
+                        session_wait_ms=waited_session_ms,
+                        global_wait_ms=waited_global_ms,
+                        duration_ms=duration_ms,
+                    )
+                    return result
+                except asyncio.CancelledError:
+                    if waited_global_ms <= 0:
+                        waited_global_ms = int((time.monotonic() - global_wait_start) * 1000)
+                    duration_ms = int((time.monotonic() - write_start) * 1000)
+                    await self._record_write_metrics(
+                        success=False,
+                        session_wait_ms=waited_session_ms,
+                        global_wait_ms=waited_global_ms,
+                        duration_ms=duration_ms,
+                        error="cancelled",
+                    )
+                    raise
+                except Exception as exc:
+                    duration_ms = int((time.monotonic() - write_start) * 1000)
+                    await self._record_write_metrics(
+                        success=False,
+                        session_wait_ms=waited_session_ms,
+                        global_wait_ms=waited_global_ms,
+                        duration_ms=duration_ms,
+                        error=str(exc),
+                    )
+                    raise
+                finally:
+                    if global_waiting_counted:
+                        async with self._guard:
+                            self._global_waiting = max(0, self._global_waiting - 1)
+
+                    if global_active_counted:
+                        async with self._guard:
+                            self._global_active = max(0, self._global_active - 1)
+
+                    if global_acquired:
+                        self._global_sem.release()
+        finally:
+            if session_waiting_counted:
+                async with self._guard:
+                    self._decrement_session_waiting_unlocked(lane)
+            await self._maybe_cleanup_session_lane(lane, session_lock)
 
     async def status(self) -> Dict[str, Any]:
         async with self._guard:
@@ -139,6 +244,8 @@ class WriteLaneCoordinator:
                 if waiting > 0
             }
             max_session_wait_ms = max(busy_sessions.values(), default=0)
+            writes_total = max(0, self._writes_total)
+            writes_failed = max(0, self._writes_failed)
             return {
                 "global_concurrency": self._global_concurrency,
                 "global_active": self._global_active,
@@ -147,6 +254,16 @@ class WriteLaneCoordinator:
                 "session_waiting_sessions": len(busy_sessions),
                 "max_session_waiting": max_session_wait_ms,
                 "wait_warn_ms": self._wait_warn_ms,
+                "writes_total": writes_total,
+                "writes_failed": writes_failed,
+                "writes_success": max(0, self._writes_success),
+                "failure_rate": (
+                    round(writes_failed / writes_total, 6) if writes_total > 0 else 0.0
+                ),
+                "session_wait_ms_p95": self._p95(self._session_wait_samples),
+                "global_wait_ms_p95": self._p95(self._global_wait_samples),
+                "duration_ms_p95": self._p95(self._duration_samples),
+                "last_error": self._last_error,
             }
 
 
@@ -246,6 +363,33 @@ class SessionSearchCache:
         ranked = sorted(by_uri.values(), key=lambda row: row["score"], reverse=True)
         return ranked[: max(1, limit)]
 
+    async def summary(self) -> Dict[str, Any]:
+        """Return lightweight, process-local stats for SM-Lite observability."""
+        async with self._guard:
+            snapshot = {sid: len(queue) for sid, queue in self._hits.items()}
+
+        session_count = len(snapshot)
+        total_hits = sum(snapshot.values())
+        max_hits = max(snapshot.values(), default=0)
+        top_sessions = sorted(
+            (
+                {"session_id": session_id, "hits": hit_count}
+                for session_id, hit_count in snapshot.items()
+                if hit_count > 0
+            ),
+            key=lambda item: item["hits"],
+            reverse=True,
+        )[:5]
+
+        return {
+            "session_count": session_count,
+            "total_hits": total_hits,
+            "max_hits_in_session": max_hits,
+            "max_hits_per_session": self._max_hits_per_session,
+            "half_life_seconds": self._half_life_seconds,
+            "top_sessions": top_sessions,
+        }
+
 
 class SessionFlushTracker:
     """Tracks session activity and produces compact flush summaries."""
@@ -292,6 +436,41 @@ class SessionFlushTracker:
         sid = _normalize_session_id(session_id)
         async with self._guard:
             self._events.pop(sid, None)
+
+    async def summary(self) -> Dict[str, Any]:
+        """Return pending flush workload stats for SM-Lite observability."""
+        async with self._guard:
+            snapshot = {
+                sid: {"events": len(queue), "chars": sum(len(item) for item in queue)}
+                for sid, queue in self._events.items()
+                if queue
+            }
+
+        session_count = len(snapshot)
+        pending_events = sum(item["events"] for item in snapshot.values())
+        pending_chars = sum(item["chars"] for item in snapshot.values())
+        top_sessions = sorted(
+            (
+                {
+                    "session_id": session_id,
+                    "events": stats["events"],
+                    "chars": stats["chars"],
+                }
+                for session_id, stats in snapshot.items()
+            ),
+            key=lambda item: (item["events"], item["chars"]),
+            reverse=True,
+        )[:5]
+
+        return {
+            "session_count": session_count,
+            "pending_events": pending_events,
+            "pending_chars": pending_chars,
+            "trigger_chars": self._trigger_chars,
+            "min_events": self._min_events,
+            "max_events_per_session": self._max_events,
+            "top_sessions": top_sessions,
+        }
 
 
 @dataclass
@@ -382,6 +561,259 @@ class GuardDecisionTracker:
                 for reason, count in reason_counter.most_common(5)
             ],
             "last_event_at": snapshot[-1].timestamp,
+        }
+
+
+@dataclass
+class ImportLearnAuditEvent:
+    timestamp: str
+    event_type: str
+    operation: str
+    decision: str
+    reason: str
+    source: str
+    session_id: str
+    actor_id: Optional[str]
+    batch_id: Optional[str]
+    metadata: Dict[str, Any]
+
+
+class ImportLearnAuditTracker:
+    """In-process audit tracker for import/learn/reject/rollback workflows."""
+
+    _ALLOWED_EVENT_TYPES = {"import", "learn", "reject", "rollback", "unknown"}
+    _ALLOWED_DECISIONS = {"accepted", "rejected", "executed", "rolled_back", "unknown"}
+
+    def __init__(self) -> None:
+        self._max_events = _env_int(
+            "RUNTIME_IMPORT_LEARN_AUDIT_LIMIT", 300, minimum=50
+        )
+        self._events: Deque[ImportLearnAuditEvent] = deque(maxlen=self._max_events)
+        self._guard = asyncio.Lock()
+
+    async def record_event(
+        self,
+        *,
+        event_type: str,
+        operation: str,
+        decision: str,
+        reason: str,
+        source: str,
+        session_id: Optional[str],
+        actor_id: Optional[str] = None,
+        batch_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        normalized_event_type = (
+            (event_type or "unknown").strip().lower() or "unknown"
+        )
+        if normalized_event_type not in self._ALLOWED_EVENT_TYPES:
+            normalized_event_type = "unknown"
+
+        normalized_decision = (decision or "unknown").strip().lower() or "unknown"
+        if normalized_decision not in self._ALLOWED_DECISIONS:
+            normalized_decision = "unknown"
+
+        event = ImportLearnAuditEvent(
+            timestamp=_utc_iso_now(),
+            event_type=normalized_event_type,
+            operation=(operation or "unknown").strip() or "unknown",
+            decision=normalized_decision,
+            reason=(reason or "").strip(),
+            source=(source or "unknown").strip() or "unknown",
+            session_id=_normalize_session_id(session_id),
+            actor_id=(str(actor_id).strip() if actor_id is not None else None) or None,
+            batch_id=(str(batch_id).strip() if batch_id is not None else None) or None,
+            metadata=dict(metadata) if isinstance(metadata, dict) else {},
+        )
+        async with self._guard:
+            self._events.append(event)
+
+    async def summary(self) -> Dict[str, Any]:
+        async with self._guard:
+            snapshot = list(self._events)
+
+        if not snapshot:
+            return {
+                "window_size": self._max_events,
+                "total_events": 0,
+                "event_type_breakdown": {},
+                "operation_breakdown": {},
+                "decision_breakdown": {},
+                "rejected_events": 0,
+                "rollback_events": 0,
+                "top_reasons": [],
+                "last_event_at": None,
+                "recent_events": [],
+            }
+
+        event_type_counter = Counter(item.event_type for item in snapshot)
+        operation_counter = Counter(item.operation for item in snapshot)
+        decision_counter = Counter(item.decision for item in snapshot)
+        reason_counter = Counter(item.reason for item in snapshot if item.reason)
+        rejected_events = sum(
+            1
+            for item in snapshot
+            if item.decision == "rejected" or item.event_type == "reject"
+        )
+        rollback_events = sum(
+            1
+            for item in snapshot
+            if item.decision == "rolled_back" or item.event_type == "rollback"
+        )
+        recent_events = [
+            {
+                "timestamp": item.timestamp,
+                "event_type": item.event_type,
+                "operation": item.operation,
+                "decision": item.decision,
+                "reason": item.reason,
+                "source": item.source,
+                "session_id": item.session_id,
+                "actor_id": item.actor_id,
+                "batch_id": item.batch_id,
+                "metadata": dict(item.metadata),
+            }
+            for item in snapshot[-5:]
+        ]
+
+        return {
+            "window_size": self._max_events,
+            "total_events": len(snapshot),
+            "event_type_breakdown": dict(event_type_counter),
+            "operation_breakdown": dict(operation_counter),
+            "decision_breakdown": dict(decision_counter),
+            "rejected_events": rejected_events,
+            "rollback_events": rollback_events,
+            "top_reasons": [
+                {"reason": reason, "count": count}
+                for reason, count in reason_counter.most_common(5)
+            ],
+            "last_event_at": snapshot[-1].timestamp,
+            "recent_events": recent_events,
+        }
+
+
+@dataclass
+class SessionPromotionEvent:
+    timestamp: str
+    session_id: str
+    source: str
+    trigger_reason: str
+    uri: str
+    memory_id: Optional[int]
+    gist_method: str
+    quality: float
+    degraded: bool
+    degrade_reasons: List[str]
+    index_queued: int
+    index_dropped: int
+    index_deduped: int
+
+
+class SessionPromotionTracker:
+    """In-process tracker for SM-Lite promotion events."""
+
+    def __init__(self) -> None:
+        self._max_events = _env_int("RUNTIME_PROMOTION_EVENT_LIMIT", 200, minimum=20)
+        self._events: Deque[SessionPromotionEvent] = deque(maxlen=self._max_events)
+        self._guard = asyncio.Lock()
+
+    async def record_event(
+        self,
+        *,
+        session_id: Optional[str],
+        source: str,
+        trigger_reason: str,
+        uri: str,
+        memory_id: Optional[int],
+        gist_method: str,
+        quality: Optional[float],
+        degraded: bool = False,
+        degrade_reasons: Optional[List[str]] = None,
+        index_queued: int = 0,
+        index_dropped: int = 0,
+        index_deduped: int = 0,
+    ) -> None:
+        def _safe_non_negative_int(value: Any) -> int:
+            try:
+                return max(0, int(value))
+            except (TypeError, ValueError):
+                return 0
+
+        event = SessionPromotionEvent(
+            timestamp=_utc_iso_now(),
+            session_id=_normalize_session_id(session_id),
+            source=(source or "compact_context").strip().lower() or "compact_context",
+            trigger_reason=(trigger_reason or "manual").strip() or "manual",
+            uri=(uri or "").strip(),
+            memory_id=memory_id if isinstance(memory_id, int) and memory_id > 0 else None,
+            gist_method=(gist_method or "unknown").strip().lower() or "unknown",
+            quality=float(quality) if isinstance(quality, (int, float)) else 0.0,
+            degraded=bool(degraded),
+            degrade_reasons=[
+                item
+                for item in (degrade_reasons or [])
+                if isinstance(item, str) and item.strip()
+            ],
+            index_queued=_safe_non_negative_int(index_queued),
+            index_dropped=_safe_non_negative_int(index_dropped),
+            index_deduped=_safe_non_negative_int(index_deduped),
+        )
+        async with self._guard:
+            self._events.append(event)
+
+    async def summary(self) -> Dict[str, Any]:
+        async with self._guard:
+            snapshot = list(self._events)
+
+        if not snapshot:
+            return {
+                "window_size": self._max_events,
+                "total_promotions": 0,
+                "degraded_promotions": 0,
+                "source_breakdown": {},
+                "reason_breakdown": {},
+                "gist_method_breakdown": {},
+                "avg_quality": 0.0,
+                "index_queue": {
+                    "queued": 0,
+                    "dropped": 0,
+                    "deduped": 0,
+                },
+                "top_sessions": [],
+                "last_promotion_at": None,
+            }
+
+        source_counter = Counter(item.source for item in snapshot)
+        reason_counter = Counter(item.trigger_reason for item in snapshot)
+        gist_counter = Counter(item.gist_method for item in snapshot)
+        session_counter = Counter(item.session_id for item in snapshot)
+        degraded_promotions = sum(1 for item in snapshot if item.degraded)
+        quality_values = [max(0.0, min(1.0, item.quality)) for item in snapshot]
+        avg_quality = sum(quality_values) / max(1, len(quality_values))
+        index_queued = sum(item.index_queued for item in snapshot)
+        index_dropped = sum(item.index_dropped for item in snapshot)
+        index_deduped = sum(item.index_deduped for item in snapshot)
+
+        return {
+            "window_size": self._max_events,
+            "total_promotions": len(snapshot),
+            "degraded_promotions": degraded_promotions,
+            "source_breakdown": dict(source_counter),
+            "reason_breakdown": dict(reason_counter),
+            "gist_method_breakdown": dict(gist_counter),
+            "avg_quality": round(avg_quality, 6),
+            "index_queue": {
+                "queued": index_queued,
+                "dropped": index_dropped,
+                "deduped": index_deduped,
+            },
+            "top_sessions": [
+                {"session_id": session_id, "count": count}
+                for session_id, count in session_counter.most_common(5)
+            ],
+            "last_promotion_at": snapshot[-1].timestamp,
         }
 
 
@@ -617,11 +1049,11 @@ class IndexTaskWorker:
         self._enabled = _env_bool("RUNTIME_INDEX_WORKER_ENABLED", True)
         self._queue_maxsize = _env_int("RUNTIME_INDEX_QUEUE_MAXSIZE", 256, minimum=8)
         self._recent_limit = _env_int("RUNTIME_INDEX_RECENT_JOBS", 30, minimum=5)
-
-        self._queue: asyncio.Queue[IndexTask] = asyncio.Queue(maxsize=self._queue_maxsize)
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._queue: Optional[asyncio.Queue[IndexTask]] = None
         self._client_factory: Optional[Callable[[], Any]] = None
         self._runner: Optional[asyncio.Task] = None
-        self._guard = asyncio.Lock()
+        self._guard: Optional[asyncio.Lock] = None
 
         self._jobs: Dict[str, Dict[str, Any]] = {}
         self._job_events: Dict[str, asyncio.Event] = {}
@@ -641,9 +1073,34 @@ class IndexTaskWorker:
         self._last_finished_at: Optional[str] = None
         self._cancelled_job_ids: Set[str] = set()
 
+    def _ensure_loop_state(self) -> None:
+        current_loop = asyncio.get_running_loop()
+        if (
+            self._loop is current_loop
+            and self._queue is not None
+            and self._guard is not None
+        ):
+            return
+
+        self._loop = current_loop
+        self._queue = asyncio.Queue(maxsize=self._queue_maxsize)
+        self._guard = asyncio.Lock()
+        self._runner = None
+        self._active_execution_task = None
+        self._active_job_id = None
+        self._jobs.clear()
+        self._job_events.clear()
+        self._recent_job_ids.clear()
+        self._pending_memory_jobs.clear()
+        self._rebuild_job_id = None
+        self._sleep_job_id = None
+        self._cancelled_job_ids.clear()
+
     async def ensure_started(self, client_factory: Callable[[], Any]) -> None:
         if not self._enabled:
             return
+        self._ensure_loop_state()
+        assert self._guard is not None
         async with self._guard:
             self._client_factory = client_factory
             if self._runner is None or self._runner.done():
@@ -653,6 +1110,8 @@ class IndexTaskWorker:
 
     async def shutdown(self) -> None:
         runner: Optional[asyncio.Task] = None
+        self._ensure_loop_state()
+        assert self._guard is not None
         async with self._guard:
             runner = self._runner
             self._runner = None
@@ -675,6 +1134,8 @@ class IndexTaskWorker:
         if not self._enabled:
             return {"queued": False, "reason": "index_worker_disabled"}
 
+        self._ensure_loop_state()
+        assert self._guard is not None and self._queue is not None
         requested_at = _utc_iso_now()
         async with self._guard:
             existing_job_id = self._pending_memory_jobs.get(memory_id)
@@ -735,6 +1196,8 @@ class IndexTaskWorker:
         if not self._enabled:
             return {"queued": False, "reason": "index_worker_disabled"}
 
+        self._ensure_loop_state()
+        assert self._guard is not None and self._queue is not None
         requested_at = _utc_iso_now()
         async with self._guard:
             if self._rebuild_job_id:
@@ -791,6 +1254,8 @@ class IndexTaskWorker:
         if not self._enabled:
             return {"queued": False, "reason": "index_worker_disabled"}
 
+        self._ensure_loop_state()
+        assert self._guard is not None and self._queue is not None
         requested_at = _utc_iso_now()
         async with self._guard:
             if self._sleep_job_id:
@@ -844,6 +1309,8 @@ class IndexTaskWorker:
     ) -> Dict[str, Any]:
         if not job_id:
             return {"ok": False, "error": "job_id is required."}
+        self._ensure_loop_state()
+        assert self._guard is not None
         async with self._guard:
             job = dict(self._jobs.get(job_id, {}))
             event = self._job_events.get(job_id)
@@ -860,6 +1327,8 @@ class IndexTaskWorker:
         return {"ok": True, "job": current}
 
     async def get_job(self, *, job_id: str) -> Dict[str, Any]:
+        self._ensure_loop_state()
+        assert self._guard is not None
         async with self._guard:
             job = self._jobs.get(job_id)
             if not job:
@@ -880,6 +1349,8 @@ class IndexTaskWorker:
         cancellation_ts = _utc_iso_now()
         execution_task: Optional[asyncio.Task[Any]] = None
 
+        self._ensure_loop_state()
+        assert self._guard is not None
         async with self._guard:
             job = self._jobs.get(normalized_job_id)
             if not job:
@@ -946,6 +1417,8 @@ class IndexTaskWorker:
         return {"ok": True, "cancel_requested": True, "job": snapshot}
 
     async def status(self) -> Dict[str, Any]:
+        self._ensure_loop_state()
+        assert self._guard is not None and self._queue is not None
         async with self._guard:
             recent_jobs = [
                 dict(self._jobs[job_id])
@@ -978,6 +1451,8 @@ class IndexTaskWorker:
             }
 
     async def _run_loop(self) -> None:
+        self._ensure_loop_state()
+        assert self._queue is not None and self._guard is not None
         while True:
             task = await self._queue.get()
             should_skip = False
@@ -1620,7 +2095,9 @@ class RuntimeState:
         self.write_lanes = WriteLaneCoordinator()
         self.session_cache = SessionSearchCache()
         self.flush_tracker = SessionFlushTracker()
+        self.promotion_tracker = SessionPromotionTracker()
         self.guard_tracker = GuardDecisionTracker()
+        self.import_learn_tracker = ImportLearnAuditTracker()
         self.cleanup_reviews = CleanupReviewCoordinator()
         self.vitality_decay = VitalityDecayCoordinator()
         self.index_worker = IndexTaskWorker()

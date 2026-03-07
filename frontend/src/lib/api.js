@@ -5,20 +5,83 @@ const api = axios.create({
   timeout: 15000,
 });
 
+const DASHBOARD_AUTH_STORAGE_KEY = 'memory-palace.dashboardAuth';
+
 // Handle URI encoding for resource IDs which might contain special chars
 const encodeId = (id) => encodeURIComponent(id);
 
-const readRuntimeMaintenanceAuth = () => {
-  if (typeof window === 'undefined') return null;
-  const runtimeConfig =
-    window.__MEMORY_PALACE_RUNTIME__ || window.__MCP_RUNTIME_CONFIG__ || null;
+const normalizeMaintenanceAuth = (runtimeConfig) => {
   if (!runtimeConfig || typeof runtimeConfig !== 'object') return null;
   const rawKey = runtimeConfig.maintenanceApiKey ?? runtimeConfig.mcpApiKey;
   const key = typeof rawKey === 'string' ? rawKey.trim() : '';
   if (!key) return null;
-  const rawMode = runtimeConfig.maintenanceApiKeyMode ?? runtimeConfig.mcpApiKeyMode ?? 'header';
-  const mode = String(rawMode).trim().toLowerCase() === 'bearer' ? 'bearer' : 'header';
+  const rawMode =
+    runtimeConfig.maintenanceApiKeyMode ??
+    runtimeConfig.mcpApiKeyMode ??
+    'header';
+  const mode =
+    String(rawMode).trim().toLowerCase() === 'bearer' ? 'bearer' : 'header';
   return { key, mode };
+};
+
+const readWindowRuntimeMaintenanceAuth = () => {
+  if (typeof window === 'undefined') return null;
+  const runtimeConfig =
+    window.__MEMORY_PALACE_RUNTIME__ || window.__MCP_RUNTIME_CONFIG__ || null;
+  return normalizeMaintenanceAuth(runtimeConfig);
+};
+
+const readStoredMaintenanceAuth = () => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(DASHBOARD_AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    return normalizeMaintenanceAuth(JSON.parse(raw));
+  } catch (_error) {
+    return null;
+  }
+};
+
+export const getMaintenanceAuthState = () => {
+  const runtimeAuth = readWindowRuntimeMaintenanceAuth();
+  if (runtimeAuth) {
+    return { ...runtimeAuth, source: 'runtime' };
+  }
+
+  const storedAuth = readStoredMaintenanceAuth();
+  if (storedAuth) {
+    return { ...storedAuth, source: 'stored' };
+  }
+
+  return null;
+};
+
+export const saveStoredMaintenanceAuth = (key, mode = 'header') => {
+  if (typeof window === 'undefined') return null;
+  const normalized = normalizeMaintenanceAuth({
+    maintenanceApiKey: key,
+    maintenanceApiKeyMode: mode,
+  });
+  if (!normalized) return null;
+  window.localStorage.setItem(
+    DASHBOARD_AUTH_STORAGE_KEY,
+    JSON.stringify({
+      maintenanceApiKey: normalized.key,
+      maintenanceApiKeyMode: normalized.mode,
+    })
+  );
+  return getMaintenanceAuthState();
+};
+
+export const clearStoredMaintenanceAuth = () => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(DASHBOARD_AUTH_STORAGE_KEY);
+};
+
+const readRuntimeMaintenanceAuth = () => {
+  const authState = getMaintenanceAuthState();
+  if (!authState) return null;
+  return { key: authState.key, mode: authState.mode };
 };
 
 const normalizeProtectedPath = (pathname) => {
@@ -27,14 +90,11 @@ const normalizeProtectedPath = (pathname) => {
   return pathname;
 };
 
-const isProtectedPath = (pathname, method) => {
+const isProtectedPath = (pathname) => {
   const normalizedPath = normalizeProtectedPath(pathname);
   if (normalizedPath.startsWith('/maintenance/')) return true;
   if (normalizedPath.startsWith('/review/')) return true;
-  if (normalizedPath.startsWith('/browse/')) {
-    const normalizedMethod = String(method || 'get').trim().toLowerCase();
-    return !['get', 'head', 'options'].includes(normalizedMethod);
-  }
+  if (normalizedPath.startsWith('/browse/')) return true;
   return false;
 };
 
@@ -104,6 +164,33 @@ const normalizeMemoryNodePayload = (payload) => {
       : [],
     breadcrumbs: Array.isArray(safe.breadcrumbs) ? safe.breadcrumbs : [],
   };
+};
+
+const normalizeApiErrorCode = (value) => {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (!/^[a-z0-9][a-z0-9_.-]*$/.test(normalized)) return null;
+  return normalized;
+};
+
+export const extractApiErrorCode = (error) => {
+  const detail = error?.response?.data?.detail;
+  const codes = [];
+  const pushCode = (value) => {
+    const code = normalizeApiErrorCode(value);
+    if (!code || codes.includes(code)) return;
+    codes.push(code);
+  };
+
+  if (typeof detail === 'string') {
+    pushCode(detail);
+  } else if (detail && typeof detail === 'object') {
+    pushCode(detail.code);
+    pushCode(detail.error);
+    pushCode(detail.reason);
+  }
+  return codes[0] || null;
 };
 
 export const extractApiError = (error, fallback = 'Request failed') => {

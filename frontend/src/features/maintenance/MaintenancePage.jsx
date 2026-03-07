@@ -11,12 +11,21 @@ import {
   confirmVitalityCleanup,
   triggerVitalityDecay,
   extractApiError,
+  extractApiErrorCode,
   listOrphanMemories,
   getOrphanMemoryDetail,
   deleteOrphanMemory,
 } from '../../lib/api';
 
 const VITALITY_PREPARE_MAX_SELECTIONS = 100;
+
+const formatDateTimeOrUnknown = (value) => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return 'Unknown';
+  return format(parsed, 'yyyy-MM-dd HH:mm');
+};
+
+const normalizePaths = (value) => (Array.isArray(value) ? value : []);
 
 export default function MaintenancePage() {
   const [orphans, setOrphans] = useState([]);
@@ -37,11 +46,15 @@ export default function MaintenancePage() {
   const [vitalityThreshold, setVitalityThreshold] = useState(0.35);
   const [vitalityInactiveDays, setVitalityInactiveDays] = useState(14);
   const [vitalityLimit, setVitalityLimit] = useState(80);
+  const [vitalityDomain, setVitalityDomain] = useState('');
+  const [vitalityPathPrefix, setVitalityPathPrefix] = useState('');
   const [vitalityReviewer, setVitalityReviewer] = useState('maintenance_dashboard');
   const [vitalityProcessing, setVitalityProcessing] = useState(false);
   const [vitalityPreparedReview, setVitalityPreparedReview] = useState(null);
   const [vitalityLastResult, setVitalityLastResult] = useState(null);
   const [vitalityQueryMeta, setVitalityQueryMeta] = useState(null);
+  const orphanRequestSeqRef = useRef(0);
+  const detailRequestSeqRef = useRef(0);
   const vitalityRequestSeqRef = useRef(0);
   const vitalityPrepareSeqRef = useRef(0);
 
@@ -56,15 +69,20 @@ export default function MaintenancePage() {
   }, []);
 
   const loadOrphans = async () => {
+    const requestSeq = orphanRequestSeqRef.current + 1;
+    orphanRequestSeqRef.current = requestSeq;
     setLoading(true);
     setError(null);
     setSelectedIds(new Set());
     try {
       const data = await listOrphanMemories();
+      if (requestSeq !== orphanRequestSeqRef.current) return;
       setOrphans(Array.isArray(data) ? data : []);
     } catch (err) {
+      if (requestSeq !== orphanRequestSeqRef.current) return;
       setError(`Failed to load orphans: ${extractApiError(err, 'Failed to load orphans')}`);
     } finally {
+      if (requestSeq !== orphanRequestSeqRef.current) return;
       setLoading(false);
     }
   };
@@ -91,6 +109,8 @@ export default function MaintenancePage() {
       const parsedThreshold = Number(thresholdRaw);
       const parsedInactiveDays = Number(inactiveDaysRaw);
       const parsedLimit = Number(limitRaw);
+      const domainRaw = String(vitalityDomain ?? '').trim();
+      const pathPrefixRaw = String(vitalityPathPrefix ?? '').trim();
       if (!Number.isFinite(parsedThreshold) || parsedThreshold < 0) {
         throw new Error('threshold must be a non-negative number');
       }
@@ -108,11 +128,18 @@ export default function MaintenancePage() {
       if (forceDecay) {
         await triggerVitalityDecay({ force: true, reason: 'maintenance.manual_refresh' });
       }
-      const res = await queryVitalityCleanupCandidates({
+      const payload = {
         threshold: parsedThreshold,
         inactive_days: parsedInactiveDays,
         limit: parsedLimit,
-      });
+      };
+      if (domainRaw) {
+        payload.domain = domainRaw;
+      }
+      if (pathPrefixRaw) {
+        payload.path_prefix = pathPrefixRaw;
+      }
+      const res = await queryVitalityCleanupCandidates(payload);
       if (requestSeq !== vitalityRequestSeqRef.current) return;
       setVitalityCandidates(Array.isArray(res.items) ? res.items : []);
       setVitalityQueryMeta({
@@ -304,10 +331,11 @@ export default function MaintenancePage() {
       invalidatePreparedReview();
       await Promise.all([loadOrphans(), loadVitalityCandidates()]);
     } catch (err) {
+      const detailCode = extractApiErrorCode(err);
       const detailText = extractApiError(err, 'Failed to confirm cleanup');
       setVitalityError(detailText);
-      invalidatePreparedReview();
-      if (detailText !== 'confirmation_phrase_mismatch') {
+      if (detailCode !== 'confirmation_phrase_mismatch') {
+        invalidatePreparedReview();
         await loadVitalityCandidates();
       }
     } finally {
@@ -317,21 +345,31 @@ export default function MaintenancePage() {
 
   const handleExpand = async (id) => {
     if (expandedId === id) {
+      detailRequestSeqRef.current += 1;
       setExpandedId(null);
+      setDetailLoading(null);
       return;
     }
     setExpandedId(id);
+    const requestSeq = detailRequestSeqRef.current + 1;
+    detailRequestSeqRef.current = requestSeq;
 
-    if (!detailData[id]) {
-      setDetailLoading(id);
-      try {
-        const data = await getOrphanMemoryDetail(id);
-        setDetailData(prev => ({ ...prev, [id]: data }));
-      } catch (err) {
-        setDetailData(prev => ({ ...prev, [id]: { error: extractApiError(err, 'Failed to load orphan detail') } }));
-      } finally {
-        setDetailLoading(null);
-      }
+    if (detailData[id]) {
+      setDetailLoading(null);
+      return;
+    }
+
+    setDetailLoading(id);
+    try {
+      const data = await getOrphanMemoryDetail(id);
+      if (requestSeq !== detailRequestSeqRef.current) return;
+      setDetailData(prev => ({ ...prev, [id]: data }));
+    } catch (err) {
+      if (requestSeq !== detailRequestSeqRef.current) return;
+      setDetailData(prev => ({ ...prev, [id]: { error: extractApiError(err, 'Failed to load orphan detail') } }));
+    } finally {
+      if (requestSeq !== detailRequestSeqRef.current) return;
+      setDetailLoading(null);
     }
   };
 
@@ -350,6 +388,8 @@ export default function MaintenancePage() {
     const detail = detailData[item.id];
     const isLoadingDetail = detailLoading === item.id;
     const isChecked = selectedIds.has(item.id);
+    const migrationTargetPaths = normalizePaths(item?.migration_target?.paths);
+    const detailMigrationPaths = normalizePaths(detail?.migration_target?.paths);
 
     return (
       <div key={item.id} className="group relative rounded-lg border border-stone-700/40 bg-stone-900 transition-all hover:border-amber-700/45 hover:shadow-[0_0_14px_rgba(245,158,11,0.12)]">
@@ -388,21 +428,21 @@ export default function MaintenancePage() {
                 </span>
               )}
               <span className="text-[11px] text-stone-500">
-                {item.created_at ? format(new Date(item.created_at), 'yyyy-MM-dd HH:mm') : 'Unknown'}
+                {formatDateTimeOrUnknown(item.created_at)}
               </span>
             </div>
 
-            {item.migration_target && item.migration_target.paths.length > 0 && (
+            {item.migration_target && migrationTargetPaths.length > 0 && (
               <div className="flex items-center gap-1.5 flex-wrap mb-2">
                 <ArrowRight size={12} className="text-amber-400/70 flex-shrink-0" />
-                {item.migration_target.paths.map((p, i) => (
+                {migrationTargetPaths.map((p, i) => (
                   <span key={i} className="text-[11px] font-mono text-amber-300/90 bg-amber-900/25 px-1.5 py-0.5 rounded border border-amber-800/30">
                     {p}
                   </span>
                 ))}
               </div>
             )}
-            {item.migration_target && item.migration_target.paths.length === 0 && (
+            {item.migration_target && migrationTargetPaths.length === 0 && (
               <div className="flex items-center gap-1.5 mb-2">
                 <ArrowRight size={12} className="text-stone-500 flex-shrink-0" />
                 <span className="text-[11px] text-stone-500 italic">
@@ -445,9 +485,9 @@ export default function MaintenancePage() {
                   <div>
                     <h4 className="text-[11px] uppercase tracking-widest text-stone-500 mb-2 font-semibold flex items-center gap-2">
                       <span>Diff: #{item.id} → #{detail.migration_target.id}</span>
-                      {detail.migration_target.paths.length > 0 && (
+                      {detailMigrationPaths.length > 0 && (
                         <span className="text-amber-400/70 normal-case tracking-normal font-normal">
-                          ({detail.migration_target.paths[0]})
+                          ({detailMigrationPaths[0]})
                         </span>
                       )}
                     </h4>
@@ -682,6 +722,36 @@ export default function MaintenancePage() {
                     }}
                     disabled={vitalityProcessing}
                     className="w-20 rounded border border-stone-700 bg-stone-900 px-2 py-1 text-stone-200"
+                  />
+                </label>
+                <label className="flex items-center gap-1 text-stone-400">
+                  domain
+                  <input
+                    type="text"
+                    value={vitalityDomain}
+                    onChange={(e) => {
+                      setVitalityDomain(e.target.value);
+                      invalidatePreparedReview();
+                    }}
+                    disabled={vitalityProcessing}
+                    className="w-24 rounded border border-stone-700 bg-stone-900 px-2 py-1 text-stone-200"
+                    placeholder="(optional)"
+                    aria-label="vitality domain"
+                  />
+                </label>
+                <label className="flex items-center gap-1 text-stone-400">
+                  path_prefix
+                  <input
+                    type="text"
+                    value={vitalityPathPrefix}
+                    onChange={(e) => {
+                      setVitalityPathPrefix(e.target.value);
+                      invalidatePreparedReview();
+                    }}
+                    disabled={vitalityProcessing}
+                    className="w-32 rounded border border-stone-700 bg-stone-900 px-2 py-1 text-stone-200"
+                    placeholder="(optional)"
+                    aria-label="vitality path prefix"
                   />
                 </label>
                 <label className="flex items-center gap-1 text-stone-400">

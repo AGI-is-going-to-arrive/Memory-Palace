@@ -1,20 +1,39 @@
 # Memory Palace 评测结果
 
-本文档汇总 Memory Palace 各档位（A/B/C/D）的检索质量、延迟与语义质量门禁测试结果。所有数据均来自仓库内已落盘 JSON 产物，可通过 `pytest` 命令完整复现。
+本文档汇总 Memory Palace 各档位（A/B/C/D）的检索质量、延迟与语义质量门禁测试结果。这里保留**摘要表 + 复核说明**；机器相关的原始 benchmark 日志、`tests/benchmark` 脚手架和阶段性重测草稿默认只在开发阶段或本地使用。
+
+> 状态说明（2026-03）：本页主要保留 2026-02 的公开基线表格，便于用户理解档位差异；当前发布口径请同时参考 `docs/changelog/release_summary_vs_old_project_2026-03-06.md`。
 
 ---
 
 ## 1. 数据来源
 
-| 产物文件 | 说明 |
+| 来源 | 说明 |
 |---|---|
-| `backend/tests/benchmark/profile_ab_metrics.json` | A/B/CD 小样本门禁检索指标 |
-| `backend/tests/benchmark/profile_abcd_real_metrics.json` | A/B/C/D 真实运行检索指标 |
-| `backend/tests/benchmark/write_guard_quality_metrics.json` | Write Guard 准确率 |
-| `backend/tests/benchmark/intent_accuracy_metrics.json` | Intent 分类准确率 |
-| `backend/tests/benchmark/compact_context_gist_quality_metrics.json` | Gist 质量（ROUGE-L） |
+| 本页公开摘要表 | 面向用户保留的 A/B/C/D 关键指标和门禁结果 |
+| 维护期 benchmark 产物 | 用于生成公开摘要；默认不随用户仓分发 |
+| 发布对比摘要 | `docs/changelog/release_summary_vs_old_project_2026-03-06.md` |
 
 > 数据生成时间：`2026-02-19T06:55:30+00:00`（门禁）/ `2026-02-18T21:22:48+00:00`（真实运行）
+
+---
+
+## 1.5 这些指标到底在看什么？
+
+先说人话：
+
+- **HR@10**：前 10 条结果里，**有没有**把正确答案找出来。越高越好。
+- **MRR**：正确答案排得**靠不靠前**。越靠前，分数越高。
+- **NDCG@10**：不只看“找没找到”，还看**排序整体好不好**。越高越好。
+- **Recall@10**：如果一条查询可能有多个相关结果，它看前 10 条里**覆盖了多少**。越高越好。
+- **p50 / p95**：响应时间。`p50` 可以理解成“平时大多数请求有多快”，`p95` 可以理解成“慢的时候大概慢到什么程度”。
+- **降级率**：系统因为外部 embedding / reranker 不可用而退回低配模式的比例。越低越好。
+
+如果你只想快速看表，优先看这三个：
+
+1. **HR@10**：能不能找到
+2. **MRR**：找到了以后排得靠不靠前
+3. **p95**：最慢那批请求慢不慢
 
 ---
 
@@ -59,7 +78,80 @@
 > - C 与 D 使用相同检索算法，差异来源于模型服务配置与网络延迟。
 > - 所有 Gate 均为 PASS，表明各档位在其适用场景下工作正常。
 
-![检索质量与延迟对比图（A:B:C:D）](images/检索质量与延迟对比图（A:B:C:D）.png)
+## 3.5 旧版 vs 当前版本（同口径摘要）
+
+下面这组数字来自一轮**同口径旧新对照复核**。这里保留摘要，不保留带本机路径的原始对照记录。
+
+![旧版 vs 当前版本检索质量与延迟对比图](images/benchmark_comparison.png)
+
+> 📈 这张图对应的是**旧版 vs 当前版本**在同口径下的对照结果。
+>
+> 读图时可以先看：
+>
+> - 左上 `HR@10`：前 10 条里有没有找到
+> - 右下 `p95 latency`：慢的时候大概慢到什么程度
+> - 页脚那行 `cm=8 avg`：表示新版把候选池继续放大后的上限表现
+
+---
+
+### 高干扰场景的核心结论
+
+| 场景 | 指标 | 旧版 C | 新版 C | 旧版 D | 新版 D |
+|---|---|---:|---:|---:|---:|
+| `s8,d10` | `HR@10` | 0.875 | 0.875 | 0.875 | 0.875 |
+| `s8,d200` | `HR@10` | 0.313 | 0.563 | 0.375 | 0.625 |
+| `s100,d200` | `HR@10` | 0.280 | 0.580 | 0.295 | 0.615 |
+
+### 更细一点看：MRR / NDCG@10
+
+| 场景 | 指标 | 旧版 C | 新版 C | 旧版 D | 新版 D |
+|---|---|---:|---:|---:|---:|
+| `s8,d10` | `MRR / NDCG@10` | 0.783 / 0.805 | 0.783 / 0.805 | 0.825 / 0.837 | 0.825 / 0.837 |
+| `s8,d200` | `MRR / NDCG@10` | 0.313 / 0.313 | 0.563 / 0.563 | 0.375 / 0.375 | 0.625 / 0.625 |
+| `s100,d200` | `MRR / NDCG@10` | 0.247 / 0.255 | 0.512 / 0.529 | 0.268 / 0.275 | 0.560 / 0.573 |
+
+### 怎么读这组数据
+
+- `s8,d10`：低难度场景，**持平**
+- `s8,d200`：干扰一多，新版提升就很明显
+- `s100,d200`：样本更大、干扰更多时，新版依然明显更稳
+
+一句话总结：
+
+> 如果你关心的是真实复杂检索，而不是最简单的演示场景，那么当前版本相对旧版本确实更强。
+
+### 这些参数顺手解释一下
+
+- `s8,d10`：`s=sample_size`，`d=extra_distractors`。可以理解成“8 条样本 + 10 条干扰文档”。
+- `s8,d200`：样本还是 8 条，但干扰文档拉到 200 条，更容易把真正结果淹没。
+- `s100,d200`：100 条样本 + 200 条干扰文档，更接近真实复杂检索。
+- `candidate_multiplier=4 / 8`：检索第一轮先放大候选池，再做后续排序。数字越大，通常**质量更有机会提升**，但**时延也更容易上去**。
+
+### 延迟补充
+
+| 场景 | 仓库 | C p95(ms) | D p95(ms) |
+|---|---|---:|---:|
+| `s8,d10` | 旧版 | 474.5 | 2103.2 |
+| `s8,d10` | 新版 | 639.5 | 2088.2 |
+| `s8,d200` | 旧版 | 945.8 | 2507.1 |
+| `s8,d200` | 新版 | 1150.9 | 2428.8 |
+| `s100,d200` | 旧版 | 1027.8 | 2796.5 |
+| `s100,d200` | 新版 | 937.6 | 2772.0 |
+
+这里也要说人话：
+
+- 新版的主收益是**检索质量更高**
+- 不是所有场景都更快
+- 但在 `s100,d200` 这种更接近真实复杂检索的场景里，延迟并没有明显变坏
+
+### 新版增强口径（补充）
+
+在 `s100,d200` 场景下，如果把新版的 `candidate_multiplier` 从 `4` 调到 `8`，3 次重复均值为：
+
+- C：`HR@10=0.700`、`MRR=0.607`、`NDCG@10=0.630`
+- D：`HR@10=0.720`、`MRR=0.651`、`NDCG@10=0.668`
+
+这说明新版还有进一步调优空间，但代价是更高的候选池和更高的时延。
 
 ---
 
@@ -78,6 +170,12 @@
 - 决策类型分布：`NOOP`×2, `UPDATE`×2, `ADD`×2
 - 综合判定：**overall_pass = true**
 
+怎么理解这组指标：
+
+- **Precision（精确率）**：系统说“该拦 / 该改”的时候，判断有多准。越高越好。
+- **Recall（召回率）**：真正该拦 / 该改的情况，它漏掉了多少。越高越好。
+- 这组测试的目标不是看“文笔”，而是看 **Write Guard 会不会误拦、漏拦**。
+
 ### Intent 分类（查询意图识别）
 
 **来源**：`intent_accuracy_metrics.json`
@@ -94,6 +192,11 @@
   - `causal` → `causal_wide_pool`
   - `exploratory` → `exploratory_high_recall`
   - `factual` → `factual_high_precision`
+
+怎么理解：
+
+- 这里测的不是“答得好不好”，而是系统能不能先判断出：这条查询更像**事实查询、探索查询、时间查询还是因果查询**。
+- 判断对了，后面的检索策略才更容易选对。
 
 ### Gist 质量（上下文压缩摘要）
 
@@ -114,39 +217,25 @@
 | gist-004 | 0.667 |
 | gist-005 | 0.714 |
 
+怎么理解：
+
+- **ROUGE-L** 可以简单理解成：生成的 gist 和参考摘要在“关键内容重合度”上有多接近。
+- 它不是“最终写作质量分”，而是看压缩后**有没有把关键意思留下来**。
+
 ---
 
-## 5. 如何复现
+## 5. 如何复核当前公开口径
 
-### 全量基准测试
+当前这份面向用户的项目内容**不附带 `tests/benchmark` 评测脚手架**，因此不能直接从日常使用包里重跑完整 benchmark。
 
-```bash
-cd backend
-source .venv/bin/activate   # Windows: .venv\Scripts\Activate.ps1
-pytest tests/benchmark -q
-```
-
-### 定向门禁测试
+如果你只是想确认当前安装状态，建议使用下面这组最小检查：
 
 ```bash
-# A/B/CD 小样本门禁
-pytest tests/benchmark/test_benchmark_public_datasets_profiles.py -q -k small_gate
-
-# 检索契约回归
-pytest tests/benchmark/test_search_memory_contract_regression.py -q
-
-# 真实 A/B/C/D 运行（需配置 embedding/reranker API）
-pytest tests/benchmark/test_profile_abcd_real_runner.py -q
-
-# Write Guard 质量门禁
-pytest tests/benchmark/test_write_guard_quality_metrics.py -q
-
-# Intent 分类准确率
-pytest tests/benchmark/test_intent_accuracy_metrics.py -q
-
-# Gist 质量门禁
-pytest tests/benchmark/test_compact_context_gist_quality.py -q
+bash scripts/pre_publish_check.sh
+curl -fsS http://127.0.0.1:8000/health
 ```
+
+如果你需要完整 benchmark runners、原始 JSON 产物或更细的门控脚本，那属于维护阶段验证材料，默认只在完整开发工作区里使用，不作为公开用户仓承诺的一部分。
 
 ---
 
@@ -160,3 +249,14 @@ pytest tests/benchmark/test_compact_context_gist_quality.py -q
 | D | API-first / 远程服务优先 | 最高检索质量 | 延迟最高（p95 ~2000ms+），受网络影响 |
 
 > **上线建议**：固定一套 profile + 模型配置，长期追踪同一指标口径，避免跨档位混合比较。
+
+---
+
+## 7. 2026-03 重测进展（已完成本轮）
+
+- 当前关键观察：
+  - 评测产物时间戳已更新到 2026-03-03，明显晚于本页 2026-02 基线。
+  - 真实 A/B/C/D 产物当前为 `sample_size_requested=1`、`dataset_scope=squad_v2_dev`，与本页“2 数据集 × 8 查询”不一致。
+  - `runtime-env-mode none` 更接近发布场景；如果 `profile c/d` 在本机缺少外部模型配置，可能出现 `embedding_request_failed` / `embedding_fallback_hash`。
+  - `runtime-env-mode file + --allow-runtime-env-debug` 适合本地排障，但它不是最终发布口径。
+  - 本轮还完成了 `api_tolerant<=5%` 重测，当前公开结论是：`phase6.gate.valid` 保持为 `true`。

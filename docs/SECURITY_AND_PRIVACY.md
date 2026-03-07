@@ -1,6 +1,6 @@
 # Memory Palace 安全与隐私指南
 
-本文档面向部署和维护 Memory Palace 的用户，涵盖密钥管理、接口鉴权、Docker 安全与发布前检查。
+本文档面向部署和维护 Memory Palace 的用户，涵盖密钥管理、接口鉴权、Docker 安全，以及分享或正式发布前的安全自检。
 
 ---
 
@@ -17,7 +17,8 @@
 | `RETRIEVAL_RERANKER_API_KEY` | Reranker 模型 API 访问 | `RETRIEVAL_RERANKER_API_KEY=` |
 | `WRITE_GUARD_LLM_API_KEY` | Write Guard LLM 决策 | `WRITE_GUARD_LLM_API_KEY=` |
 | `COMPACT_GIST_LLM_API_KEY` | Compact Context Gist LLM（为空时自动回退到 Write Guard） | `COMPACT_GIST_LLM_API_KEY=` |
-| `ROUTER_API_KEY` | Router 模式下的 Embedding API 访问（`RETRIEVAL_EMBEDDING_BACKEND=router`） | `ROUTER_API_KEY=` |
+| `INTENT_LLM_API_KEY` | 实验性 Intent LLM 决策 | `INTENT_LLM_API_KEY=` |
+| `ROUTER_API_KEY` | Router 模式下的 Embedding API 访问；以及 Reranker 未显式配置 `RETRIEVAL_RERANKER_API_KEY` 时的回退密钥 | `ROUTER_API_KEY=` |
 
 ---
 
@@ -41,10 +42,10 @@
 |---|---|---|
 | `/maintenance/*` | 所有请求 | `backend/api/maintenance.py` — `require_maintenance_api_key` 作为路由依赖 |
 | `/review/*` | 所有请求 | `backend/api/review.py` — 导入并依赖同一鉴权函数 |
-| `/browse/*` 写操作 | 仅 `POST`、`PUT`、`DELETE` | `backend/api/browse.py` — 仅写端点挂载 `Depends(require_maintenance_api_key)` |
+| `/browse/*` | 所有请求（含读操作） | `backend/api/browse.py` — 路由统一挂载 `Depends(require_maintenance_api_key)` |
 | SSE 接口 | `/sse` 与 `/messages` | `backend/run_sse.py` — ASGI 中间件 `apply_mcp_api_key_middleware` |
 
-> 📖 `/browse/node` 的 `GET` 请求**无需鉴权**，可自由浏览记忆内容。
+> 📖 `/browse/node` 的 `GET` 请求也在鉴权范围内，请携带 `X-MCP-API-Key` 或 `Authorization: Bearer`。
 
 ### 鉴权方式（二选一）
 
@@ -70,15 +71,16 @@ Authorization: Bearer <MCP_API_KEY>
 |---|---|---|
 | `MCP_API_KEY` 已设置且请求携带正确 Key | ✅ 放行 | — |
 | `MCP_API_KEY` 已设置但 Key 错误或缺失 | ❌ 拒绝 | `401`，`reason: invalid_or_missing_api_key` |
-| `MCP_API_KEY` 为空，`MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，请求来自 loopback | ✅ 放行 | — |
+| `MCP_API_KEY` 为空，`MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，请求来自 loopback 且不包含 `Forwarded` / `X-Forwarded-*` / `X-Real-IP` 等转发头 | ✅ 放行 | — |
+| `MCP_API_KEY` 为空，`MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，请求来自 loopback 但包含 `Forwarded` / `X-Forwarded-*` / `X-Real-IP` 等转发头 | ❌ 拒绝 | `401`，`reason: insecure_local_override_requires_loopback` |
 | `MCP_API_KEY` 为空，`MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，请求非 loopback | ❌ 拒绝 | `401`，`reason: insecure_local_override_requires_loopback` |
 | `MCP_API_KEY` 为空，未开启 insecure local | ❌ 拒绝 | `401`，`reason: api_key_not_configured` |
 
-> 📌 Loopback 地址仅包含 `127.0.0.1`、`::1`、`localhost`（代码常量 `_LOOPBACK_CLIENT_HOSTS`）。
+> 📌 Loopback 地址仅包含 `127.0.0.1`、`::1`、`localhost`（代码常量 `_LOOPBACK_CLIENT_HOSTS`）；且必须为直连本机请求（无 `Forwarded` / `X-Forwarded-*` / `X-Real-IP` 等转发头）。
 
-### 对应的测试用例
+### 维护期验证锚点（完整开发仓）
 
-以上鉴权逻辑在以下测试文件中有完整覆盖：
+以上鉴权逻辑在完整开发仓的以下测试文件中有覆盖；公开用户仓默认不附带这些 `tests/` 文件：
 
 - `backend/tests/test_week6_maintenance_auth.py` — 维护 API 五项鉴权场景
 - `backend/tests/test_week6_sse_auth.py` — SSE 鉴权场景
@@ -104,7 +106,7 @@ Authorization: Bearer <MCP_API_KEY>
 
 1. `readRuntimeMaintenanceAuth()` 读取 `window.__MEMORY_PALACE_RUNTIME__`
 2. axios 请求拦截器 `isProtectedApiRequest()` 判断请求是否需要鉴权
-3. 对 `/maintenance/*`、`/review/*` 和 `/browse/*` 写操作自动注入鉴权头
+3. 对 `/maintenance/*`、`/review/*` 和 `/browse/*`（含读写）自动注入鉴权头
 
 > 兼容性：也支持旧字段名 `window.__MCP_RUNTIME_CONFIG__`（同一文件第 14 行 fallback 逻辑）。
 
@@ -129,9 +131,13 @@ Authorization: Bearer <MCP_API_KEY>
 
 ---
 
-## 6. 开源发布前检查清单
+<p align="center">
+  <img src="images/security_checklist.png" width="900" alt="分享前安全自检清单" />
+</p>
 
-在公开仓库之前，请完成以下步骤：
+## 6. 分享或发布前自检清单
+
+在分享项目、交付环境或正式发布之前，请完成以下仓库卫生与安全自检步骤：
 
 0. **一键自检（推荐）**：
 
@@ -140,6 +146,8 @@ Authorization: Bearer <MCP_API_KEY>
    ```
 
    该脚本会检查：本地敏感产物是否存在、是否被 git 跟踪、已跟踪文件中的密钥模式、个人绝对路径泄露、`.env.example` 的 API key 占位状态。
+
+   脚本会把检查结果直接输出在当前终端；如果你另外运行 `python scripts/evaluate_memory_palace_skill.py` 或 `backend/.venv/bin/python scripts/evaluate_memory_palace_mcp_e2e.py`，对应的 Markdown 摘要会在 `<repo-root>/docs/skills/` 下本地生成或更新，通常更适合当成你自己机器上的验证记录。
 
 1. **检查工作区状态** — 确认无意外暴露：
 
@@ -166,25 +174,29 @@ Authorization: Bearer <MCP_API_KEY>
 3. **检查绝对路径** — 确保文档中不包含本机路径：
 
    ```bash
-   grep -rn "/Users/" --include="*.md" .
-   grep -rn "C:\\\\Users\\\\" --include="*.md" .
+   # 如需手工补查，请先把下面的占位符替换成你自己的实际路径前缀
+   grep -rn "<user-home>" --include="*.md" <repo-root>
+   grep -rn "C:/absolute/path/to/" --include="*.md" <repo-root>
    ```
 
-4. **运行测试** — 确认项目可复现构建：
+4. **运行验证** — 确认项目可复现构建：
 
    ```bash
-   # 后端
-   cd backend && python -m pytest tests -q
+   # 用户仓最小检查
+   bash scripts/pre_publish_check.sh
+   curl -fsS http://127.0.0.1:8000/health
 
-   # 前端
+   # 前端构建检查
    cd frontend && npm ci && npm run test && npm run build
    ```
 
+   > 如果你使用的是完整开发仓，再额外运行 `cd backend && python -m pytest tests -q`。
+
 ---
 
-## 7. 不建议公开的本地文件
+## 7. 通常只在自己机器上使用的文件与维护文档
 
-以下文件类型已在 [`.gitignore`](../.gitignore) 中配置排除：
+以下内容分为两类：一类已在 [`.gitignore`](../.gitignore) 中配置排除；另一类是运行脚本后在你自己的工作区生成或更新、通常更适合只留在当前机器上的摘要。
 
 | 文件 / 目录 | 说明 |
 |---|---|
@@ -200,5 +212,22 @@ Authorization: Bearer <MCP_API_KEY>
 | `frontend/node_modules` | NPM 依赖 |
 | `frontend/dist/` | 前端构建产物 |
 | `.DS_Store` | macOS 系统文件 |
+| `backups/` | 本地备份目录，通常只在你自己的机器上使用 |
+| `docs/improvement/` | 阶段性实施计划、重测草稿、内部排障记录 |
+| `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` | 运行 `python scripts/evaluate_memory_palace_skill.py` 后本地生成或更新的 skill smoke 摘要 |
+| `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` | 运行 `backend/.venv/bin/python scripts/evaluate_memory_palace_mcp_e2e.py` 后本地生成或更新的 MCP e2e 摘要 |
+| `backend/docs/benchmark_*.md` | 本地 benchmark 分析笔记 |
+| `backend/tests/benchmark_results.md` | 一次性 benchmark 汇总草稿 |
+| `docs/evaluation_old_vs_new_executive_summary_2026-03-05.md` | 一次性对照摘要，更适合作为维护阶段材料 |
+| `docs/changelog/current_code_improvements_vs_legacy_docs.md` | 面向维护者的补充差异清单 |
 
 > 💡 保留 `.env.example` 作为配置模板提交到仓库。
+>
+> 💡 公开文档里建议统一使用占位符：
+>
+> - `<repo-root>`：仓库根目录
+> - `<path-to-runtime-env>`：你自己的运行时 `.env`
+> - `<old-repo>`：旧项目路径
+> - `<user-home>`：用户目录
+> - `/absolute/path/to/...`：macOS / Linux 绝对路径示例
+> - `C:/absolute/path/to/...`：Windows 绝对路径示例

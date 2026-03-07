@@ -5,6 +5,7 @@ This replaces the old Entity/Relation/Chapter conceptual split with a simple
 hierarchical browser. Every path is just a node with content and children.
 """
 
+import os
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Any
@@ -15,6 +16,17 @@ from .maintenance import require_maintenance_api_key
 from sqlalchemy import select
 
 router = APIRouter(prefix="/browse", tags=["browse"])
+_READ_ONLY_DOMAINS = {"system"}
+_VALID_DOMAINS = list(
+    dict.fromkeys(
+        [
+            d.strip().lower()
+            for d in str(os.getenv("VALID_DOMAINS", "core,writer,game,notes,system")).split(",")
+            if d.strip()
+        ]
+        + sorted(_READ_ONLY_DOMAINS)
+    )
+)
 
 
 class NodeUpdate(BaseModel):
@@ -32,14 +44,54 @@ class NodeCreate(BaseModel):
     domain: str = "core"
 
 
-def _normalize_guard_decision(payload: Any) -> dict[str, Any]:
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on", "enabled"}
+
+
+ENABLE_WRITE_LANE_QUEUE = _env_bool("RUNTIME_WRITE_LANE_QUEUE", True)
+
+
+def _normalize_domain_or_422(domain: str) -> str:
+    normalized = str(domain or "").strip().lower()
+    if not normalized:
+        normalized = "core"
+    if normalized not in _VALID_DOMAINS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown domain '{normalized}'. Valid domains: {', '.join(_VALID_DOMAINS)}",
+        )
+    return normalized
+
+
+def _ensure_writable_domain_or_422(domain: str, *, operation: str) -> str:
+    normalized = _normalize_domain_or_422(domain)
+    if normalized in _READ_ONLY_DOMAINS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{operation} does not allow writes to '{normalized}://'. system:// is read-only.",
+        )
+    return normalized
+
+
+def _normalize_guard_decision(payload: Any, *, allow_bypass: bool = False) -> dict[str, Any]:
     if not isinstance(payload, dict):
         payload = {}
-    action = str(payload.get("action") or "ADD").strip().upper()
-    if action not in {"ADD", "UPDATE", "NOOP", "DELETE", "BYPASS"}:
-        action = "ADD"
-    method = str(payload.get("method") or "none").strip().lower() or "none"
     reason = str(payload.get("reason") or "").strip()
+    has_action = "action" in payload
+    raw_action = str(payload.get("action") or "").strip().upper() if has_action else ""
+    action = raw_action
+    valid_actions = {"ADD", "UPDATE", "NOOP", "DELETE"}
+    if allow_bypass:
+        valid_actions.add("BYPASS")
+    if action not in valid_actions:
+        action = "NOOP"
+        marker_value = raw_action or ("EMPTY" if has_action else "MISSING")
+        marker = f"invalid_guard_action:{marker_value}"
+        reason = marker if not reason else f"{marker}; {reason}"
+    method = str(payload.get("method") or "none").strip().lower() or "none"
     target_id = payload.get("target_id")
     if not isinstance(target_id, int) or target_id <= 0:
         target_id = None
@@ -80,10 +132,21 @@ async def _record_guard_event(operation: str, decision: dict[str, Any], blocked:
         return
 
 
+async def _run_write_lane(operation: str, task):
+    if not ENABLE_WRITE_LANE_QUEUE:
+        return await task()
+    return await runtime_state.write_lanes.run_write(
+        session_id=None,
+        operation=operation,
+        task=task,
+    )
+
+
 @router.get("/node")
 async def get_node(
     path: str = Query("", description="URI path like 'memory-palace' or 'memory-palace/salem'"),
-    domain: str = Query("core")
+    domain: str = Query("core"),
+    _auth: None = Depends(require_maintenance_api_key),
 ):
     """
     Get a node's content and its direct children.
@@ -94,6 +157,7 @@ async def get_node(
     - Breadcrumb trail for navigation
     """
     client = get_sqlite_client()
+    domain = _normalize_domain_or_422(domain)
     
     if not path:
         # Virtual Root Node
@@ -108,7 +172,9 @@ async def get_node(
         breadcrumbs = [{"path": "", "label": "root"}]
     else:
         # Get the node itself
-        memory = await client.get_memory_by_path(path, domain=domain)
+        memory = await client.get_memory_by_path(
+            path, domain=domain, reinforce_access=False
+        )
         
         if not memory:
             raise HTTPException(status_code=404, detail=f"Path not found: {domain}://{path}")
@@ -187,7 +253,7 @@ async def create_node(
     """
     client = get_sqlite_client()
     parent_path = body.parent_path.strip().strip("/")
-    domain = body.domain.strip() or "core"
+    domain = _ensure_writable_domain_or_422(body.domain, operation="create_node")
     title = (body.title or "").strip() or None
     try:
         guard_decision = _normalize_guard_decision(
@@ -200,19 +266,20 @@ async def create_node(
     except Exception as exc:
         guard_decision = _normalize_guard_decision(
             {
-                "action": "ADD",
+                "action": "NOOP",
                 "reason": f"write_guard_unavailable: {exc}",
-                "method": "fallback",
+                "method": "exception",
             }
         )
 
-    guard_action = str(guard_decision.get("action") or "ADD").upper()
-    blocked = guard_action in {"NOOP", "UPDATE", "DELETE"}
+    guard_action = str(guard_decision.get("action") or "NOOP").upper()
+    blocked = guard_action != "ADD"
     await _record_guard_event("browse.create_node", guard_decision, blocked=blocked)
     if blocked:
         return {
-            "success": True,
+            "success": False,
             "created": False,
+            "reason": "write_guard_blocked",
             "message": (
                 "Skipped: write_guard blocked create_node "
                 f"(action={guard_action}, method={guard_decision.get('method')})."
@@ -220,8 +287,8 @@ async def create_node(
             **_guard_fields(guard_decision),
         }
 
-    try:
-        result = await client.create_memory(
+    async def _write_task():
+        return await client.create_memory(
             parent_path=parent_path,
             content=body.content,
             priority=body.priority,
@@ -229,6 +296,9 @@ async def create_node(
             disclosure=body.disclosure,
             domain=domain,
         )
+
+    try:
+        result = await _run_write_lane("browse.create_node", _write_task)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -251,9 +321,12 @@ async def update_node(
     Update a node's content.
     """
     client = get_sqlite_client()
+    domain = _ensure_writable_domain_or_422(domain, operation="update_node")
     
     # Check exists
-    memory = await client.get_memory_by_path(path, domain=domain)
+    memory = await client.get_memory_by_path(
+        path, domain=domain, reinforce_access=False
+    )
     if not memory:
         raise HTTPException(status_code=404, detail=f"Path not found: {domain}://{path}")
 
@@ -270,49 +343,61 @@ async def update_node(
         except Exception as exc:
             guard_decision = _normalize_guard_decision(
                 {
-                    "action": "ADD",
+                    "action": "NOOP",
                     "reason": f"write_guard_unavailable: {exc}",
-                    "method": "fallback",
+                    "method": "exception",
                 }
             )
     else:
         guard_decision = _normalize_guard_decision(
-            {"action": "BYPASS", "reason": "metadata_only_update", "method": "none"}
+            {"action": "BYPASS", "reason": "metadata_only_update", "method": "none"},
+            allow_bypass=True,
         )
 
-    guard_action = str(guard_decision.get("action") or "BYPASS").upper()
+    guard_action = str(guard_decision.get("action") or "NOOP").upper()
     blocked = False
     if body.content is not None:
-        if guard_action in {"NOOP", "DELETE"}:
-            blocked = True
+        if guard_action == "ADD":
+            blocked = False
         elif guard_action == "UPDATE":
             target_id = guard_decision.get("target_id")
-            if isinstance(target_id, int) and target_id != memory.get("id"):
+            current_memory_id = memory.get("id")
+            if (
+                not isinstance(target_id, int)
+                or not isinstance(current_memory_id, int)
+                or target_id != current_memory_id
+            ):
                 blocked = True
+        else:
+            blocked = True
     await _record_guard_event("browse.update_node", guard_decision, blocked=blocked)
     if blocked:
         return {
-            "success": True,
+            "success": False,
             "updated": False,
+            "reason": "write_guard_blocked",
             "message": (
                 "Skipped: write_guard blocked update_node "
                 f"(action={guard_action}, method={guard_decision.get('method')})."
             ),
             **_guard_fields(guard_decision),
         }
-    
-    # Update (creates new version if content changed, updates path metadata otherwise)
-    try:
-        result = await client.update_memory(
+
+    async def _write_task():
+        return await client.update_memory(
             path=path,
             domain=domain,
             content=body.content,
             priority=body.priority,
             disclosure=body.disclosure,
         )
+
+    # Update (creates new version if content changed, updates path metadata otherwise)
+    try:
+        result = await _run_write_lane("browse.update_node", _write_task)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    
+
     return {
         "success": True,
         "updated": True,
@@ -331,9 +416,13 @@ async def delete_node(
     Delete a single path. If the path has children, this operation is rejected.
     """
     client = get_sqlite_client()
+    domain = _ensure_writable_domain_or_422(domain, operation="delete_node")
+
+    async def _write_task():
+        return await client.remove_path(path=path, domain=domain)
 
     try:
-        result = await client.remove_path(path=path, domain=domain)
+        result = await _run_write_lane("browse.delete_node", _write_task)
     except ValueError as e:
         message = str(e)
         if "not found" in message:

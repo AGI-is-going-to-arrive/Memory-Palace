@@ -10,6 +10,11 @@ import MaintenancePage from './features/maintenance/MaintenancePage';
 import ObservabilityPage from './features/observability/ObservabilityPage';
 import AgentationLite from './components/AgentationLite';
 import FluidBackground from './components/FluidBackground';
+import {
+  clearStoredMaintenanceAuth,
+  getMaintenanceAuthState,
+  saveStoredMaintenanceAuth,
+} from './lib/api';
 
 function NavItem({ to, icon: Icon, label }) {
   return (
@@ -41,7 +46,42 @@ function NavItem({ to, icon: Icon, label }) {
   );
 }
 
-function Layout() {
+function AuthControls({ authState, onSetApiKey, onClearApiKey }) {
+  if (authState?.source === 'runtime') {
+    return (
+      <div className="hidden md:flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-700 shadow-sm">
+        Runtime key active
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={onSetApiKey}
+        className="rounded-full border border-white/40 bg-white/40 px-3 py-2 text-xs font-medium text-[color:var(--palace-ink)] backdrop-blur-md transition hover:bg-white/60"
+      >
+        {authState ? 'Update API key' : 'Set API key'}
+      </button>
+      {authState ? (
+        <button
+          type="button"
+          onClick={onClearApiKey}
+          className="rounded-full border border-white/30 bg-white/20 px-3 py-2 text-xs font-medium text-[color:var(--palace-muted)] backdrop-blur-md transition hover:bg-white/40 hover:text-[color:var(--palace-ink)]"
+        >
+          Clear key
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function Layout({ authState, onSetApiKey, onClearApiKey }) {
+  const routesKey = authState
+    ? `${authState.source}:${authState.mode}:${authState.key}`
+    : 'no-auth';
+
   return (
     <div className="relative flex h-screen flex-col overflow-hidden text-[color:var(--palace-ink)]">
       <FluidBackground />
@@ -71,19 +111,24 @@ function Layout() {
             <NavItem to="/observability" icon={Eye} label="Observability" />
           </motion.nav>
 
-           <div className="hidden md:block w-[140px]" /> {/* Spacer for centering if needed, or actions */}
+          <AuthControls
+            authState={authState}
+            onSetApiKey={onSetApiKey}
+            onClearApiKey={onClearApiKey}
+          />
         </div>
       </div>
 
       {/* Main Area */}
       <div className="relative z-10 flex-1 min-h-0 overflow-hidden px-6 pb-6 pt-2">
         <div className="h-full w-full max-w-7xl mx-auto">
-             <Routes>
+            <Routes key={routesKey}>
               <Route path="/" element={<Navigate to="/memory" replace />} />
               <Route path="/review" element={<ReviewPage />} />
               <Route path="/memory" element={<MemoryBrowser />} />
               <Route path="/maintenance" element={<MaintenancePage />} />
               <Route path="/observability" element={<ObservabilityPage />} />
+              <Route path="*" element={<Navigate to="/memory" replace />} />
             </Routes>
         </div>
       </div>
@@ -94,9 +139,35 @@ function Layout() {
 }
 
 function App() {
+  const [authState, setAuthState] = React.useState(() => getMaintenanceAuthState());
+
+  const handleSetApiKey = React.useCallback(() => {
+    const nextValue = window.prompt(
+      'Enter the MCP API key for protected dashboard routes.',
+      authState?.source === 'stored' ? authState.key : ''
+    );
+    if (typeof nextValue !== 'string') return;
+
+    const saved = saveStoredMaintenanceAuth(nextValue, authState?.mode ?? 'header');
+    if (!saved) {
+      window.alert('API key cannot be empty.');
+      return;
+    }
+    setAuthState(saved);
+  }, [authState]);
+
+  const handleClearApiKey = React.useCallback(() => {
+    clearStoredMaintenanceAuth();
+    setAuthState(getMaintenanceAuthState());
+  }, []);
+
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <Layout />
+      <Layout
+        authState={authState}
+        onSetApiKey={handleSetApiKey}
+        onClearApiKey={handleClearApiKey}
+      />
     </BrowserRouter>
   );
 }

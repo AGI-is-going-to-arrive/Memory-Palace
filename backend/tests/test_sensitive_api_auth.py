@@ -37,6 +37,14 @@ def test_browse_write_requires_api_key_when_configured(monkeypatch) -> None:
     assert response.status_code == 401
 
 
+def test_browse_read_requires_api_key_when_configured(monkeypatch) -> None:
+    monkeypatch.setenv("MCP_API_KEY", "browse-secret")
+    monkeypatch.delenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", raising=False)
+    with _build_client() as client:
+        response = client.get("/browse/node")
+    assert response.status_code == 401
+
+
 def test_review_rejects_invalid_session_id_with_api_key(monkeypatch) -> None:
     monkeypatch.setenv("MCP_API_KEY", "review-secret")
     monkeypatch.delenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", raising=False)

@@ -69,7 +69,7 @@ system://boot             ← 系统内置 URI（只读）
 - 检测是否已有重复内容（避免冗余写入）
 - 建议合并到已有记忆（返回 `UPDATE` / `NOOP` 动作）
 
-Write Guard 的决策方法可能包括 `llm`、`embedding`、`keyword`、`fallback`、`none`，取决于当前配置和服务可用性。
+Write Guard 的决策方法可能包括 `llm`、`embedding`、`keyword`、`fallback`、`none`、`exception`，取决于当前配置和服务可用性。
 
 ---
 
@@ -82,13 +82,14 @@ Write Guard 的决策方法可能包括 `llm`、`embedding`、`keyword`、`fallb
 **功能：** 按 URI 读取记忆内容。
 
 **函数签名：**
-<!-- 源码位置: backend/mcp_server.py:1564-1832 -->
+<!-- 源码位置: backend/mcp_server.py -->
 ```python
 read_memory(
     uri: str,                       # 必填，记忆 URI
     chunk_id: Optional[int] = None, # 可选，分片索引（0 起始）
     range: Optional[str] = None,    # 可选，字符范围（如 "0:500"）
-    max_chars: Optional[int] = None # 可选，返回字符数上限
+    max_chars: Optional[int] = None, # 可选，返回字符数上限
+    include_ancestors: Optional[bool] = False # 可选，是否附带父链记忆（仅非 system URI）
 )
 ```
 
@@ -98,6 +99,8 @@ read_memory(
 |---|---|---|
 | `system://boot` | 加载核心记忆 + 最近记忆 | 每次**会话启动**时调用 |
 | `system://index` | 查看所有记忆的完整索引 | 需要**概览全部记忆**时 |
+| `system://index-lite` | 查看 gist 轻量索引摘要 | 需要**低成本快速概览**时 |
+| `system://audit` | 查看聚合观测/审计摘要 | 需要**排障与运行态巡检**时 |
 | `system://recent` | 最近修改的 10 条记忆 | 快速查看**最新变更** |
 | `system://recent/N` | 最近修改的 N 条记忆 | 自定义数量（最多 100） |
 
@@ -133,7 +136,7 @@ read_memory("core://agent", range="0:500")
 **功能：** 在父 URI 下创建一条新记忆。
 
 **函数签名：**
-<!-- 源码位置: backend/mcp_server.py:1835-2015 -->
+<!-- 源码位置: backend/mcp_server.py -->
 ```python
 create_memory(
     parent_uri: str,              # 必填，父 URI（如 "core://agent"）
@@ -182,7 +185,7 @@ create_memory(
 **功能：** 更新已有记忆的内容或元数据。
 
 **函数签名：**
-<!-- 源码位置: backend/mcp_server.py:2017-2383 -->
+<!-- 源码位置: backend/mcp_server.py -->
 ```python
 update_memory(
     uri: str,                          # 必填，目标 URI
@@ -231,7 +234,7 @@ update_memory("core://agent/my_user", priority=5)
 **功能：** 删除指定 URI 路径。
 
 **函数签名：**
-<!-- 源码位置: backend/mcp_server.py:2385-2446 -->
+<!-- 源码位置: backend/mcp_server.py -->
 ```python
 delete_memory(
     uri: str  # 必填，要删除的 URI
@@ -259,7 +262,7 @@ delete_memory("core://agent/old_note")
 **功能：** 为同一条记忆添加别名 URI，提升可达性。
 
 **函数签名：**
-<!-- 源码位置: backend/mcp_server.py:2448-2516 -->
+<!-- 源码位置: backend/mcp_server.py -->
 ```python
 add_alias(
     new_uri: str,                       # 必填，新的别名 URI
@@ -291,7 +294,7 @@ add_alias(
 **功能：** 通过关键词、语义或混合模式检索记忆。
 
 **函数签名：**
-<!-- 源码位置: backend/mcp_server.py:2518-2845 -->
+<!-- 源码位置: backend/mcp_server.py -->
 ```python
 search_memory(
     query: str,                                  # 必填，搜索关键词
@@ -299,7 +302,8 @@ search_memory(
     max_results: Optional[int] = None,           # 可选，返回结果数上限
     candidate_multiplier: Optional[int] = None,  # 可选，候选池倍率
     include_session: Optional[bool] = None,      # 可选，是否包含本会话记忆
-    filters: Optional[Dict] = None               # 可选，过滤条件
+    filters: Optional[Dict] = None,              # 可选，过滤条件
+    scope_hint: Optional[str] = None             # 可选，查询侧作用域提示（domain/path_prefix/URI 前缀）
 )
 ```
 
@@ -326,7 +330,7 @@ search_memory(
 |---|---|
 | `query_effective` | 实际生效的查询文本 |
 | `query_preprocess` | 查询预处理信息 |
-| `intent` | 意图分类：`factual` / `exploratory` / `temporal` / `causal` |
+| `intent` | 意图分类：`factual` / `exploratory` / `temporal` / `causal` / `unknown` |
 | `mode_applied` | 实际使用的检索模式 |
 | `results` | 搜索结果列表 |
 | `degrade_reasons` | 降级原因（如有） |
@@ -356,7 +360,7 @@ search_memory(
 **功能：** 将当前会话上下文压缩为持久化记忆摘要。
 
 **函数签名：**
-<!-- 源码位置: backend/mcp_server.py:2847-2901 -->
+<!-- 源码位置: backend/mcp_server.py -->
 ```python
 compact_context(
     reason: str = "manual",  # 可选，压缩原因标签
@@ -406,7 +410,7 @@ compact_context(reason="long_session", force=True, max_lines=8)
 **功能：** 触发检索索引重建或 sleep-time 整合任务。
 
 **函数签名：**
-<!-- 源码位置: backend/mcp_server.py:2903-3047 -->
+<!-- 源码位置: backend/mcp_server.py -->
 ```python
 rebuild_index(
     memory_id: Optional[int] = None,     # 可选，目标记忆 ID（省略则重建全量）
@@ -460,7 +464,7 @@ rebuild_index(sleep_consolidation=True, wait=True)
 **功能：** 查询检索索引可用性、统计信息和运行时状态。
 
 **函数签名：**
-<!-- 源码位置: backend/mcp_server.py:3049-3087 -->
+<!-- 源码位置: backend/mcp_server.py -->
 ```python
 index_status()  # 无参数
 ```
@@ -494,7 +498,7 @@ index_status()
 |---|---|---|
 | `guard_action` | `ADD` / `UPDATE` / `NOOP` / `DELETE` / `BYPASS` | Guard 的决策动作 |
 | `guard_reason` | 字符串 | 决策原因 |
-| `guard_method` | `llm` / `embedding` / `keyword` / `fallback` / `none` | 检测方法 |
+| `guard_method` | `llm` / `embedding` / `keyword` / `fallback` / `none` / `exception` | 检测方法 |
 
 ### 索引入队统计字段
 
@@ -512,7 +516,8 @@ index_status()
 
 ## 降级机制
 
-当远程 Embedding / Reranker 服务不可用或返回异常时，系统会**自动降级**并在响应中返回 `degrade_reasons` 字段。
+检索链路中，当远程 Embedding / Reranker 服务不可用或返回异常时，系统会**自动降级**并在响应中返回 `degrade_reasons` 字段。  
+写入链路中，若出现 `write_guard_exception`，系统会 fail-closed 拒绝写入并记录审计，不属于“继续写入的自动降级”。
 
 **常见降级原因：**
 
@@ -521,7 +526,7 @@ index_status()
 | `embedding_fallback_hash` | Embedding API 不可用，回退到本地 hash |
 | `embedding_request_failed` | Embedding 请求失败 |
 | `reranker_request_failed` | Reranker 请求失败 |
-| `write_guard_exception` | Write Guard 执行异常 |
+| `write_guard_exception` | Write Guard 执行异常，写入已被拒绝（fail-closed） |
 | `query_preprocess_failed` | 查询预处理失败 |
 | `index_enqueue_dropped` | 索引任务入队失败 |
 
@@ -577,17 +582,17 @@ Memory Palace 支持多种检索 Profile。Profile C 和 D 使用混合检索路
 
 ```bash
 # ── Embedding 配置 ──
-RETRIEVAL_EMBEDDING_BACKEND=none      # 可选: none / openai
+RETRIEVAL_EMBEDDING_BACKEND=none      # 可选: none / hash / router / api / openai
 RETRIEVAL_EMBEDDING_API_BASE=         # API 地址
 RETRIEVAL_EMBEDDING_API_KEY=          # API 密钥
-RETRIEVAL_EMBEDDING_MODEL=            # 模型名称
+RETRIEVAL_EMBEDDING_MODEL=Qwen3-Embedding-8B
 RETRIEVAL_EMBEDDING_DIM=1024            # 向量维度
 
 # ── Reranker 配置 ──
 RETRIEVAL_RERANKER_ENABLED=false      # 是否启用 Reranker
 RETRIEVAL_RERANKER_API_BASE=          # API 地址
 RETRIEVAL_RERANKER_API_KEY=           # API 密钥
-RETRIEVAL_RERANKER_MODEL=             # 模型名称
+RETRIEVAL_RERANKER_MODEL=Qwen3-Reranker-8B
 
 # ── 权重调参 ──
 RETRIEVAL_RERANKER_WEIGHT=0.25        # Reranker 权重（首要调参项）
@@ -596,6 +601,12 @@ RETRIEVAL_HYBRID_SEMANTIC_WEIGHT=0.3  # 语义权重
 ```
 
 > 💡 **首要调参项**是 `RETRIEVAL_RERANKER_WEIGHT`。即使 Embedding / Reranker 是本地部署的，也必须配置 OpenAI-compatible API 参数。
+>
+> 配置语义说明：`RETRIEVAL_EMBEDDING_BACKEND` 仅控制 Embedding 路径；Reranker 没有 `RETRIEVAL_RERANKER_BACKEND` 开关。Reranker 参数优先使用 `RETRIEVAL_RERANKER_*`，缺失时才回退 `ROUTER_*`（最后回退 `OPENAI_*` 的 base/key）。
+>
+> 推荐模型：Embedding 使用 `Qwen3-Embedding-8B`，Reranker 使用 `Qwen3-Reranker-8B`；如启用可选 LLM，推荐 `Qwen3.5-35B-A3B`。
+>
+> 进阶配置（例如 `INTENT_LLM_*`、`RETRIEVAL_MMR_*`、`CORS_ALLOW_*`、运行时观测/睡眠整合开关）请以 `.env.example` 为准；本节只保留最常用主配置。
 >
 > 预置 Profile 配置文件位于 `deploy/profiles/` 目录下（macOS / Windows / Docker）。
 

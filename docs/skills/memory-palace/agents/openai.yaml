@@ -1,0 +1,4 @@
+interface:
+  display_name: "Memory Palace"
+  short_description: "Operate Memory Palace MCP safely"
+  default_prompt: "Use Memory Palace safely: boot once, search before write, respect write guard, and recover from degraded retrieval when needed."

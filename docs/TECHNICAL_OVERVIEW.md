@@ -42,13 +42,13 @@ backend/
 ├── models/
 │   ├── __init__.py        # 模型导出
 │   └── schemas.py         # Pydantic 数据模型定义
-└── tests/                 # 测试与基准测试（含 benchmark/ 目录）
+└── scripts/               # 启动脚本、profile 应用、一键部署与仓库自检
 ```
 
 ### 核心模块说明
 
-- **`main.py`**：FastAPI 应用入口（版本 `v1.0.1`），负责生命周期管理（数据库初始化、legacy 数据库文件兼容恢复）、CORS 配置、路由注册（`review`、`browse`、`maintenance`）和健康检查（含索引状态、write lane 与 index worker 运行时状态报告）。
-- **`mcp_server.py`**：实现 9 个 MCP 工具，包括 URI 解析（`domain://path` 格式）、快照管理、write guard 决策、会话缓存、异步索引入队等核心逻辑。同时提供系统 URI (`system://boot`、`system://index`、`system://recent`) 资源。
+- **`main.py`**：FastAPI 应用入口（版本 `v1.0.1`），负责生命周期管理（数据库初始化、legacy 数据库文件兼容恢复）、CORS 配置、路由注册（`review`、`browse`、`maintenance`）和健康检查（含索引状态、write lane 与 index worker 运行时状态报告）。默认 CORS origin 收敛为本地常用列表（`localhost/127.0.0.1` 的 `5173/3000`）；显式配置 wildcard（`*`）时会自动禁用 credentials；legacy sqlite 恢复前会执行 regular-file + quick_check + 核心表存在校验。
+- **`mcp_server.py`**：实现 9 个 MCP 工具，包括 URI 解析（`domain://path` 格式）、快照管理、write guard 决策、会话缓存、异步索引入队等核心逻辑。同时提供系统 URI（`system://boot`、`system://index`、`system://index-lite`、`system://audit`、`system://recent`）资源。
 - **`runtime_state.py`**：管理写入 lane（串行化写操作）、索引 worker（异步队列处理索引重建任务）、vitality 衰减调度、cleanup review 审批流程和 sleep consolidation 调度等运行时状态。
 - **`db/sqlite_client.py`**：SQLite 数据库操作层，包含记忆 CRUD、keyword/semantic/hybrid 三种检索模式、write_guard 逻辑（支持语义匹配 + 关键词匹配 + LLM 决策三级判定）、gist 生成与缓存、vitality 评分与衰减、embedding 获取（支持远程 API 和本地 hash 两种模式）、reranker 集成。
 
@@ -56,14 +56,28 @@ backend/
 
 ## 3. HTTP API 入口
 
+先说人话：
+
+- `/browse`：平时最常用，负责**看记忆、写记忆**
+- `/review`：出了改动要复核时用，负责**看 diff、回滚、确认集成**
+- `/maintenance`：系统运维入口，负责**清理、重建索引、看运行状态**
+
+如果你只是接一个普通客户端，通常先看 `/browse` 和 `/review` 就够了。
+
 ### 浏览与写入（`/browse`）
 
 | 方法 | 路径 | 鉴权 | 说明 |
 |---|---|---|---|
-| `GET` | `/browse/node` | 无 | 浏览记忆树（含子节点、面包屑、gist、别名） |
+| `GET` | `/browse/node` | API Key | 浏览记忆树（含子节点、面包屑、gist、别名） |
 | `POST` | `/browse/node` | API Key | 创建记忆节点（含 write_guard） |
 | `PUT` | `/browse/node` | API Key | 更新记忆节点（含 write_guard） |
 | `DELETE` | `/browse/node` | API Key | 删除记忆路径 |
+
+这是最像“主业务接口”的一组：
+
+- 记忆树浏览
+- 新建 / 更新 / 删除记忆
+- 返回结果里会带上当前节点、子节点、面包屑、gist 等前端直接要用的数据
 
 ### 审查与回滚（`/review`）
 
@@ -82,6 +96,12 @@ backend/
 | `DELETE` | `/review/memories/{memory_id}` | 永久删除已审查的记忆 |
 | `POST` | `/review/diff` | 通用文本 diff 计算 |
 
+这组接口更像“变更复核区”：
+
+- 先看 session
+- 再看 snapshot / diff
+- 最后决定是 rollback 还是 integrate
+
 ### 维护与观测（`/maintenance`）
 
 路由级 API Key 鉴权（所有端点均需要鉴权）。
@@ -91,8 +111,15 @@ backend/
 | `GET` | `/maintenance/orphans` | 查看孤儿记忆（deprecated 或无路径指向） |
 | `GET` | `/maintenance/orphans/{memory_id}` | 查看孤儿记忆详情 |
 | `DELETE` | `/maintenance/orphans/{memory_id}` | 永久删除孤儿记忆 |
+| `POST` | `/maintenance/import/prepare` | 准备外部导入任务（生成可执行计划） |
+| `POST` | `/maintenance/import/execute` | 执行外部导入任务 |
+| `GET` | `/maintenance/import/jobs/{job_id}` | 查看导入任务状态 |
+| `POST` | `/maintenance/import/jobs/{job_id}/rollback` | 回滚导入任务 |
+| `POST` | `/maintenance/learn/trigger` | 触发显式学习任务 |
+| `GET` | `/maintenance/learn/jobs/{job_id}` | 查看显式学习任务状态 |
+| `POST` | `/maintenance/learn/jobs/{job_id}/rollback` | 回滚显式学习任务 |
 | `POST` | `/maintenance/vitality/decay` | 触发 vitality 衰减 |
-| `POST` | `/maintenance/vitality/candidates/query` | 查询清理候选记忆 |
+| `POST` | `/maintenance/vitality/candidates/query` | 查询清理候选记忆（支持 `domain` / `path_prefix` 过滤） |
 | `POST` | `/maintenance/vitality/cleanup/prepare` | 准备清理审批（生成 review_id + token） |
 | `POST` | `/maintenance/vitality/cleanup/confirm` | 确认并执行清理（需 review_id + token + 确认短语） |
 | `GET` | `/maintenance/index/worker` | 查看索引 worker 状态 |
@@ -105,6 +132,14 @@ backend/
 | `POST` | `/maintenance/observability/search` | 观测搜索（含检索统计） |
 | `GET` | `/maintenance/observability/summary` | 观测概览 |
 
+这组接口比较多，但可以简单分成 4 类：
+
+1. **导入 / 学习任务**：`import/*`、`learn/*`
+2. **孤儿记忆清理**：`orphans*`
+3. **活力治理**：`vitality/*`
+4. **索引任务**：`index/*`
+5. **运行态观测**：`observability/*`
+
 完整 API 文档可启动后端后访问 `http://127.0.0.1:8000/docs`（Swagger UI）。
 
 ---
@@ -115,7 +150,7 @@ backend/
 
 | 工具 | 类型 | 说明 |
 |---|---|---|
-| `read_memory` | 读取 | 读取记忆内容，支持整段与分片（chunk_id / range / max_chars），支持系统 URI（`system://boot`、`system://index`、`system://recent`） |
+| `read_memory` | 读取 | 读取记忆内容，支持整段与分片（chunk_id / range / max_chars），支持系统 URI（`system://boot`、`system://index`、`system://index-lite`、`system://audit`、`system://recent`） |
 | `create_memory` | 写入 | 创建新记忆节点（含 write_guard，进入 write lane 串行化） |
 | `update_memory` | 写入 | 更新已有记忆（old_string/new_string 精准替换 或 append 追加，含 write_guard） |
 | `delete_memory` | 写入 | 删除记忆路径（进入 write lane 串行化） |
@@ -160,8 +195,13 @@ frontend/src/
 |---|---|---|
 | Memory Browser | `/memory` | 按域（domain）树形浏览、内联编辑、查看 gist 摘要、别名管理 |
 | Review | `/review` | 查看写入快照 diff、支持 rollback 回滚和 integrate 确认、清理 deprecated 记忆 |
-| Maintenance | `/maintenance` | 查看 vitality 评分、清理孤儿记忆、触发索引重建、管理清理审批流程 |
-| Observability | `/observability` | 检索日志与统计、任务执行记录、索引 worker 状态、系统状态概览 |
+| Maintenance | `/maintenance` | 查看 vitality 评分、清理孤儿记忆、触发索引重建、管理清理审批流程，支持 `domain` / `path_prefix` 过滤 |
+| Observability | `/observability` | 检索日志与统计、任务执行记录、索引 worker 状态、系统状态概览，支持 `scope_hint` 与更细的运行时快照 |
+
+补充说明：
+
+- 当前版本的应用壳层右上角有统一的鉴权入口：`Set API key` / `Update API key` / `Clear key`
+- 如果还没配置鉴权，受保护页面会先显示授权提示或空态，而不是直接加载完整数据
 
 ---
 
@@ -183,6 +223,8 @@ frontend/src/
 > 兼容性：运行时对象也兼容旧字段名 `window.__MCP_RUNTIME_CONFIG__`。
 >
 > 代码参考：`frontend/src/lib/api.js` 第 14 行。
+>
+> 说人话就是：前端把鉴权做成了“运行时再决定”，所以你可以在页面顶部直接补 key，也可以由部署脚本在页面加载前注入。
 
 ---
 
@@ -207,9 +249,18 @@ frontend/src/
    - `unknown` → 策略模板 `default`（冲突或低信号混合时保守回退）
 3. 执行 **keyword / semantic / hybrid** 检索。
 4. 可选 **reranker** 重排序（通过远程 API 调用）。
-5. 返回 `results` 与 `degrade_reasons`。
+5. 支持额外的查询侧约束，例如 `scope_hint`、`domain`、`path_prefix`、`max_priority`。
+6. 返回 `results` 与 `degrade_reasons`。
 
 > 意图分类使用 `keyword_scoring_v2` 方法实现（`db/sqlite_client.py` `classify_intent` 方法），通过关键词匹配评分与排名进行意图推断，无需外部模型调用。
+>
+> **配置策略说明**：
+> - 本项目支持两种思路：`1)` 分别直配 embedding / reranker / llm；`2)` 通过 `router` 统一代理这些能力。
+> - `INTENT_LLM_ENABLED` 默认关闭；开启后会优先尝试 LLM 意图分类，失败则回退到现有关键词规则。
+> - `RETRIEVAL_MMR_ENABLED` 默认关闭；只有 `hybrid` 检索下才会做去重 / 多样性重排。
+> - `RETRIEVAL_SQLITE_VEC_ENABLED` 默认关闭；当前仍保留 legacy 向量路径为默认实现，sqlite-vec 走受控 rollout。
+> - 本地开发默认更推荐前者，因为三条链路的故障通常彼此独立，分别配置更容易确认是哪一个模型、哪个端点或哪组密钥出了问题。
+> - `router` 更适合作为生产 / 客户环境的统一入口：便于集中做鉴权、限流、审计、模型切换与 fallback 编排。
 
 ![记忆写入与审查时序图](images/记忆写入与审查时序图.png)
 
@@ -233,15 +284,17 @@ Docker 端口环境变量：
 - 镜像定义：`deploy/docker/Dockerfile.backend`（基于 `python:3.11-slim`）、`deploy/docker/Dockerfile.frontend`（构建阶段 `node:22-alpine`，运行阶段 `nginxinc/nginx-unprivileged:1.27-alpine`）
 - Nginx 配置：`deploy/docker/nginx.conf`
 - 入口脚本：`deploy/docker/backend-entrypoint.sh`
+- 备份脚本：`scripts/backup_memory.sh`、`scripts/backup_memory.ps1`
+- 分享前检查：`scripts/pre_publish_check.sh`
 
 ---
 
 ## 9. 安全默认值
 
 - `/maintenance/*`、`/review/*` 所有端点均需 API Key 鉴权。
-- `/browse` 写操作（POST/PUT/DELETE）通过端点级 `Depends(require_maintenance_api_key)` 门控；GET 读取不需要鉴权。
+- `/browse` 读写操作（GET/POST/PUT/DELETE）均通过端点级 `Depends(require_maintenance_api_key)` 门控。
 - `MCP_API_KEY` 为空时默认 **fail-closed**（拒绝请求）。
-- 仅在 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` **且** loopback 请求（`127.0.0.1` / `::1` / `localhost`）时可本地放行。
+- 仅在 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` **且** loopback 请求（`127.0.0.1` / `::1` / `localhost`）时可本地放行，且仅限直连 loopback 且无 forwarding headers 的请求。
 - Docker 容器默认以非 root 用户运行：
   - Backend：自定义用户 `app`（UID `10001`，GID `10001`）
   - Frontend：使用 `nginx-unprivileged` 官方非 root 镜像

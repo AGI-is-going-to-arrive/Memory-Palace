@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pytest
+from fastapi import HTTPException
 
 import mcp_server
 from api import browse as browse_api
@@ -45,9 +46,15 @@ class _FakeClient:
             "index_targets": [11],
         }
 
-    async def get_memory_by_path(self, path: str, domain: str = "core") -> Optional[Dict[str, Any]]:
+    async def get_memory_by_path(
+        self,
+        path: str,
+        domain: str = "core",
+        reinforce_access: bool = True,
+    ) -> Optional[Dict[str, Any]]:
         _ = path
         _ = domain
+        _ = reinforce_access
         return dict(self.memory)
 
     async def update_memory(self, **kwargs: Any) -> Dict[str, Any]:
@@ -58,6 +65,11 @@ class _FakeClient:
             "new_memory_id": 19,
             "index_targets": [19],
         }
+
+
+class _GuardErrorClient(_FakeClient):
+    async def write_guard(self, **_: Any) -> Dict[str, Any]:
+        raise RuntimeError("guard_down")
 
 
 async def _noop_async(*_: Any, **__: Any) -> None:
@@ -134,6 +146,30 @@ async def test_write_guard_exclude_memory_id_allows_add(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_write_guard_is_fail_closed_when_search_backends_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "guard-search-unavailable.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    async def _raise_search_advanced(*_: Any, **__: Any) -> Dict[str, Any]:
+        raise RuntimeError("search backend unavailable")
+
+    monkeypatch.setattr(client, "search_advanced", _raise_search_advanced)
+    decision = await client.write_guard(content="new candidate", domain="core")
+    await client.close()
+
+    assert decision["action"] == "NOOP"
+    assert decision["method"] == "exception"
+    assert decision["reason"] == "write_guard_unavailable"
+    assert decision["degraded"] is True
+    assert "write_guard_semantic_failed:RuntimeError" in decision["degrade_reasons"]
+    assert "write_guard_keyword_failed:RuntimeError" in decision["degrade_reasons"]
+
+
+@pytest.mark.asyncio
 async def test_create_memory_is_blocked_when_guard_returns_noop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -156,7 +192,7 @@ async def test_create_memory_is_blocked_when_guard_returns_noop(
     )
     payload = json.loads(raw)
 
-    assert payload["ok"] is True
+    assert payload["ok"] is False
     assert payload["created"] is False
     assert payload["guard_action"] == "NOOP"
     assert fake_client.create_called is False
@@ -190,6 +226,118 @@ async def test_create_memory_returns_guard_fields_on_success(
 
 
 @pytest.mark.asyncio
+async def test_create_memory_is_fail_closed_when_guard_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _GuardErrorClient(
+        guard_decision={"action": "ADD", "reason": "unused", "method": "keyword"}
+    )
+    _patch_mcp_dependencies(monkeypatch, fake_client)
+
+    raw = await mcp_server.create_memory(
+        parent_uri="core://agent",
+        content="new information",
+        priority=2,
+        title="fresh_note",
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is False
+    assert payload["created"] is False
+    assert payload["guard_action"] == "NOOP"
+    assert payload["guard_method"] == "exception"
+    assert fake_client.create_called is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "invalid_action",
+    ["unexpected_action", "", None],
+)
+async def test_create_memory_invalid_guard_action_is_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_action: Any,
+) -> None:
+    fake_client = _FakeClient(
+        guard_decision={
+            "action": invalid_action,
+            "reason": "model_output_not_supported",
+            "method": "embedding",
+        }
+    )
+    _patch_mcp_dependencies(monkeypatch, fake_client)
+
+    raw = await mcp_server.create_memory(
+        parent_uri="core://agent",
+        content="new information",
+        priority=2,
+        title="fresh_note",
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is False
+    assert payload["created"] is False
+    assert payload["guard_action"] == "NOOP"
+    assert "invalid_guard_action" in str(payload.get("guard_reason") or "")
+    assert fake_client.create_called is False
+
+
+@pytest.mark.asyncio
+async def test_create_memory_missing_guard_action_is_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeClient(
+        guard_decision={
+            "reason": "guard_payload_missing_action",
+            "method": "embedding",
+        }
+    )
+    _patch_mcp_dependencies(monkeypatch, fake_client)
+
+    raw = await mcp_server.create_memory(
+        parent_uri="core://agent",
+        content="new information",
+        priority=2,
+        title="fresh_note",
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is False
+    assert payload["created"] is False
+    assert payload["guard_action"] == "NOOP"
+    assert "invalid_guard_action:MISSING" in str(payload.get("guard_reason") or "")
+    assert fake_client.create_called is False
+
+
+@pytest.mark.asyncio
+async def test_create_memory_guard_bypass_action_is_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeClient(
+        guard_decision={
+            "action": "BYPASS",
+            "reason": "unexpected_bypass",
+            "method": "embedding",
+        }
+    )
+    _patch_mcp_dependencies(monkeypatch, fake_client)
+
+    raw = await mcp_server.create_memory(
+        parent_uri="core://agent",
+        content="new information",
+        priority=2,
+        title="fresh_note",
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is False
+    assert payload["created"] is False
+    assert payload["guard_action"] == "NOOP"
+    assert "invalid_guard_action:BYPASS" in str(payload.get("guard_reason") or "")
+    assert fake_client.create_called is False
+
+
+@pytest.mark.asyncio
 async def test_update_memory_is_blocked_when_guard_returns_noop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -211,9 +359,84 @@ async def test_update_memory_is_blocked_when_guard_returns_noop(
     )
     payload = json.loads(raw)
 
-    assert payload["ok"] is True
+    assert payload["ok"] is False
     assert payload["updated"] is False
     assert payload["guard_action"] == "NOOP"
+    assert fake_client.update_called is False
+
+
+@pytest.mark.asyncio
+async def test_update_memory_is_fail_closed_when_guard_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _GuardErrorClient(
+        guard_decision={"action": "ADD", "reason": "unused", "method": "keyword"}
+    )
+    _patch_mcp_dependencies(monkeypatch, fake_client)
+
+    raw = await mcp_server.update_memory(
+        uri="core://agent/current",
+        old_string="world",
+        new_string="planet",
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is False
+    assert payload["updated"] is False
+    assert payload["guard_action"] == "NOOP"
+    assert payload["guard_method"] == "exception"
+    assert fake_client.update_called is False
+
+
+@pytest.mark.asyncio
+async def test_update_memory_missing_guard_action_is_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeClient(
+        guard_decision={
+            "reason": "guard_payload_missing_action",
+            "method": "embedding",
+        }
+    )
+    _patch_mcp_dependencies(monkeypatch, fake_client)
+
+    raw = await mcp_server.update_memory(
+        uri="core://agent/current",
+        old_string="world",
+        new_string="planet",
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is False
+    assert payload["updated"] is False
+    assert payload["guard_action"] == "NOOP"
+    assert "invalid_guard_action:MISSING" in str(payload.get("guard_reason") or "")
+    assert fake_client.update_called is False
+
+
+@pytest.mark.asyncio
+async def test_update_memory_guard_update_without_target_is_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeClient(
+        guard_decision={
+            "action": "UPDATE",
+            "reason": "possible_duplicate_without_target",
+            "method": "embedding",
+        }
+    )
+    _patch_mcp_dependencies(monkeypatch, fake_client)
+
+    raw = await mcp_server.update_memory(
+        uri="core://agent/current",
+        old_string="world",
+        new_string="planet",
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is False
+    assert payload["updated"] is False
+    assert payload["guard_action"] == "UPDATE"
     assert fake_client.update_called is False
 
 
@@ -265,9 +488,34 @@ async def test_browse_create_node_is_blocked_by_write_guard(
         )
     )
 
-    assert payload["success"] is True
+    assert payload["success"] is False
     assert payload["created"] is False
     assert payload["guard_action"] == "NOOP"
+    assert fake_client.create_called is False
+
+
+@pytest.mark.asyncio
+async def test_browse_create_node_rejects_unknown_domain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeClient(
+        guard_decision={"action": "ADD", "reason": "allow", "method": "keyword"}
+    )
+    monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: fake_client)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await browse_api.create_node(
+            browse_api.NodeCreate(
+                parent_path="agent",
+                title="new_note",
+                content="create payload",
+                priority=1,
+                domain="unknown-domain",
+            )
+        )
+
+    assert exc_info.value.status_code == 422
+    assert "Unknown domain" in str(exc_info.value.detail)
     assert fake_client.create_called is False
 
 
@@ -301,6 +549,126 @@ async def test_browse_create_node_records_guard_event(
     assert stats["total_events"] == 1
     assert stats["blocked_events"] == 1
     assert stats["operation_breakdown"]["browse.create_node"] == 1
+
+
+@pytest.mark.asyncio
+async def test_browse_create_node_is_fail_closed_when_guard_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _GuardErrorClient(
+        guard_decision={"action": "ADD", "reason": "unused", "method": "keyword"}
+    )
+    monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: fake_client)
+
+    payload = await browse_api.create_node(
+        browse_api.NodeCreate(
+            parent_path="agent",
+            title="new_note",
+            content="create payload",
+            priority=1,
+            domain="core",
+        )
+    )
+
+    assert payload["success"] is False
+    assert payload["created"] is False
+    assert payload["guard_action"] == "NOOP"
+    assert payload["guard_method"] == "exception"
+    assert fake_client.create_called is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "invalid_action",
+    ["UNEXPECTED_ACTION", "", None],
+)
+async def test_browse_create_node_invalid_guard_action_is_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_action: Any,
+) -> None:
+    fake_client = _FakeClient(
+        guard_decision={
+            "action": invalid_action,
+            "reason": "guard_model_bad_action",
+            "method": "keyword",
+        }
+    )
+    monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: fake_client)
+
+    payload = await browse_api.create_node(
+        browse_api.NodeCreate(
+            parent_path="agent",
+            title="new_note",
+            content="create payload",
+            priority=1,
+            domain="core",
+        )
+    )
+
+    assert payload["success"] is False
+    assert payload["created"] is False
+    assert payload["guard_action"] == "NOOP"
+    assert "invalid_guard_action" in str(payload.get("guard_reason") or "")
+    assert fake_client.create_called is False
+
+
+@pytest.mark.asyncio
+async def test_browse_create_node_missing_guard_action_is_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeClient(
+        guard_decision={
+            "reason": "guard_payload_missing_action",
+            "method": "embedding",
+        }
+    )
+    monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: fake_client)
+
+    payload = await browse_api.create_node(
+        browse_api.NodeCreate(
+            parent_path="agent",
+            title="new_note",
+            content="create payload",
+            priority=1,
+            domain="core",
+        )
+    )
+
+    assert payload["success"] is False
+    assert payload["created"] is False
+    assert payload["guard_action"] == "NOOP"
+    assert "invalid_guard_action:MISSING" in str(payload.get("guard_reason") or "")
+    assert fake_client.create_called is False
+
+
+@pytest.mark.asyncio
+async def test_browse_create_node_guard_bypass_action_is_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeClient(
+        guard_decision={
+            "action": "BYPASS",
+            "reason": "unexpected_bypass",
+            "method": "embedding",
+        }
+    )
+    monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: fake_client)
+
+    payload = await browse_api.create_node(
+        browse_api.NodeCreate(
+            parent_path="agent",
+            title="new_note",
+            content="create payload",
+            priority=1,
+            domain="core",
+        )
+    )
+
+    assert payload["success"] is False
+    assert payload["created"] is False
+    assert payload["guard_action"] == "NOOP"
+    assert "invalid_guard_action:BYPASS" in str(payload.get("guard_reason") or "")
+    assert fake_client.create_called is False
 
 
 @pytest.mark.asyncio
@@ -347,9 +715,102 @@ async def test_browse_update_node_blocks_guard_noop(
         body=browse_api.NodeUpdate(content="replace payload"),
     )
 
-    assert payload["success"] is True
+    assert payload["success"] is False
     assert payload["updated"] is False
     assert payload["guard_action"] == "NOOP"
+    assert fake_client.update_called is False
+
+
+@pytest.mark.asyncio
+async def test_browse_update_node_is_fail_closed_when_guard_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _GuardErrorClient(
+        guard_decision={"action": "ADD", "reason": "unused", "method": "keyword"}
+    )
+    monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: fake_client)
+
+    payload = await browse_api.update_node(
+        path="agent/current",
+        domain="core",
+        body=browse_api.NodeUpdate(content="replace payload"),
+    )
+
+    assert payload["success"] is False
+    assert payload["updated"] is False
+    assert payload["guard_action"] == "NOOP"
+    assert payload["guard_method"] == "exception"
+    assert fake_client.update_called is False
+
+
+@pytest.mark.asyncio
+async def test_browse_update_node_missing_guard_action_is_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeClient(
+        guard_decision={
+            "reason": "guard_payload_missing_action",
+            "method": "embedding",
+        }
+    )
+    monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: fake_client)
+
+    payload = await browse_api.update_node(
+        path="agent/current",
+        domain="core",
+        body=browse_api.NodeUpdate(content="replace payload"),
+    )
+
+    assert payload["success"] is False
+    assert payload["updated"] is False
+    assert payload["guard_action"] == "NOOP"
+    assert "invalid_guard_action:MISSING" in str(payload.get("guard_reason") or "")
+    assert fake_client.update_called is False
+
+
+@pytest.mark.asyncio
+async def test_browse_update_node_guard_update_without_target_is_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeClient(
+        guard_decision={
+            "action": "UPDATE",
+            "reason": "possible_duplicate_without_target",
+            "method": "embedding",
+        }
+    )
+    monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: fake_client)
+
+    payload = await browse_api.update_node(
+        path="agent/current",
+        domain="core",
+        body=browse_api.NodeUpdate(content="replace payload"),
+    )
+
+    assert payload["success"] is False
+    assert payload["updated"] is False
+    assert payload["guard_action"] == "UPDATE"
+    assert fake_client.update_called is False
+
+
+@pytest.mark.asyncio
+async def test_browse_update_node_rejects_read_only_domain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeClient(
+        guard_decision={"action": "ADD", "reason": "allow", "method": "keyword"}
+    )
+    monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: fake_client)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await browse_api.update_node(
+            path="agent/current",
+            domain="system",
+            body=browse_api.NodeUpdate(content="replace payload"),
+        )
+
+    assert exc_info.value.status_code == 422
+    assert "read-only" in str(exc_info.value.detail)
     assert fake_client.update_called is False
 
 
@@ -372,6 +833,15 @@ async def test_observability_summary_includes_guard_stats(
                 "avg_quality_score": 0.0,
                 "method_breakdown": {},
                 "latest_created_at": None,
+            }
+
+        async def get_vitality_stats(self) -> Dict[str, Any]:
+            return {
+                "degraded": False,
+                "total_paths": 0,
+                "low_vitality_paths": 0,
+                "deprecation_candidates": 0,
+                "total_memories": 0,
             }
 
     async def _ensure_started(_factory) -> None:
