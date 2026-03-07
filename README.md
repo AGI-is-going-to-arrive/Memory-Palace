@@ -202,13 +202,12 @@ A React-powered dashboard with four views: **Memory Browser**, **Review & Rollba
 memory-palace/
 ├── backend/
 │   ├── main.py                 # FastAPI entrypoint; registers Review/Browse/Maintenance routes
-│   ├── mcp_server.py           # 9 MCP tools + snapshot logic + URI parsing (3100+ lines)
+│   ├── mcp_server.py           # 9 MCP tools + snapshot logic + URI parsing
 │   ├── runtime_state.py        # Write Lane queue, Index Worker, vitality decay scheduler
 │   ├── run_sse.py              # SSE transport layer with API Key auth gating
 │   ├── db/
 │   │   └── sqlite_client.py    # Schema definition, CRUD, retrieval, Write Guard, Gist
 │   ├── api/                    # REST routers: review, browse, maintenance
-│   └── scripts/                # Launch helpers, profile tools, repo hygiene checks
 ├── frontend/
 │   └── src/
 │       ├── App.jsx             # Routing and page scaffold
@@ -228,7 +227,7 @@ memory-palace/
 │   ├── docker_one_click.sh     # macOS/Linux one-click Docker deployment
 │   └── docker_one_click.ps1    # Windows one-click Docker deployment
 ├── docs/                       # Full documentation suite
-├── .env.example                # Configuration template (140 lines, with detailed comments)
+├── .env.example                # Configuration template (with detailed comments)
 ├── docker-compose.yml          # Docker Compose definition
 └── LICENSE                     # MIT License
 ```
@@ -242,7 +241,7 @@ memory-palace/
 | Python | 3.10+ | 3.11+ |
 | Node.js | 20.19+ (or >=22.12) | latest LTS |
 | npm | 9+ | latest stable |
-| Docker (optional) | 24+ | latest stable |
+| Docker (optional) | 20+ | latest stable |
 
 ---
 
@@ -250,8 +249,8 @@ memory-palace/
 
 ### Option 1: Manual Local Setup (Recommended for Beginners)
 
-> **💡 Tip**: This guide uses **Profile B** (fully local, no external model services required).
-> For best retrieval quality, see [Upgrading to Profile C/D](#-upgrading-to-profile-cd) after setup.
+> **💡 Tip**: The recommended starting target in this guide is still **Profile B**, so you can boot with zero external model services.
+> For real day-to-day retrieval quality, **Profile C is the strongly recommended target profile** once you are ready to fill the embedding / reranker / LLM settings described in [Upgrading to Profile C/D](#-upgrading-to-profile-cd).
 
 #### Step 1: Clone the Repository
 
@@ -269,6 +268,10 @@ Choose **one** of the following methods:
 ```bash
 cp .env.example .env
 ```
+
+> This path starts from the **conservative `.env.example` template**. It is enough for a minimal local boot, but it is **not the same thing as applying Profile B**.
+>
+> If you want the actual Profile B defaults from this repository (for example local hash embedding), use **Method B** below. If you stay on Method A, that is fine too — just treat it as the minimal template and fill the fields you actually need.
 
 Then open `.env` and set `DATABASE_URL` to a path on your system. An absolute path is recommended for shared or production-like environments:
 
@@ -300,7 +303,14 @@ bash scripts/apply_profile.sh macos b
 .\scripts\apply_profile.ps1 -Platform windows -Profile b
 ```
 
-This generates a ready-to-use `.env` using the platform-specific Profile B template at `deploy/profiles/{macos,windows,docker}/profile-b.env`.
+This generates a Profile B-based `.env` using the platform-specific template at `deploy/profiles/{macos,windows,docker}/profile-b.env`.
+
+On **macOS / Windows local setup**, the generated file still leaves `MCP_API_KEY` empty by default. If you want the Dashboard, `/browse` / `/review` / `/maintenance`, or `/sse` / `/messages` to work immediately, add either:
+
+- `MCP_API_KEY=change-this-local-key`
+- `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` (loopback-only debugging on your own machine)
+
+For the **docker** platform only, `apply_profile` auto-generates a local `MCP_API_KEY` when the value is empty.
 
 #### Step 3: Start the Backend
 
@@ -354,9 +364,14 @@ You should see:
 # Check backend health
 curl -s http://127.0.0.1:8000/health | python -m json.tool
 
-# Browse memory tree (use the same local key you configured in `.env`)
+# Browse memory tree
+#
+# Option A: if you configured `MCP_API_KEY`
 curl -s "http://127.0.0.1:8000/browse/node?domain=core&path=" \
   -H "X-MCP-API-Key: <YOUR_MCP_API_KEY>" | python -m json.tool
+
+# Option B: if you enabled `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`
+curl -s "http://127.0.0.1:8000/browse/node?domain=core&path=" | python -m json.tool
 ```
 
 Open your browser at **<http://localhost:5173>** — you should see the Memory Palace dashboard 🎉
@@ -375,11 +390,13 @@ cd backend
 # stdio mode (for IDE-integrated clients like Cursor)
 python mcp_server.py
 
-# SSE mode (for remote / multi-client access)
+# SSE mode (loopback example; change HOST for remote access)
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
 > Note: `stdio` connects directly to the MCP tool process and does not pass through the HTTP/SSE auth middleware, so MCP tools can still be used locally without `MCP_API_KEY`. This applies to `stdio` only — protected HTTP/SSE routes still follow the normal API key rules.
+>
+> This `HOST=127.0.0.1` example is intentionally loopback-only. If you really need remote access, switch `HOST` to `0.0.0.0` (or your bind address) and apply your own API key, firewall, reverse proxy, and transport security controls.
 
 See [Multi-Client Integration](#-multi-client-integration) for detailed client configuration.
 
@@ -432,13 +449,19 @@ Memory Palace provides four deployment profiles to match your hardware and requi
 | Profile | Retrieval Mode | Embedding | Reranker | Best For |
 |---|---|---|---|---|
 | **A** | `keyword` only | ❌ Off | ❌ Off | 🟢 Minimal resources, initial validation |
-| **B** | `hybrid` | 📦 Local Hash | ❌ Off | 🟡 **Default** — local dev, no external services |
-| **C** | `hybrid` | 🌐 Router / API | ✅ On | 🟠 Local model server (Ollama / LM Studio) |
+| **B** | `hybrid` | 📦 Local Hash | ❌ Off | 🟡 **Default starting profile** — local dev, no external services |
+| **C** | `hybrid` | 🌐 Router / API | ✅ On | 🟠 **Strongly recommended** when you can provide local model endpoints |
 | **D** | `hybrid` | 🌐 Router / API | ✅ On | 🔴 Remote API, production environments |
 
 > **Note**: Profiles C and D share the same hybrid retrieval pipeline (`keyword + semantic + reranker`). In the shipped templates, the main differences are the model endpoint (local vs remote) and the default `RETRIEVAL_RERANKER_WEIGHT` (`0.30` vs `0.35`).
 
 ### 🔼 Upgrading to Profile C/D
+
+**Profile C is the strongly recommended target profile**, but it is not zero-config.
+
+- Keep **Profile B** as the default starting point when you want the repo to work with no extra model services.
+- Move to **Profile C** when you are ready to configure the embedding and reranker endpoints yourself.
+- If you also want LLM-assisted write guard / gist / intent routing, fill the matching `WRITE_GUARD_LLM_*`, `COMPACT_GIST_LLM_*`, and optional `INTENT_LLM_*` settings in the same `.env`.
 
 Configure these parameters in your `.env` file. All endpoints support the **OpenAI-compatible API** format, including locally deployed Ollama or LM Studio:
 
@@ -525,9 +548,11 @@ Memory Palace exposes **9 standardized tools** via the MCP protocol:
 # stdio mode (for IDE internal calls — Cursor, Codex, etc.)
 cd backend && python mcp_server.py
 
-# SSE mode (for remote / multi-client)
+# SSE mode (loopback example; change HOST for remote access)
 cd backend && HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
+
+> Use `HOST=0.0.0.0` only when you really need remote clients and have already added the usual network protections.
 
 Full tool semantics: [TOOLS.md](docs/TOOLS.md)
 

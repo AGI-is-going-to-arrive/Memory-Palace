@@ -23,7 +23,7 @@
 ```
 backend/
 ├── main.py               # FastAPI 入口，注册路由，生命周期管理
-├── mcp_server.py          # 9 个 MCP 工具实现（3100+ 行）
+├── mcp_server.py          # 9 个 MCP 工具实现
 ├── runtime_state.py       # 写入 lane、索引 worker、vitality 衰减、cleanup review 管理
 ├── run_sse.py             # SSE 传输层，支持 API Key 鉴权门控
 ├── mcp_wrapper.py         # MCP 启动封装
@@ -42,8 +42,9 @@ backend/
 ├── models/
 │   ├── __init__.py        # 模型导出
 │   └── schemas.py         # Pydantic 数据模型定义
-└── scripts/               # 启动脚本、profile 应用、一键部署与仓库自检
 ```
+
+> 补充说明：部署、profile 应用、分享前自检等脚本位于仓库根目录的 `scripts/`，不在 `backend/` 子目录里。
 
 ### 核心模块说明
 

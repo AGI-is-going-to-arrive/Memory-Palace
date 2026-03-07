@@ -24,11 +24,11 @@
 
 ## 1. 三步上手
 
-1. **选择档位**：根据你的硬件选择 `A`、`B`、`C` 或 `D`（不确定就选 **B**，零依赖即可运行）
+1. **选择档位**：根据你的硬件选择 `A`、`B`、`C` 或 `D`（不确定就先选 **B** 跑通；要长期用、且模型服务已就绪时优先上 **C**）
 2. **生成配置**：运行 `apply_profile` 脚本生成 `.env` 文件
 3. **启动服务**：使用 Docker 一键部署 **或** 手动启动后端 + 前端
 
-> **💡 新手建议**：先用 **Profile B** 跑通整个流程，熟悉后再升级到 C/D 获得更高检索精度。
+> **💡 建议口径**：**Profile B 仍是默认起步档位**，因为它零外部依赖；但只要你已经准备好模型服务，**Profile C 是强烈推荐档位**。升级到 C 前，请确认你会在 `.env` 的相应位置填写 embedding / reranker；如果还要启用 LLM 辅助能力，再继续填写对应的 LLM 配置。
 
 ---
 
@@ -37,8 +37,8 @@
 | 档位 | 搜索模式 | Embedding 方式 | Reranker | 适用场景 |
 |:---:|---|---|---|---|
 | **A** | `keyword` | 关闭（`none`） | ❌ 关闭 | 最低配要求，纯关键词检索，快速验证 |
-| **B** | `hybrid` | 本地哈希（`hash`） | ❌ 关闭 | **默认推荐**，单机开发，无需额外服务 |
-| **C** | `hybrid` | API 调用（`router`） | ✅ 开启 | 本地部署 embedding/reranker 模型服务 |
+| **B** | `hybrid` | 本地哈希（`hash`） | ❌ 关闭 | **默认起步档位**，单机开发，无需额外服务 |
+| **C** | `hybrid` | API 调用（`router`） | ✅ 开启 | **强烈推荐档位**，本地部署 embedding/reranker 模型服务 |
 | **D** | `hybrid` | API 调用（`router`） | ✅ 开启 | 使用远程 API 服务，无需本地 GPU |
 
 **关键区别**：
@@ -93,9 +93,19 @@ RUNTIME_INDEX_WORKER_ENABLED=true     # 开启异步索引
 RUNTIME_INDEX_DEFER_ON_WRITE=true
 ```
 
-### Profile C/D —— 混合检索 + 真实模型（最优效果）
+### Profile C/D —— 混合检索 + 真实模型（推荐目标；C 为强烈推荐）
 
 C 和 D 的算法路径相同，均使用 `router` 后端调用 OpenAI-compatible API；默认模板中 D 的 reranker 权重更高（`0.35`）。
+
+> **先说结论**：
+> - **Profile B**：默认起步，先保证你今天就能跑起来
+> - **Profile C**：强烈推荐，只要你已经有可用的模型服务
+> - **Profile D**：远程 API / 客户环境
+>
+> **升级到 Profile C 前最少要准备什么**：
+> - Embedding：`RETRIEVAL_EMBEDDING_*`
+> - Reranker：`RETRIEVAL_RERANKER_*`
+> - 如果你还想启用 LLM 辅助的 write guard / gist / intent routing：再填写 `WRITE_GUARD_LLM_*`、`COMPACT_GIST_LLM_*`、可选的 `INTENT_LLM_*`
 
 **Profile C**（本地模型服务）——适合有 GPU 或使用 Ollama/vLLM 等本地推理：
 
@@ -428,6 +438,8 @@ Authorization: Bearer <你的 MCP_API_KEY>
 ```bash
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
+
+> 这里的 `HOST=127.0.0.1` 是本机回环调试示例。若要给其他机器访问，请改成 `0.0.0.0`（或你的实际监听地址），并自行补齐 `MCP_API_KEY`、网络隔离、反向代理与 TLS 等保护。
 
 Docker 一键部署时，直接使用：
 

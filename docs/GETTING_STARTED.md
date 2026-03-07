@@ -36,7 +36,6 @@ memory-palace/
 │   │   ├── browse.py     # 记忆树浏览（GET /browse/node）
 │   │   ├── review.py     # 审查接口（/review/*）
 │   │   └── maintenance.py# 维护接口（/maintenance/*）
-│   └── scripts/          # 启动、部署、仓库自检脚本
 ├── frontend/             # React + Vite + Tailwind Dashboard
 │   ├── package.json      # 版本 1.0.1
 │   └── vite.config.js    # 开发服务器 port 5173，代理到后端 8000
@@ -76,6 +75,10 @@ memory-palace/
 cp .env.example .env
 ```
 
+> 这里复制出来的是**更保守的 `.env.example` 最小模板**。它足够你先完成本地启动，但**不等于已经套用了 Profile B**。
+>
+> 如果你想直接使用仓库里定义好的 Profile B 默认值（例如本地 hash Embedding），请优先使用下面的 Profile 脚本；如果你继续手动改 `.env.example` 也可以，就把它理解成“从最小模板开始按需补配置”。
+
 > **重要**：复制后请检查 `.env` 中的 `DATABASE_URL`，将路径改成你的实际路径。共享环境或接近生产的场景更推荐使用绝对路径。例如：
 >
 > ```
@@ -95,6 +98,8 @@ bash scripts/apply_profile.sh macos b
 > apply_profile 脚本会将 `.env.example` 复制到 `.env`（或你指定的目标文件），然后追加对应 Profile 的覆盖配置。macOS 平台还会自动检测并填充 `DATABASE_URL`。
 >
 > `apply_profile.sh/.ps1` 当前会在生成后统一去重重复 env key；原生 Windows / native `pwsh` 仍建议在目标环境单独补跑一次。
+>
+> 但要注意：**macOS / Windows 本地生成的 profile-b `.env` 不会自动补 `MCP_API_KEY`**。如果你接下来就要打开 Dashboard，或者直接调 `/browse` / `/review` / `/maintenance`、`/sse`、`/messages`，请再自行补 `MCP_API_KEY`，或仅在本机回环调试时设置 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`。只有 `docker` 平台的 profile 脚本会在 key 为空时自动生成一把本地 key。
 
 #### 关键配置项说明
 
@@ -118,7 +123,9 @@ bash scripts/apply_profile.sh macos b
 | `CORS_ALLOW_ORIGINS` | 允许跨域访问的来源列表（留空使用本地默认） | 空 |
 | `VALID_DOMAINS` | 允许的可写记忆 URI 域（`system://` 为内建只读域） | `core,writer,game,notes` |
 
-> B 档位默认使用本地 hash Embedding 且不启用 Reranker；C/D 档位需要配置外部 Embedding 与 Reranker，详见 [DEPLOYMENT_PROFILES.md](DEPLOYMENT_PROFILES.md)。
+> B 档位默认使用本地 hash Embedding 且不启用 Reranker；它仍然是**默认起步档位**。
+>
+> 如果你已经准备好模型服务，**更推荐尽快升级到 Profile C**：它需要你在 `.env` 中把 Embedding / Reranker 链路填好；如果还要启用 LLM 辅助的 write guard / gist / intent routing，再继续填写 `WRITE_GUARD_LLM_*`、`COMPACT_GIST_LLM_*`、可选的 `INTENT_LLM_*`。详见 [DEPLOYMENT_PROFILES.md](DEPLOYMENT_PROFILES.md)。
 >
 > 上表展示的是 `.env.example` 里的模板示例值；如果某些检索环境变量在运行时完全缺失，后端内部还会使用自己的回退值（例如 `hash` / `hash-v1` / `64`）。
 >
@@ -233,6 +240,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 |---|---|
 | Frontend | `http://localhost:3000` |
 | Backend API | `http://localhost:18000` |
+| SSE | `http://localhost:3000/sse` |
 | Health Check | `http://localhost:18000/health` |
 | API 文档 (Swagger) | `http://localhost:18000/docs` |
 
@@ -342,7 +350,10 @@ curl -fsS "http://127.0.0.1:8000/browse/node?domain=core&path=" \
   -H "X-MCP-API-Key: <YOUR_MCP_API_KEY>"
 ```
 
-> 此端点来自 `api/browse.py` 的 `GET /browse/node`，用于查看指定域下的记忆节点树。`domain` 参数对应 `.env` 中 `VALID_DOMAINS` 配置的域名，读取同样需要鉴权头。
+> 此端点来自 `api/browse.py` 的 `GET /browse/node`，用于查看指定域下的记忆节点树。`domain` 参数对应 `.env` 中 `VALID_DOMAINS` 配置的域名。
+>
+> - 如果你配置了 `MCP_API_KEY`，请像上面这样带 `X-MCP-API-Key`
+> - 如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，并且请求来自本机回环地址（且没有 forwarded headers），也可以直接省略鉴权头
 
 ### 5.3 查看 API 文档
 
@@ -384,7 +395,11 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 
 > `run_sse.py` 默认监听 `0.0.0.0:8000`（通过 `HOST` 和 `PORT` 环境变量可自定义），SSE 端点路径为 `/sse`。SSE 模式受 `MCP_API_KEY` 鉴权保护。
 >
+> 上面这条命令故意绑定到 `127.0.0.1`，更适合本机调试。如果你真的需要让其他机器访问，再把 `HOST` 改成 `0.0.0.0`（或你的实际监听地址），并同时补齐 API Key、反向代理、防火墙和传输层安全。
+>
 > 如果你使用 Docker 一键部署，SSE 会由独立容器启动，并通过前端代理暴露在 `http://127.0.0.1:3000/sse`。
+>
+> 上面的 `HOST=127.0.0.1 PORT=8010` 示例是**本机回环**写法。只有在你确实要开放给远程客户端时，才改为 `HOST=0.0.0.0`（或目标绑定地址），并自行补齐网络侧安全控制。
 
 ### 6.3 客户端配置示例
 

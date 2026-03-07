@@ -198,13 +198,12 @@
 memory-palace/
 ├── backend/
 │   ├── main.py                 # FastAPI 入口；注册 Review/Browse/Maintenance 路由
-│   ├── mcp_server.py           # 9 个 MCP 工具 + 快照逻辑 + URI 解析（3100+ 行）
+│   ├── mcp_server.py           # 9 个 MCP 工具 + 快照逻辑 + URI 解析
 │   ├── runtime_state.py        # Write Lane 队列、Index Worker、活力衰减调度器
 │   ├── run_sse.py              # SSE 传输层，带 API Key 鉴权网关
 │   ├── db/
 │   │   └── sqlite_client.py    # Schema 定义、CRUD、检索、Write Guard、Gist
 │   ├── api/                    # REST 路由：review、browse、maintenance
-│   └── scripts/                # 启动脚本、档位脚本、仓库自检
 ├── frontend/
 │   └── src/
 │       ├── App.jsx             # 路由与页面脚手架
@@ -227,7 +226,7 @@ memory-palace/
 │   ├── docker_one_click.ps1    # Windows 一键 Docker 部署
 │   └── pre_publish_check.sh    # 分享前本地产物 / 泄露扫描
 ├── docs/                       # 完整文档集
-├── .env.example                # 配置模板（140 行，含详细注释）
+├── .env.example                # 配置模板（含详细注释）
 ├── docker-compose.yml          # Docker Compose 定义
 └── LICENSE                     # MIT 许可证
 ```
@@ -241,7 +240,7 @@ memory-palace/
 | Python | 3.10+ | 3.11+ |
 | Node.js | 20.19+（或 >=22.12） | 最新 LTS |
 | npm | 9+ | 最新稳定版 |
-| Docker（可选） | 24+ | 最新稳定版 |
+| Docker（可选） | 20+ | 最新稳定版 |
 
 ---
 
@@ -249,8 +248,8 @@ memory-palace/
 
 ### 方式一：手动本地搭建（推荐新手使用）
 
-> **💡 提示**：本教程默认使用 **档位 B**（纯本地运行，无需外部模型服务）。
-> 要获得**最佳检索质量**，请在搭建完成后参阅 [升级到档位 C/D](#-升级到档位-cd)。
+> **💡 提示**：本教程推荐你先以 **档位 B** 为目标，这样可以在**零外部模型服务**的前提下跑通全流程。
+> 如果你希望日常使用时拿到更好的检索效果，**强烈建议后续升级到档位 C**；但请先按 [升级到档位 C/D](#-升级到档位-cd) 中的说明补齐 embedding / reranker / LLM 对应配置。
 
 #### 第 1 步：克隆仓库
 
@@ -268,6 +267,10 @@ cd Memory-Palace
 ```bash
 cp .env.example .env
 ```
+
+> 这条路径用的是**更保守的 `.env.example` 最小模板**。它足够你先把本地服务跑起来，但**不等于已经套用了仓库里的档位 B 模板**。
+>
+> 如果你想直接拿到仓库预设好的档位 B 默认值（例如本地 hash Embedding），请直接使用下面的**方法 B**。如果你继续走方法 A 也没问题，就把它理解成“从最小模板手动往上补配置”即可。
 
 然后打开 `.env`，将 `DATABASE_URL` 设置为你机器上的实际路径。共享环境或接近生产的场景更推荐使用绝对路径：
 
@@ -299,7 +302,15 @@ bash scripts/apply_profile.sh macos b
 .\scripts\apply_profile.ps1 -Platform windows -Profile b
 ```
 
-脚本会根据平台从 `deploy/profiles/{macos,windows,docker}/profile-b.env` 模板生成即用的 `.env` 文件。
+脚本会根据平台从 `deploy/profiles/{macos,windows,docker}/profile-b.env` 模板生成一份 **基于档位 B 的 `.env`**。
+
+但要注意：
+
+- **macOS / Windows 本地启动**时，脚本**不会**自动帮你填 `MCP_API_KEY`
+- 如果你想立刻用 Dashboard、`/browse` / `/review` / `/maintenance`，或者 `/sse` / `/messages`，还需要自己再补一项：
+  - `MCP_API_KEY=change-this-local-key`
+  - 或 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`（仅限你自己机器上的回环调试）
+- 只有 **docker 平台**下，`apply_profile` 才会在 `MCP_API_KEY` 为空时自动生成一把本地 key
 
 #### 第 3 步：启动后端
 
@@ -353,9 +364,14 @@ npm run dev
 # 检查后端健康状态
 curl -s http://127.0.0.1:8000/health | python -m json.tool
 
-# 浏览记忆树（把这里的 key 换成你在 `.env` 里配置的同一把本地 key）
+# 浏览记忆树
+#
+# 方式 A：如果你配置了 `MCP_API_KEY`
 curl -s "http://127.0.0.1:8000/browse/node?domain=core&path=" \
   -H "X-MCP-API-Key: <YOUR_MCP_API_KEY>" | python -m json.tool
+
+# 方式 B：如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`
+curl -s "http://127.0.0.1:8000/browse/node?domain=core&path=" | python -m json.tool
 ```
 
 在浏览器中打开 **<http://localhost:5173>** —— 你应该能看到 Memory Palace 仪表盘 🎉
@@ -374,11 +390,13 @@ cd backend
 # stdio 模式（用于 IDE 内部调用，如 Cursor）
 python mcp_server.py
 
-# SSE 模式（用于远程 / 多客户端访问）
+# SSE 模式（下面这个命令是本机回环示例；远程访问请改 HOST）
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
 > 说明：`stdio` 直接连接 MCP 工具进程，不经过 HTTP/SSE 鉴权中间层；未设置 `MCP_API_KEY` 时也可本地使用 MCP 工具。这里说的是 `stdio` 本身，不包括受保护的 HTTP / SSE 路由。
+>
+> 上面这个 `HOST=127.0.0.1` 是**只给本机访问**的写法。真要给远程客户端访问，请改成 `HOST=0.0.0.0`（或你的实际绑定地址），同时自己补齐 API Key、防火墙、反向代理和传输安全。
 
 详细的客户端配置请参阅 [多客户端集成](#-多客户端集成)。
 
@@ -431,13 +449,20 @@ Memory Palace 提供四种部署档位以匹配你的硬件和需求：
 | 档位 | 检索模式 | Embedding | Reranker | 适用场景 |
 |---|---|---|---|---|
 | **A** | 纯 `keyword` | ❌ 关闭 | ❌ 关闭 | 🟢 最小资源，初步验证 |
-| **B** | `hybrid` 混合 | 📦 本地哈希 | ❌ 关闭 | 🟡 **默认**——本地开发，无需外部服务 |
-| **C** | `hybrid` 混合 | 🌐 Router / API | ✅ 开启 | 🟠 本地模型服务器（Ollama / LM Studio）|
+| **B** | `hybrid` 混合 | 📦 本地哈希 | ❌ 关闭 | 🟡 **默认起步档位**——本地开发，无需外部服务 |
+| **C** | `hybrid` 混合 | 🌐 Router / API | ✅ 开启 | 🟠 **强烈推荐档位**——你已经准备好本地模型服务 |
 | **D** | `hybrid` 混合 | 🌐 Router / API | ✅ 开启 | 🔴 远程 API，生产环境 |
 
 > **说明**：档位 C 和 D 共享相同的混合检索流水线（`keyword + semantic + reranker`）。当前仓库附带模板的主要区别是模型服务地址（本地 vs 远程）以及默认 `RETRIEVAL_RERANKER_WEIGHT`（`0.30` vs `0.35`）。
 
 ### 🔼 升级到档位 C/D
+
+**档位 C 是强烈推荐的目标档位**，但它不是“切过去就自动好用”的零配置方案。
+
+- 想先无脑跑通仓库，默认还是从 **档位 B** 开始
+- 想把检索质量拉起来，再升级到 **档位 C**
+- 升级时至少要把 `.env` 里的 **embedding** 和 **reranker** 相关参数填好
+- 如果你还想启用 LLM 辅助的 write guard / gist / intent routing，也要把对应的 `WRITE_GUARD_LLM_*`、`COMPACT_GIST_LLM_*`、可选的 `INTENT_LLM_*` 一并填好
 
 在 `.env` 文件中配置以下参数。所有端点均支持 **OpenAI 兼容 API** 格式，包括本地部署的 Ollama 或 LM Studio：
 
@@ -531,9 +556,11 @@ Memory Palace 通过 MCP 协议暴露 **9 个标准化工具**：
 # stdio 模式（用于 IDE 内部调用——Cursor、Codex 等）
 cd backend && python mcp_server.py
 
-# SSE 模式（用于远程 / 多客户端）
+# SSE 模式（下面这个命令是本机回环示例；远程访问请改 HOST）
 cd backend && HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
+
+> 只有在你确实需要远程客户端时，才改成 `HOST=0.0.0.0`；同时记得补齐网络侧安全措施。
 
 完整工具语义：[TOOLS.md](docs/TOOLS.md)
 
