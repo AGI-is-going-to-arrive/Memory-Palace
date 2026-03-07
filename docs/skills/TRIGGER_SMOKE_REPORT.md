@@ -1,6 +1,11 @@
 # Memory Palace Trigger Smoke Report
 
 > 说明：本页保留**对外可读**的 smoke 摘要。绝对路径、用户目录、运行时 ID、时间戳和机器相关 stderr 已做脱敏处理。
+>
+> 口径补充：
+>
+> - 这里写的是**最近一次验证环境**的结果
+> - `PASS / FAIL / PARTIAL` 代表的是“这轮验证看到了什么”，不是“所有机器都会完全一样”
 
 ## Summary
 
@@ -16,9 +21,9 @@
 | `opencode` | `PASS` | OpenCode smoke 通过 |
 | `gemini` | `PASS` | Gemini smoke 通过 |
 | `gemini_live` | `FAIL` | Gemini live MCP 链路未完全通过 |
-| `cursor` | `PARTIAL` | Cursor runtime 存在，但当前机器缺少登录/鉴权 |
-| `agent` | `PARTIAL` | agent 仅完成 mirror 结构校验 |
-| `antigravity` | `PARTIAL` | Antigravity app-bundled CLI 已发现，global_workflow 已安装；仍需 GUI 手工 smoke |
+| `cursor` | `PARTIAL` | 最近验证环境里 Cursor runtime 存在，但缺少登录/鉴权 |
+| `agent` | `PARTIAL` | 最近验证环境里 agent 仅完成 mirror 结构校验 |
+| `antigravity` | `PARTIAL` | 最近验证环境里 Antigravity app-bundled CLI 已发现，global_workflow 已安装；仍需 GUI 手工 smoke |
 
 ## Details
 
@@ -124,7 +129,7 @@ Based on the Memory-Palace skill documentation:
 ### cursor
 
 - Status: `PARTIAL`
-- Summary: Cursor runtime 存在，但当前机器缺少登录/鉴权
+- Summary: 最近验证环境里 Cursor runtime 存在，但缺少登录/鉴权
 
 ```text
 Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable.
@@ -133,7 +138,7 @@ Error: Authentication required. Please run 'agent login' first, or set CURSOR_AP
 ### agent
 
 - Status: `PARTIAL`
-- Summary: agent 仅完成 mirror 结构校验
+- Summary: 最近验证环境里 agent 仅完成 mirror 结构校验
 
 ```text
 <repo-root>/.agent/skills/memory-palace
@@ -142,7 +147,7 @@ Error: Authentication required. Please run 'agent login' first, or set CURSOR_AP
 ### antigravity
 
 - Status: `PARTIAL`
-- Summary: Antigravity app-bundled CLI 已发现，global_workflow 已安装；仍需 GUI 手工 smoke
+- Summary: 最近验证环境里 Antigravity app-bundled CLI 已发现，global_workflow 已安装；仍需 GUI 手工 smoke
 
 ```text
 <Applications>/Antigravity.app/Contents/Resources/app/bin/antigravity

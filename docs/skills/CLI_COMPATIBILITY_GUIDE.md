@@ -153,8 +153,9 @@ python Memory-Palace/scripts/install_skill.py \
 
 结论：
 
-- **当前仓库可直接用**
-- 若本机对隐藏目录更严格，仍推荐再补一次 `--scope user --with-mcp`
+- **workspace 入口已经就位**
+- 若你想更稳，或准备跨仓复用，仍推荐再补一次 `--scope user --with-mcp`
+- 对外说明时，建议写成“公开 smoke 已通过，但 `gemini_live` 尚未完全通过”
 
 ### Codex CLI
 

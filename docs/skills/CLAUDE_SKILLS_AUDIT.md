@@ -19,7 +19,7 @@
 
 简单说：
 
-> **这套 skill 现在已经是“能稳定用”的状态；**
+> **这套 skill 在 Claude 这一侧已经是“能稳定用”的状态；**
 > **如果要追到 Claude 官方 `skill-creator` 的满配标准，还可以继续把 eval/benchmark 这一层补厚。**
 
 ---

@@ -14,8 +14,8 @@
 |---|---|---|---|
 | `Claude Code` | 已就绪 | 已补项目级 allowlist，非交互模式也能直接调 `memory-palace` 工具 | 直接在本仓库打开即可 |
 | `Gemini CLI` | 已就绪 | 已有 `.gemini/settings.json`，但 `live MCP` 仍有个别场景待补验 | 先在本仓库打开；需要更稳时再补一次 user-scope 安装 |
-| `Codex CLI` | 已有 repo-local skill | 当前机器已修正为真实 backend 启动命令 | 当前机器可直接使用；新机器第一次执行 1 条 `codex mcp add` |
-| `OpenCode` | 已有 repo-local skill | 当前机器 live smoke 已通过；新机器通常要先确认本地 MCP 注册 | 先看 `opencode mcp list`，没有再补注册 |
+| `Codex CLI` | 已有 repo-local skill | 最近验证环境里已修正为真实 backend 启动命令 | 若是首次在你的机器上使用，先执行 1 条 `codex mcp add` |
+| `OpenCode` | 已有 repo-local skill | 最近验证环境里 live smoke 已通过；新机器通常要先确认本地 MCP 注册 | 先看 `opencode mcp list`，没有再补注册 |
 
 一句话理解：
 
@@ -72,10 +72,10 @@
 
 所以：
 
-- `Claude Code`、`Gemini CLI` 在**当前仓库**里已经是“打开就能用”的路线
+- `Claude Code`、`Gemini CLI` 在**当前仓库**里是最省心的路线
 - `Codex CLI` 和 `OpenCode` 的 **skill** 已经就位
-- 当前这台机器上的 `Codex` MCP 已经修正完成
-- `OpenCode` 在新机器上建议先手动确认一次 `mcp list`
+- 最近验证环境里的 `Codex` MCP 已经修正完成
+- `OpenCode` 建议先手动确认一次 `mcp list`
 
 ---
 
@@ -164,7 +164,7 @@ gemini mcp add -s project -e DATABASE_URL=sqlite+aiosqlite:////<repo-root>/Memor
 说人话就是：
 
 - 在这个仓库里，`Codex` 已经知道有 `memory-palace` 这套 skill
-- 但你第一次在这台机器上用时，还要告诉它“Memory Palace MCP 服务器怎么启动”
+- 但你第一次在自己的机器上用时，还要告诉它“Memory Palace MCP 服务器怎么启动”
 
 第一次执行一次：
 
@@ -194,7 +194,7 @@ codex mcp list
 
 - `.opencode/skills/memory-palace/`
 
-并且这台机器上的 smoke 已经通过，所以**当前环境**里它是能跑通的。
+并且最近验证环境里的 smoke 已经通过，所以这条接法是可信的。
 
 但如果你换一台新机器，更稳妥的顺序是：
 

@@ -102,7 +102,7 @@ python Memory-Palace/scripts/install_skill.py \
 
 ## 4. 第三步：补上 Codex / OpenCode 的 user-scope MCP
 
-如果你想让当前机器上的 `Codex/OpenCode` 明确连到这个仓库，执行：
+如果你想让你自己的 `Codex/OpenCode` 明确连到这个仓库，执行：
 
 ```bash
 python Memory-Palace/scripts/install_skill.py \
@@ -149,8 +149,9 @@ python Memory-Palace/scripts/install_skill.py \
 
 结论：
 
-- **当前仓库可直接用**
-- 如果本机对隐藏目录更严格，再补一次 `--scope user --with-mcp`
+- **workspace 入口已经就位**
+- 如果你想更稳，或者准备跨仓复用，再补一次 `--scope user --with-mcp`
+- 对外口径仍建议保守：公开 smoke 已通过，但 `gemini_live` 还没有到“完全通过”的程度
 
 ### Codex CLI
 

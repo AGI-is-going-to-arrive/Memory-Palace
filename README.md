@@ -423,13 +423,13 @@ Configure these parameters in your `.env` file. All endpoints support the **Open
 RETRIEVAL_EMBEDDING_BACKEND=api
 RETRIEVAL_EMBEDDING_API_BASE=http://localhost:11434/v1   # e.g., Ollama
 RETRIEVAL_EMBEDDING_API_KEY=your-api-key
-RETRIEVAL_EMBEDDING_MODEL=bge-m3
+RETRIEVAL_EMBEDDING_MODEL=Qwen3-Embedding-8B
 
 # ── Reranker Model ───────────────────────────────────────────
 RETRIEVAL_RERANKER_ENABLED=true
 RETRIEVAL_RERANKER_API_BASE=http://localhost:11434/v1
 RETRIEVAL_RERANKER_API_KEY=your-api-key
-RETRIEVAL_RERANKER_MODEL=bge-reranker-v2-m3
+RETRIEVAL_RERANKER_MODEL=Qwen3-Reranker-8B
 
 # ── Tuning (recommended 0.20 ~ 0.40) ────────────────────────
 RETRIEVAL_RERANKER_WEIGHT=0.25
@@ -447,13 +447,13 @@ RETRIEVAL_RERANKER_WEIGHT=0.25
 WRITE_GUARD_LLM_ENABLED=true
 WRITE_GUARD_LLM_API_BASE=http://localhost:11434/v1
 WRITE_GUARD_LLM_API_KEY=your-api-key
-WRITE_GUARD_LLM_MODEL=qwen2.5
+WRITE_GUARD_LLM_MODEL=Qwen3.5-4B
 
 # ── Compact Gist LLM (falls back to Write Guard if empty) ──
 COMPACT_GIST_LLM_ENABLED=true
 COMPACT_GIST_LLM_API_BASE=
 COMPACT_GIST_LLM_API_KEY=
-COMPACT_GIST_LLM_MODEL=
+COMPACT_GIST_LLM_MODEL=Qwen3.5-4B
 ```
 
 Profile templates are located at: `deploy/profiles/{macos,windows,docker}/profile-{a,b,c,d}.env`
@@ -578,6 +578,15 @@ Full guide: [MEMORY_PALACE_SKILLS.md](docs/skills/MEMORY_PALACE_SKILLS.md)
 
 Source: `profile_abcd_real_metrics.json` · Sample size = 8 per dataset · 10 distractor documents · Seed = 20260219
 
+> 📌 How to read these metrics:
+>
+> - `HR@10`: did the correct result appear in the top 10?
+> - `MRR`: how early did the correct result appear?
+> - `NDCG@10`: how good was the overall ranking quality?
+> - `p95`: how slow do the slower requests get?
+>
+> If you only look at one metric, start with `HR@10`.
+
 | Profile | Dataset | HR@10 | MRR | NDCG@10 | p95 (ms) | Gate |
 |---|---|---:|---:|---:|---:|---|
 | A | SQuAD v2 | 0.000 | 0.000 | 0.000 | 1.78 | ✅ PASS |
@@ -604,9 +613,18 @@ Source: `profile_ab_metrics.json` · Sample size = 100
 | B | BEIR NFCorpus | 1.000 | 0.828 | 0.850 | 4.7 |
 | B | SQuAD v2 | 1.000 | 0.765 | 0.822 | 3.9 |
 
+> ⚠️ The A/B/C/D numbers above are mainly here to help you understand the **profile differences**.
+>
+> If you want to see “**how much the current version improved over the old one**”, do not use the old baseline chart. Go straight to:
+>
+> - `docs/EVALUATION.md` → `3.5 Old vs Current Version (Same-Setup Summary)`
+> - `docs/changelog/release_summary_vs_old_project_2026-03-06.md`
+
 <p align="center">
-  <img src="docs/images/检索质量与延迟对比图（A:B:C:D）.png" width="800" alt="Retrieval Quality vs Latency Comparison (A/B/C/D)" />
+  <img src="docs/images/benchmark_comparison.png" width="900" alt="Old vs Current benchmark comparison" />
 </p>
+
+> 📈 This chart shows the **old vs current** comparison under the same setup. It is not the old A/B/C/D profile baseline chart.
 
 ### Quality Gates Summary
 
@@ -623,6 +641,12 @@ Source: `profile_ab_metrics.json` · Sample size = 100
 > **Intent Classification**: 6/6 correct classifications across temporal, causal, exploratory, and factual intents using `keyword_scoring_v2`. Source: `intent_accuracy_metrics.json`
 >
 > **Gist ROUGE-L**: Average across 5 test cases (range: 0.667 – 0.923). Source: `compact_context_gist_quality_metrics.json`
+>
+> In plain English:
+>
+> - **Write Guard** checks whether the system blocks or redirects writes correctly
+> - **Intent Classification** checks whether the system understands what kind of query it is before retrieval
+> - **ROUGE-L** checks whether the compressed gist still keeps the key meaning
 
 ### Reproducing Benchmarks
 
@@ -645,6 +669,12 @@ pytest tests/benchmark/test_search_memory_contract_regression.py -q
 
 ## 🖼️ Dashboard Screenshots
 
+> 📌 These images are here to help you quickly understand the main dashboard areas.
+>
+> - They show the **typical post-entry dashboard state**
+> - The current version now has a unified `Set API key` button in the top bar
+> - If auth is not configured yet, the protected pages (`Memory / Review / Maintenance / Observability`) will show an auth prompt before full data is available
+
 <details>
 <summary>📂 Memory — Tree Browser & Editor</summary>
 
@@ -658,7 +688,7 @@ Tree-structured memory browser with inline editor and Gist view. Navigate by dom
 
 <img src="docs/images/memory-palace-review-page.png" width="900" alt="Memory Palace — Review Page" />
 
-Side-by-side diff comparison of snapshots with one-click rollback and integrate actions.
+Side-by-side diff comparison of snapshots with one-click rollback and integrate actions. The current version also adds more explicit error handling and session-state behavior here.
 </details>
 
 <details>
@@ -666,7 +696,7 @@ Side-by-side diff comparison of snapshots with one-click rollback and integrate 
 
 <img src="docs/images/memory-palace-maintenance-page.png" width="900" alt="Memory Palace — Maintenance Page" />
 
-Monitor memory vitality scores, trigger cleanup tasks, and manage decay parameters.
+Monitor memory vitality scores, trigger cleanup tasks, and manage decay parameters. The current version also adds domain / path-prefix filters and a more explicit human-confirmation flow.
 </details>
 
 <details>
@@ -674,16 +704,10 @@ Monitor memory vitality scores, trigger cleanup tasks, and manage decay paramete
 
 <img src="docs/images/memory-palace-observability-page.png" width="900" alt="Memory Palace — Observability Page" />
 
-Real-time search query monitoring, retrieval quality insights, and task queue status.
+Real-time search query monitoring, retrieval quality insights, and task queue status. The current version also adds `scope hint`, runtime snapshot details, and richer index-task visibility.
 </details>
 
-<details>
-<summary>📄 API Docs — Swagger</summary>
-
-<img src="docs/images/memory-palace-api-docs.png" width="900" alt="Memory Palace — API Docs (Swagger)" />
-
-Auto-generated interactive API documentation at `/docs`.
-</details>
+> 💡 For API docs, use the live `/docs` page from a running service. It stays more accurate than a static screenshot as routes continue to evolve.
 
 ---
 

@@ -60,6 +60,14 @@ memory-palace/
   <img src="images/onboarding_flow.png" width="900" alt="Memory Palace 快速开始流程图" />
 </p>
 
+> 📌 这张图只是帮助你快速记住顺序。
+>
+> 真正以正文命令为准：
+>
+> - 后端默认是 `uvicorn` 跑在 `127.0.0.1:8000`
+> - 前端开发服务器默认是 `5173`
+> - Docker 默认暴露的是 `18000 / 3000`
+
 ## 3. 本地开发（推荐先走这一条）
 
 ### Step 1：准备配置文件
@@ -232,7 +240,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 docker compose -f docker-compose.yml down
 ```
 
-> 若当前机器是 `arm64` 且没有原生 Windows / native `pwsh`，`deployment.windows_equivalent_pwsh_docker` 会以 `pwsh-in-docker` 等效 smoke 为准；该检查在不适合当前宿主机时可能记为 `SKIP`，而不是 `FAIL`。
+> 若宿主机是 `arm64` 且没有原生 Windows / native `pwsh`，`deployment.windows_equivalent_pwsh_docker` 会以 `pwsh-in-docker` 等效 smoke 为准；该检查在不适合当前宿主机时可能记为 `SKIP`，而不是 `FAIL`。
 
 ### 4.1 备份当前数据库
 

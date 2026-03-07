@@ -8,6 +8,13 @@
 
 **现象**：页面能打开，但列表为空或接口报错。
 
+> 📌 当前版本还有一种很常见的“看起来像坏了，其实是正常门控”的情况：
+>
+> - 页面右上角出现 `Set API key`
+> - `Memory / Review / Maintenance / Observability` 里出现空态、等待提示或 `401`
+>
+> 这通常不是前端挂了，而是**你还没给受保护接口授权**。
+
 **排查步骤**：
 
 1. 确认**后端已启动**：
@@ -73,6 +80,7 @@
   ```
 
 - **前端**：注入 `window.__MEMORY_PALACE_RUNTIME__`（详见 [SECURITY_AND_PRIVACY.md](SECURITY_AND_PRIVACY.md) 第 4 节）
+- **前端页面**：也可以直接点右上角的 `Set API key` / `Update API key`
 
 - **本地调试** 可设置 insecure local override（仅 loopback 生效）：
 
@@ -88,6 +96,15 @@
 | `invalid_or_missing_api_key` | Key 错误或未提供 | 检查 Key 是否正确 |
 | `api_key_not_configured` | `.env` 中 `MCP_API_KEY` 为空 | 设置 Key 或启用 insecure local |
 | `insecure_local_override_requires_loopback` | 启用了 insecure local 但请求非 loopback | 确保从 `127.0.0.1` 或 `localhost` 访问 |
+
+> 💡 如果你看到的是：
+>
+> - `Awaiting Input`
+> - `Failed to load node`
+> - `Connection Lost`
+> - `maintenance_auth_failed | api_key_not_configured`
+>
+> 优先先配 key，再判断是不是别的问题。
 
 ---
 
@@ -206,6 +223,12 @@
    ```
 
 5. **检查配置参数**：确认 `RETRIEVAL_RERANKER_WEIGHT` 在合理范围（`.env.example` 注释建议 `0.20 ~ 0.40`，默认 `0.25`）
+
+6. **观测页里看到新增字段不要慌**：
+
+   - `scope_hint`：只是告诉检索“优先看哪个范围”
+   - `sm-lite`：是当前版本新增的一组轻量运行时状态，不是报错
+   - `Runtime Snapshot`：是帮助你排障的摘要，不是必须每项都有值
 
 ---
 

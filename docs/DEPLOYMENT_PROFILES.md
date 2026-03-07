@@ -256,7 +256,7 @@ cd <project-root>
 
 > `apply_profile.ps1` 现已对 **所有重复 env key** 做“保留最后值”的统一去重，不再只处理 `DATABASE_URL`。
 >
-> 原生 Windows / `pwsh` 补验证清单见：`docs/improvement/pwsh_native_validation_checklist_2026-03-06.md`
+> 原生 Windows / `pwsh` 仍建议在目标环境单独补跑一次，不建议把内部检查清单直接当公开交付文档。
 >
 > `docker_one_click.sh/.ps1` 默认会为每次运行生成独立的临时 Docker env 文件，并通过 `MEMORY_PALACE_DOCKER_ENV_FILE` 传给 `docker compose`；只有显式设置该环境变量时才会复用指定路径，而不是固定共享 `.env.docker`。
 >

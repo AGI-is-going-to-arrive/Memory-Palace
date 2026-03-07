@@ -88,8 +88,13 @@ Gemini 端当前有一个已知边界：
 
 因此当前推荐分两层：
 
-- **当前仓库里直接用**：优先走项目级 `.gemini/skills/...` + `.gemini/settings.json`
+- **当前仓库里优先尝试**：先走项目级 `.gemini/skills/...` + `.gemini/settings.json`
 - **跨仓复用 / 复制到别的工作区**：仍然优先 `user-scope install`
+
+公开口径建议：
+
+- 可以说“workspace 入口已经就位”
+- 不建议直接写成“Gemini 已经完全开箱即用”
 
 ## 2. 目录职责
 
@@ -297,7 +302,7 @@ gemini -m gemini-3-flash-preview \
   --allowed-tools activate_skill,read_file
 ```
 
-注意：这是一条**当前环境下更稳定的经验路径**，不是对所有 Gemini 版本都恒真的官方保证。
+注意：这是一条**最近验证里更稳定的经验路径**，不是对所有 Gemini 版本都恒真的官方保证。
 
 ## 7. 维护边界
 

@@ -452,13 +452,13 @@ RETRIEVAL_RERANKER_WEIGHT=0.25
 WRITE_GUARD_LLM_ENABLED=true
 WRITE_GUARD_LLM_API_BASE=http://localhost:11434/v1
 WRITE_GUARD_LLM_API_KEY=your-api-key
-WRITE_GUARD_LLM_MODEL=Qwen3.5-35B-A3B
+WRITE_GUARD_LLM_MODEL=Qwen3.5-4B
 
 # ── Compact Gist LLM（留空则回退至 Write Guard 配置）───────
 COMPACT_GIST_LLM_ENABLED=true
 COMPACT_GIST_LLM_API_BASE=
 COMPACT_GIST_LLM_API_KEY=
-COMPACT_GIST_LLM_MODEL=Qwen3.5-35B-A3B
+COMPACT_GIST_LLM_MODEL=Qwen3.5-4B
 ```
 
 > 当前推荐模型：Embedding 使用 `Qwen3-Embedding-8B`，Reranker 使用 `Qwen3-Reranker-8B`，LLM 使用 `Qwen3.5-35B-A3B`。如需启用实验性的 Intent LLM、CORS、自定义 MMR 或运行时审计上限，请直接参考 `.env.example`；README 只保留最常用主配置。
@@ -585,6 +585,15 @@ python Memory-Palace/scripts/install_skill.py --targets gemini --scope user --fo
 
 数据源：`profile_abcd_real_metrics.json` · 每数据集样本量 = 8 · 10 个干扰文档 · Seed = 20260219
 
+> 📌 这些指标怎么理解：
+>
+> - `HR@10`：前 10 条里有没有找到正确结果
+> - `MRR`：正确结果排得靠不靠前
+> - `NDCG@10`：整体排序质量好不好
+> - `p95`：慢的时候大概会慢到什么程度
+>
+> 如果你只看一个指标，先看 `HR@10`。
+
 | 档位 | 数据集 | HR@10 | MRR | NDCG@10 | p95（ms） | 门控 |
 |---|---|---:|---:|---:|---:|---|
 | A | SQuAD v2 | 0.000 | 0.000 | 0.000 | 1.78 | ✅ 通过 |
@@ -611,9 +620,18 @@ python Memory-Palace/scripts/install_skill.py --targets gemini --scope user --fo
 | B | BEIR NFCorpus | 1.000 | 0.828 | 0.850 | 4.7 |
 | B | SQuAD v2 | 1.000 | 0.765 | 0.822 | 3.9 |
 
+> ⚠️ 上面这组 A/B/C/D 指标主要用来帮助你理解**档位差异**。
+>
+> 如果你想看“**当前版本相对旧版本到底提升了多少**”，不要看旧图，直接看：
+>
+> - `docs/EVALUATION.md` 里的 `3.5 旧版 vs 当前版本（同口径摘要）`
+> - `docs/changelog/release_summary_vs_old_project_2026-03-06.md`
+
 <p align="center">
-  <img src="docs/images/检索质量与延迟对比图（A:B:C:D）.png" width="800" alt="检索质量与延迟对比图（A/B/C/D）" />
+  <img src="docs/images/benchmark_comparison.png" width="900" alt="旧版 vs 当前版本检索质量与延迟对比图" />
 </p>
+
+> 📈 这张图看的是**旧版 vs 当前版本**在同口径下的对照结果，不是 A/B/C/D 档位示意图。
 
 ### 质量门控汇总
 
@@ -630,6 +648,12 @@ python Memory-Palace/scripts/install_skill.py --targets gemini --scope user --fo
 > **意图分类**：使用 `keyword_scoring_v2` 方法，6/6 正确分类，覆盖 temporal、causal、exploratory、factual 四种意图。数据源：`intent_accuracy_metrics.json`
 >
 > **Gist ROUGE-L**：5 个测试用例的平均值（范围：0.667 – 0.923）。数据源：`compact_context_gist_quality_metrics.json`
+>
+> 说人话就是：
+>
+> - **Write Guard** 看“该拦的时候拦没拦对”
+> - **意图分类** 看“系统有没有先看懂这条查询是什么类型”
+> - **ROUGE-L** 看“压缩后的 gist 有没有把关键意思留下来”
 
 ### 复现评测
 
@@ -652,6 +676,12 @@ pytest tests/benchmark/test_search_memory_contract_regression.py -q
 
 ## 🖼️ 仪表盘截图
 
+> 📌 下面这些图主要用来帮助你快速认识功能区。
+>
+> - 它们展示的是**已经进入 Dashboard 后**的典型页面状态
+> - 当前版本顶部统一新增了 `Set API key` 按钮
+> - 如果还没配置鉴权，`Memory / Review / Maintenance / Observability` 这些受保护页面会先提示授权，而不是直接显示完整数据
+
 <details>
 <summary>📂 记忆 — 树形浏览器与编辑器</summary>
 
@@ -665,7 +695,7 @@ pytest tests/benchmark/test_search_memory_contract_regression.py -q
 
 <img src="docs/images/memory-palace-review-page.png" width="900" alt="Memory Palace — 审查页面" />
 
-快照的并排差异对比，支持一键回滚和整合操作。
+快照的并排差异对比，支持一键回滚和整合操作。当前版本在这页上还补了更细的错误提示和会话处理细节。
 </details>
 
 <details>
@@ -673,7 +703,7 @@ pytest tests/benchmark/test_search_memory_contract_regression.py -q
 
 <img src="docs/images/memory-palace-maintenance-page.png" width="900" alt="Memory Palace — 维护页面" />
 
-监控记忆活力值、触发清理任务、管理衰减参数。
+监控记忆活力值、触发清理任务、管理衰减参数。当前版本还补了 domain / path_prefix 等过滤项，以及更完整的人工确认流程。
 </details>
 
 <details>
@@ -681,16 +711,10 @@ pytest tests/benchmark/test_search_memory_contract_regression.py -q
 
 <img src="docs/images/memory-palace-observability-page.png" width="900" alt="Memory Palace — 可观测性页面" />
 
-实时搜索查询监控、检索质量洞察和任务队列状态。
+实时搜索查询监控、检索质量洞察和任务队列状态。当前版本还补了 `scope hint`、运行时快照和索引任务队列等信息。
 </details>
 
-<details>
-<summary>📄 API 文档 — Swagger</summary>
-
-<img src="docs/images/memory-palace-api-docs.png" width="900" alt="Memory Palace — API 文档（Swagger）" />
-
-自动生成的交互式 API 文档，访问 `/docs` 即可使用。
-</details>
+> 💡 API 文档建议直接看运行中的 `/docs`。因为接口会继续补充，在线 Swagger 永远比静态截图更准。
 
 ---
 
