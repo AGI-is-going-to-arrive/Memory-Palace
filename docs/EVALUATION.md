@@ -160,7 +160,7 @@
 
 ### Write Guard（写入守卫）
 
-**来源**：`write_guard_quality_metrics.json`（通常由 benchmark helpers 在维护阶段生成）
+**来源**：`backend/tests/benchmark/write_guard_quality_metrics.json`
 
 | 指标 | 值 | 阈值 | 状态 |
 |---|---:|---:|---|
@@ -179,7 +179,7 @@
 
 ### Intent 分类（查询意图识别）
 
-**来源**：`intent_accuracy_metrics.json`（通常由 benchmark helpers 在维护阶段生成）
+**来源**：`backend/tests/benchmark/intent_accuracy_metrics.json`
 
 | 指标 | 值 | 阈值 | 状态 |
 |---|---:|---:|---|
@@ -201,7 +201,7 @@
 
 ### Gist 质量（上下文压缩摘要）
 
-**来源**：`compact_context_gist_quality_metrics.json`（通常由 benchmark helpers 在维护阶段生成）
+**来源**：`backend/tests/benchmark/compact_context_gist_quality_metrics.json`
 
 | 指标 | 值 | 阈值 | 状态 |
 |---|---:|---:|---|
