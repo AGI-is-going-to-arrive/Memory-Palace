@@ -643,6 +643,8 @@ Full guide: [MEMORY_PALACE_SKILLS.md](docs/skills/MEMORY_PALACE_SKILLS.md)
 > This section keeps the **user-facing summary tables** from the current public benchmark suite and local release runs. More detailed benchmark logs, one-off re-baseline notes, and machine-specific artifacts stay local by default and are not treated as public guarantees or universal outcomes.
 >
 > For methodology, caveats, and reproduction commands, see `docs/EVALUATION.md`. For the same-setup old-vs-current summary used in this release note, see `docs/changelog/release_summary_vs_old_project_2026-03-06.md`.
+>
+> The raw `*_metrics.json` files behind these tables stay local by default and are gitignored, so they may be absent in the public GitHub repo.
 
 ### Retrieval Quality — A/B/C/D Real Run
 
