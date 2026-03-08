@@ -595,6 +595,11 @@ python scripts/sync_memory_palace_skill.py --check
 python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope workspace --with-mcp --force
 python scripts/install_skill.py --targets gemini,codex,opencode --scope user --with-mcp --force
 python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope workspace --with-mcp --check
+```
+
+Optional local verification on your own machine:
+
+```bash
 python scripts/evaluate_memory_palace_skill.py
 cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ```
@@ -604,6 +609,8 @@ For `Gemini CLI`, `Codex CLI`, and `OpenCode`, prefer a **user-scope** MCP insta
 ```bash
 python scripts/install_skill.py --targets gemini,codex,opencode --scope user --with-mcp --force
 ```
+
+The two verification commands above are best treated as **machine-local diagnostics**, not as a universal “must all PASS” gate. They write local reports under `docs/skills/`, and some checks can still show `PARTIAL` / `FAIL` when your current machine lacks a logged-in CLI, a user-scope MCP binding, or the larger workspace-only validation helpers.
 
 Canonical source and the local paths that appear after you run the sync/install steps:
 
@@ -639,7 +646,7 @@ Full guide: [MEMORY_PALACE_SKILLS.md](docs/skills/MEMORY_PALACE_SKILLS.md)
 
 ### Retrieval Quality — A/B/C/D Real Run
 
-Source: `profile_abcd_real_metrics.json` · Sample size = 8 per dataset · 10 distractor documents · Seed = 20260219
+Source: `profile_abcd_real_metrics.json` · Sample size = 8 per dataset · 10 distractor documents · Seed = 20260219 · typically generated as a maintainer-side benchmark artifact during local validation
 
 > 📌 These numbers summarize one current release run. Hardware, provider, and model differences may change outcomes.
 
@@ -667,7 +674,7 @@ Source: `profile_abcd_real_metrics.json` · Sample size = 8 per dataset · 10 di
 
 ### Retrieval Quality — A/B Large-Sample Gate
 
-Source: `profile_ab_metrics.json` · Sample size = 100
+Source: `profile_ab_metrics.json` · Sample size = 100 · typically generated as a maintainer-side benchmark artifact during local validation
 
 | Profile | Dataset | HR@10 | MRR | NDCG@10 | p95 (ms) |
 |---|---|---:|---:|---:|---:|
@@ -701,11 +708,11 @@ Source: `profile_ab_metrics.json` · Sample size = 100
 | Gist Quality | ROUGE-L | 0.759 | ≥ 0.40 | ✅ PASS |
 | Phase 6 Gate | Valid | true | — | ✅ PASS |
 
-> **Write Guard**: Evaluated on 6 test cases (4 TP, 0 FP, 0 FN). Source: `backend/tests/benchmark/write_guard_quality_metrics.json`
+> **Write Guard**: Evaluated on 6 test cases (4 TP, 0 FP, 0 FN). Source: `write_guard_quality_metrics.json` (typically generated as a maintainer-side benchmark artifact during local validation)
 >
-> **Intent Classification**: 6/6 correct classifications across temporal, causal, exploratory, and factual intents using `keyword_scoring_v2`. Source: `backend/tests/benchmark/intent_accuracy_metrics.json`
+> **Intent Classification**: 6/6 correct classifications across temporal, causal, exploratory, and factual intents using `keyword_scoring_v2`. Source: `intent_accuracy_metrics.json` (typically generated as a maintainer-side benchmark artifact during local validation)
 >
-> **Gist ROUGE-L**: Average across 5 test cases (range: 0.667 – 0.923). Source: `backend/tests/benchmark/compact_context_gist_quality_metrics.json`
+> **Gist ROUGE-L**: Average across 5 test cases (range: 0.667 – 0.923). Source: `compact_context_gist_quality_metrics.json` (typically generated as a maintainer-side benchmark artifact during local validation)
 >
 > In plain English:
 >

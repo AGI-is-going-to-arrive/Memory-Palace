@@ -603,6 +603,11 @@ python scripts/sync_memory_palace_skill.py --check
 python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope workspace --with-mcp --force
 python scripts/install_skill.py --targets gemini,codex,opencode --scope user --with-mcp --force
 python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope workspace --with-mcp --check
+```
+
+如果你想在自己的机器上额外做一轮本地验证，再运行：
+
+```bash
 python scripts/evaluate_memory_palace_skill.py
 cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ```
@@ -612,6 +617,8 @@ cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ```bash
 python scripts/install_skill.py --targets gemini,codex,opencode --scope user --with-mcp --force
 ```
+
+上面这两条验证命令更适合当成**当前机器上的诊断命令**，不要把它们理解成“所有检查都必须无条件 PASS 才算安装成功”。它们会把本地报告写到 `docs/skills/` 下；如果你当前机器缺少某个 CLI 的登录态、user-scope MCP 绑定，或者更大的工作区级验证辅助脚本，也可能看到 `PARTIAL` / `FAIL`。
 
 canonical 真源，以及你执行同步/安装命令后在本地会看到的路径：
 
@@ -647,7 +654,7 @@ canonical 真源，以及你执行同步/安装命令后在本地会看到的路
 
 ### 检索质量 — A/B/C/D 真实运行
 
-数据源：`profile_abcd_real_metrics.json` · 每数据集样本量 = 8 · 10 个干扰文档 · Seed = 20260219
+数据源：`profile_abcd_real_metrics.json` · 每数据集样本量 = 8 · 10 个干扰文档 · Seed = 20260219 · 这类 JSON 通常是维护阶段在本地复核时生成的 benchmark 产物
 
 > 📌 这组数字是当前发布轮次的一次摘要运行；硬件、模型服务和网络条件不同，结果也可能不同。
 
@@ -675,7 +682,7 @@ canonical 真源，以及你执行同步/安装命令后在本地会看到的路
 
 ### 检索质量 — A/B 大样本门控
 
-数据源：`profile_ab_metrics.json` · 样本量 = 100
+数据源：`profile_ab_metrics.json` · 样本量 = 100 · 这类 JSON 通常是维护阶段在本地复核时生成的 benchmark 产物
 
 | 档位 | 数据集 | HR@10 | MRR | NDCG@10 | p95（ms） |
 |---|---|---:|---:|---:|---:|
@@ -709,11 +716,11 @@ canonical 真源，以及你执行同步/安装命令后在本地会看到的路
 | Gist 质量 | ROUGE-L | 0.759 | ≥ 0.40 | ✅ 通过 |
 | Phase 6 门控 | 有效性 | true | — | ✅ 通过 |
 
-> **Write Guard**：在 6 个测试用例上评估（4 TP, 0 FP, 0 FN）。数据源：`backend/tests/benchmark/write_guard_quality_metrics.json`
+> **Write Guard**：在 6 个测试用例上评估（4 TP, 0 FP, 0 FN）。数据源：`write_guard_quality_metrics.json`（通常由维护阶段的本地 benchmark 复核生成）
 >
-> **意图分类**：使用 `keyword_scoring_v2` 方法，6/6 正确分类，覆盖 temporal、causal、exploratory、factual 四种意图。数据源：`backend/tests/benchmark/intent_accuracy_metrics.json`
+> **意图分类**：使用 `keyword_scoring_v2` 方法，6/6 正确分类，覆盖 temporal、causal、exploratory、factual 四种意图。数据源：`intent_accuracy_metrics.json`（通常由维护阶段的本地 benchmark 复核生成）
 >
-> **Gist ROUGE-L**：5 个测试用例的平均值（范围：0.667 – 0.923）。数据源：`backend/tests/benchmark/compact_context_gist_quality_metrics.json`
+> **Gist ROUGE-L**：5 个测试用例的平均值（范围：0.667 – 0.923）。数据源：`compact_context_gist_quality_metrics.json`（通常由维护阶段的本地 benchmark 复核生成）
 >
 > 说人话就是：
 >

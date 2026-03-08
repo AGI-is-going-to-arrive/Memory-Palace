@@ -303,6 +303,8 @@ cd <project-root>
 COMPOSE_PROJECT_NAME=<控制台打印出的 compose project> docker compose -f docker-compose.yml down --remove-orphans
 ```
 
+> 上面的 `down --remove-orphans` 不会删除 `memory_palace_data` 和 `memory_palace_snapshots`；只有显式执行 `down -v`，或手动删除对应 volume 时，数据库和 Review snapshots 才会一起清空。
+
 ---
 
 ## 6. 手动启动
