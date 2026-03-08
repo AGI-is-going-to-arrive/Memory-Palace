@@ -413,6 +413,8 @@ Authorization: Bearer <你的 MCP_API_KEY>
 - 非 loopback 请求仍返回 `401`（附带 `reason=insecure_local_override_requires_loopback`）
 
 > **MCP stdio 模式**不经过 HTTP/SSE 鉴权中间层，因此不受此限制。
+>
+> 把 `HOST` 改成 `0.0.0.0`（或你的实际监听地址）只会放开监听范围，不会自动放宽鉴权。
 
 ### 前端访问受保护接口
 
@@ -441,7 +443,7 @@ Authorization: Bearer <你的 MCP_API_KEY>
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
-> 这里的 `HOST=127.0.0.1` 是本机回环调试示例。若要给其他机器访问，请改成 `0.0.0.0`（或你的实际监听地址），并自行补齐 `MCP_API_KEY`、网络隔离、反向代理与 TLS 等保护。
+> 这里的 `HOST=127.0.0.1` 是本机回环调试示例。若要给其他机器访问，请改成 `0.0.0.0`（或你的实际监听地址）。这会让远程客户端可以连到该监听地址，但你仍需要自己补齐 `MCP_API_KEY`、网络隔离、反向代理与 TLS 等保护。
 
 Docker 一键部署时，直接使用：
 

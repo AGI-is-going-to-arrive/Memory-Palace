@@ -28,6 +28,7 @@ from dotenv import load_dotenv
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from db.sqlite_client import get_sqlite_client
 from db.snapshot import get_snapshot_manager
 from runtime_state import runtime_state
@@ -41,8 +42,26 @@ dotenv_path = os.path.join(root_dir, ".env")
 if os.path.exists(dotenv_path):
     load_dotenv(dotenv_path)
 
+
+def _resolve_mcp_host() -> str:
+    return str(os.getenv("HOST") or "0.0.0.0").strip() or "0.0.0.0"
+
+
+def _resolve_transport_security(host: str) -> TransportSecuritySettings | None:
+    normalized = host.strip().lower()
+    if normalized in {"127.0.0.1", "localhost", "::1"}:
+        return None
+    return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+
+_MCP_HOST = _resolve_mcp_host()
+
 # Initialize FastMCP server
-mcp = FastMCP("Memory Palace Interface")
+mcp = FastMCP(
+    "Memory Palace Interface",
+    host=_MCP_HOST,
+    transport_security=_resolve_transport_security(_MCP_HOST),
+)
 
 # =============================================================================
 # Domain Configuration

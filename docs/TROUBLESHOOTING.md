@@ -152,6 +152,21 @@
    data: /messages/?session_id=...
    ```
 
+4. 如果你是远程客户端接入，请再确认这三件事：
+
+   - `run_sse.py` 启动时不要继续绑在 `HOST=127.0.0.1`
+   - 请求里带了正确的 `X-MCP-API-Key` 或 `Authorization: Bearer ...`
+   - 反向代理 / 防火墙没有把请求拦掉
+
+   可以先用一条最小请求排查：
+
+   ```bash
+   curl -i \
+     -H 'Accept: text/event-stream' \
+     -H 'X-MCP-API-Key: <YOUR_MCP_API_KEY>' \
+     http://<YOUR_HOST>:<YOUR_PORT>/sse
+   ```
+
 ---
 
 ## 4. Docker 一键脚本失败

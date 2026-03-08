@@ -142,7 +142,7 @@ create_memory(
     parent_uri: str,              # 必填，父 URI（如 "core://agent"）
     content: str,                 # 必填，记忆正文
     priority: int,                # 必填，检索优先级（数字越小越优先）
-    title: Optional[str] = None,  # 可选，路径名（仅限 a-z/0-9/_/-）
+    title: Optional[str] = None,  # 可选，路径名（仅限 a-z/0-9/_/-；强烈建议显式填写）
     disclosure: str = ""          # 可选，触发条件描述
 )
 ```
@@ -153,6 +153,7 @@ create_memory(
 2. 若 Guard 判定为 `NOOP` / `UPDATE` / `DELETE`，创建会被阻止，返回建议目标 `guard_target_uri`
 3. `title` 只允许字母、数字、下划线和连字符（不允许空格和特殊字符）
 4. 若省略 `title`，系统自动分配数字 ID
+5. 为了让路径更稳定、结果更好读，也为了降低弱模型漏填参数时的可读性问题，**实际使用时建议始终填写 `title`**
 
 **使用示例：**
 
@@ -207,6 +208,8 @@ update_memory(
 > ⚠️ **没有全量替换模式。** 必须通过 `old_string` / `new_string` 明确指定修改内容，防止意外覆盖。
 >
 > ⚠️ **更新前请先 `read_memory`**，确保你了解将被修改的内容。
+>
+> 📌 **日常推荐顺序**：优先使用 **Patch 模式**；只有当你确实是要在末尾补一段新内容时，再使用 **Append 模式**。如果只是改 `priority` / `disclosure`，直接做元数据更新即可。
 
 **使用示例：**
 

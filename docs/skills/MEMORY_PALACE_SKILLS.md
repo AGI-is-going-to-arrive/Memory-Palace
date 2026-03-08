@@ -192,6 +192,12 @@ search_memory(query="...", include_session=True)
 - `delete_memory`
 - `add_alias`
 
+默认写法建议：
+
+- 新建时优先给 `create_memory` 显式填写 `title`
+- 普通改写优先用 `update_memory` 的 patch
+- 只有真的要把一段新内容补到末尾时，再用 `append`
+
 ### Guard-aware write
 
 不能忽略这些字段：

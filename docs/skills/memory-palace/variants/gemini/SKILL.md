@@ -26,6 +26,8 @@ Use this skill for Memory Palace memory operations and for questions about this 
 - Read `docs/skills/memory-palace/references/mcp-workflow.md` before choosing tools when the user is asking about workflow or tool behavior.
 - If the URI is unknown, use `search_memory(..., include_session=true)` before `read_memory`.
 - Read before every mutation: `create_memory`, `update_memory`, `delete_memory`, `add_alias`.
+- Prefer `update_memory` patch mode for normal edits; use append only for real tail appends.
+- When using `create_memory`, prefer supplying an explicit `title` so the new URI stays readable.
 - Use `index_status()` before `rebuild_index(wait=true)` unless the user explicitly wants immediate rebuild.
 - Use `compact_context(force=false)` for long or noisy sessions that should be distilled.
 

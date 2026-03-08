@@ -42,6 +42,8 @@ Use this skill whenever a task involves the Memory Palace memory system itself.
 - If the URI is unknown, use `search_memory(..., include_session=true)` before `read_memory`.
 - Read before every mutation: `create_memory`, `update_memory`, `delete_memory`, `add_alias`.
 - Prefer `update_memory` over duplicate `create_memory` when guard signals point to an existing memory.
+- Prefer `update_memory` patch mode for normal edits; use append only for real tail appends.
+- When using `create_memory`, prefer supplying an explicit `title` so the new URI stays readable.
 - Treat `guard_action=NOOP|UPDATE|DELETE` as a stop signal that requires inspection, not as a warning to ignore.
 - If `guard_action` is `NOOP`, stop the write, inspect `guard_target_uri` / `guard_target_id`, and read the suggested target before deciding whether anything should change.
 - Treat `guard_target_uri` and `guard_target_id` as the canonical hints for choosing the real mutation target.

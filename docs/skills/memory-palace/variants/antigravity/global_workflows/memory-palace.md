@@ -21,10 +21,12 @@ description: 'Memory Palace durable-memory workflow: boot, recall, inspect, muta
 1. If this is the first real Memory Palace operation in the session, start with `read_memory("system://boot")`.
 2. If the URI is unknown, use `search_memory(..., include_session=true)` before guessing any target path.
 3. Before any mutation (`create_memory`, `update_memory`, `delete_memory`, `add_alias`), read the target or the best matching candidate first.
-4. If `guard_action` is `NOOP`, stop the write, inspect `guard_target_uri` / `guard_target_id`, read the suggested target, then decide whether anything should change.
-5. If retrieval quality is degraded, inspect `index_status()` before `rebuild_index(wait=true)`.
-6. Use `compact_context(force=false)` for long or noisy sessions that should be distilled.
-7. When answering about the workflow itself, use repo-local facts from the two reference files above, not generic memory intuition.
+4. Prefer `update_memory` patch mode for normal edits; use append only when you really want to add text at the end.
+5. When using `create_memory`, prefer supplying an explicit `title` so the new URI stays readable.
+6. If `guard_action` is `NOOP`, stop the write, inspect `guard_target_uri` / `guard_target_id`, read the suggested target, then decide whether anything should change.
+7. If retrieval quality is degraded, inspect `index_status()` before `rebuild_index(wait=true)`.
+8. Use `compact_context(force=false)` for long or noisy sessions that should be distilled.
+9. When answering about the workflow itself, use repo-local facts from the two reference files above, not generic memory intuition.
 
 ## Verification
 

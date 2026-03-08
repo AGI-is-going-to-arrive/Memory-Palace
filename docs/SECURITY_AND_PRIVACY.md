@@ -78,6 +78,8 @@ Authorization: Bearer <MCP_API_KEY>
 | `MCP_API_KEY` 为空，未开启 insecure local | ❌ 拒绝 | `401`，`reason: api_key_not_configured` |
 
 > 📌 Loopback 地址仅包含 `127.0.0.1`、`::1`、`localhost`（代码常量 `_LOOPBACK_CLIENT_HOSTS`）；且必须为直连本机请求（无 `Forwarded` / `X-Forwarded-*` / `X-Real-IP` 等转发头）。
+>
+> 📌 如果你把 SSE 监听地址改成 `0.0.0.0`（或其他非 loopback 地址），表示这个监听地址可以被远程客户端访问；但鉴权规则**不会**因此放宽，`MCP_API_KEY` / 反向代理 / 网络隔离仍然要照常配置。
 
 ### 当前仓库中的验证锚点
 

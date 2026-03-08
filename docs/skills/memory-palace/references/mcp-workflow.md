@@ -49,6 +49,7 @@ update_memory(...)
 ```
 
 Use `create_memory(...)` only when the target truly does not exist.
+When you do create, prefer giving an explicit `title` so the new URI stays readable and stable.
 
 ### 4. Guard-aware writing
 
@@ -65,6 +66,12 @@ Operational rule:
 - `NOOP` → stop and inspect the suggested target
 - `UPDATE` → read the suggested target and usually switch to `update_memory`
 - `DELETE` → stop and confirm the old memory should be replaced
+
+Practical default:
+
+- prefer `update_memory` patch mode for normal edits
+- use `append` only when you really want to add text at the end
+- use metadata-only updates when only `priority` / `disclosure` should change
 
 If `guard_target_id` is present, prefer it over fuzzy similarity when deciding whether the target is truly the same memory.
 
