@@ -106,6 +106,19 @@ def test_phase7_docker_compose_persists_snapshots_and_entrypoint_prepares_mount(
     assert "chown -R app:app /app/data /app/snapshots" in backend_entrypoint_text
 
 
+def test_phase7_public_docs_explain_docker_snapshot_persistence() -> None:
+    readme_text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    readme_cn_text = (PROJECT_ROOT / "README_CN.md").read_text(encoding="utf-8")
+    getting_started_text = (PROJECT_ROOT / "docs/GETTING_STARTED.md").read_text(
+        encoding="utf-8"
+    )
+
+    for text in (readme_text, readme_cn_text, getting_started_text):
+        assert "memory_palace_data" in text
+        assert "memory_palace_snapshots" in text
+        assert "down -v" in text
+
+
 def test_phase7_windows_equivalent_pwsh_gate_preserves_skip_status() -> None:
     post_check_text = RUN_POST_CHANGE_CHECKS_PATH.read_text(encoding="utf-8")
     pwsh_text = RUN_PWSH_DOCKER_REAL_TEST_PATH.read_text(encoding="utf-8")
