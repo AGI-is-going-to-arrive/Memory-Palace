@@ -632,7 +632,7 @@ The canonical skill is aligned with the current code contract:
 - when `guard_action=NOOP`, stop writing, inspect the suggested target, and only then decide whether to switch to `update_memory`
 - the trigger sample set lives at `<repo-root>/docs/skills/memory-palace/references/trigger-samples.md`
 
-If you want to re-check the live MCP path on your own machine, run `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`. It generates `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` locally by default. That report is meant to stay local, is ignored by `.gitignore`, and may be absent in the public GitHub repo.
+If you want to re-check the local skill smoke or the live MCP path on your own machine, run `python scripts/evaluate_memory_palace_skill.py` and `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`. They generate `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` and `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` locally by default. Both reports are meant to stay local, are ignored by `.gitignore`, and may be absent in the public GitHub repo.
 
 Full guide: [MEMORY_PALACE_SKILLS.md](docs/skills/MEMORY_PALACE_SKILLS.md)
 
@@ -643,6 +643,8 @@ Full guide: [MEMORY_PALACE_SKILLS.md](docs/skills/MEMORY_PALACE_SKILLS.md)
 > This section keeps the **user-facing summary tables** from the current public benchmark suite and local release runs. More detailed benchmark logs, one-off re-baseline notes, and machine-specific artifacts stay local by default and are not treated as public guarantees or universal outcomes.
 >
 > For methodology, caveats, and reproduction commands, see `docs/EVALUATION.md`. For the same-setup old-vs-current summary used in this release note, see `docs/changelog/release_summary_vs_old_project_2026-03-06.md`.
+>
+> The raw `*_metrics.json` files behind these tables stay local by default and are gitignored, so they may be absent in the public GitHub repo.
 
 ### Retrieval Quality — A/B/C/D Real Run
 

@@ -132,6 +132,24 @@ def test_phase7_public_docs_explain_docker_snapshot_persistence() -> None:
         assert "down -v" in text
 
 
+def test_phase7_public_docs_do_not_claim_local_benchmark_jsons_are_repo_visible() -> None:
+    readme_text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    readme_cn_text = (PROJECT_ROOT / "README_CN.md").read_text(encoding="utf-8")
+    evaluation_text = (PROJECT_ROOT / "docs/EVALUATION.md").read_text(encoding="utf-8")
+
+    forbidden_literals = (
+        "backend/tests/benchmark/profile_ab_metrics.json",
+        "backend/tests/benchmark/profile_abcd_real_metrics.json",
+        "backend/tests/benchmark/write_guard_quality_metrics.json",
+        "backend/tests/benchmark/intent_accuracy_metrics.json",
+        "backend/tests/benchmark/compact_context_gist_quality_metrics.json",
+    )
+
+    for text in (readme_text, readme_cn_text, evaluation_text):
+        for literal in forbidden_literals:
+            assert literal not in text
+
+
 def test_phase7_windows_equivalent_pwsh_gate_preserves_skip_status() -> None:
     post_check_text = _require_workspace_file(
         RUN_POST_CHANGE_CHECKS_PATH, "workspace run_post_change_checks.sh"

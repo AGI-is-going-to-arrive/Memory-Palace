@@ -401,7 +401,18 @@ def check_sync_script() -> CheckResult:
 
 
 def check_gate_syntax() -> CheckResult:
-    proc = run_command(["bash", "-n", "new/run_post_change_checks.sh"], cwd=REPO_ROOT, timeout=30)
+    gate_candidates = [
+        REPO_ROOT / "new" / "run_post_change_checks.sh",
+        REPO_ROOT.parent / "new" / "run_post_change_checks.sh",
+    ]
+    gate_script = next((path for path in gate_candidates if path.is_file()), None)
+    if gate_script is None:
+        return CheckResult(
+            "SKIP",
+            "run_post_change_checks.sh 在当前仓库布局中缺失，跳过该项",
+            "missing: " + ", ".join(str(path) for path in gate_candidates),
+        )
+    proc = run_command(["bash", "-n", str(gate_script)], cwd=REPO_ROOT, timeout=30)
     if proc.returncode != 0:
         return CheckResult("FAIL", "run_post_change_checks.sh 语法失败", proc.stderr.strip())
     return CheckResult("PASS", "run_post_change_checks.sh 语法通过")

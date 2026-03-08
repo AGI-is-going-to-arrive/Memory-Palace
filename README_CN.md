@@ -640,7 +640,7 @@ canonical 真源，以及你执行同步/安装命令后在本地会看到的路
 - `guard_action=NOOP` 时不要继续写入；先检查建议目标，再决定是否切换为 `update_memory`
 - 触发样例集固定在 `<repo-root>/docs/skills/memory-palace/references/trigger-samples.md`
 
-如果你想在自己的机器上复核真实 MCP 端到端链路，运行 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`。脚本默认会在本地生成 `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md`。这份报告默认只建议留在本机，已被 `.gitignore` 排除，所以公开 GitHub 仓库里看不到也属于正常情况。
+如果你想在自己的机器上复核本地 skill smoke 或真实 MCP 端到端链路，运行 `python scripts/evaluate_memory_palace_skill.py` 和 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`。这两条脚本默认会在本地生成 `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` 与 `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md`。这两份报告默认只建议留在本机，已被 `.gitignore` 排除，所以公开 GitHub 仓库里看不到也属于正常情况。
 
 完整指南见：[MEMORY_PALACE_SKILLS.md](docs/skills/MEMORY_PALACE_SKILLS.md)
 
@@ -651,6 +651,8 @@ canonical 真源，以及你执行同步/安装命令后在本地会看到的路
 > 这里保留**对用户有用的摘要表**，来源于当前项目验证运行。更细的 benchmark 原始日志、一次性重测草稿和机器相关产物默认只在维护阶段使用，也不代表所有环境下的结果。
 >
 > 想看方法、边界和复现命令，直接看 `docs/EVALUATION.md`；想看这次发布里采用的同口径旧版 vs 当前版本摘要，直接看 `docs/changelog/release_summary_vs_old_project_2026-03-06.md`。
+>
+> 这些表格背后的 `*_metrics.json` 原始文件默认只留在本地，并被 `.gitignore` 排除，所以公开 GitHub 仓库里可能看不到。
 
 ### 检索质量 — A/B/C/D 真实运行
 
