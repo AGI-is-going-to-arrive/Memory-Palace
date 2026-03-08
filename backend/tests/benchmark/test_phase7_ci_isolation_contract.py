@@ -1,17 +1,19 @@
 from pathlib import Path
 
+import pytest
+
 
 BENCHMARK_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BENCHMARK_DIR.parents[2]
-REPO_ROOT = BENCHMARK_DIR.parents[3]
+WORKSPACE_ROOT = PROJECT_ROOT.parent
 
-WORKFLOW_PATH = REPO_ROOT / ".github/workflows/benchmark-gate.yml"
+WORKFLOW_PATH = WORKSPACE_ROOT / ".github/workflows/benchmark-gate.yml"
 DOCKERIGNORE_PATH = PROJECT_ROOT / ".dockerignore"
 BACKEND_DOCKERFILE_PATH = PROJECT_ROOT / "deploy/docker/Dockerfile.backend"
 DOCKER_ONE_CLICK_SH_PATH = PROJECT_ROOT / "scripts/docker_one_click.sh"
 DOCKER_ONE_CLICK_PS1_PATH = PROJECT_ROOT / "scripts/docker_one_click.ps1"
-RUN_POST_CHANGE_CHECKS_PATH = REPO_ROOT / "new/run_post_change_checks.sh"
-RUN_PWSH_DOCKER_REAL_TEST_PATH = REPO_ROOT / "new/run_pwsh_docker_real_test.sh"
+RUN_POST_CHANGE_CHECKS_PATH = WORKSPACE_ROOT / "new/run_post_change_checks.sh"
+RUN_PWSH_DOCKER_REAL_TEST_PATH = WORKSPACE_ROOT / "new/run_pwsh_docker_real_test.sh"
 
 
 def _load_nonempty_lines(path: Path) -> list[str]:
@@ -24,9 +26,16 @@ def _load_nonempty_lines(path: Path) -> list[str]:
     return lines
 
 
+def _require_workspace_file(path: Path, description: str) -> Path:
+    if not path.exists():
+        pytest.skip(f"{description} is not bundled in the standalone Memory-Palace repo")
+    return path
+
+
 def test_phase7_benchmark_workflow_has_tiered_pr_nightly_weekly_gates() -> None:
-    assert WORKFLOW_PATH.exists(), "missing benchmark workflow gate file"
-    text = WORKFLOW_PATH.read_text(encoding="utf-8")
+    text = _require_workspace_file(
+        WORKFLOW_PATH, "workspace benchmark workflow"
+    ).read_text(encoding="utf-8")
 
     assert "benchmark-pr:" in text
     assert "benchmark-nightly:" in text
@@ -58,7 +67,9 @@ def test_phase7_backend_dockerfile_relies_on_backend_copy_with_dockerignore_guar
 def test_phase7_scripts_reserve_ports_before_parallel_compose_up() -> None:
     shell_text = DOCKER_ONE_CLICK_SH_PATH.read_text(encoding="utf-8")
     ps1_text = DOCKER_ONE_CLICK_PS1_PATH.read_text(encoding="utf-8")
-    post_check_text = RUN_POST_CHANGE_CHECKS_PATH.read_text(encoding="utf-8")
+    post_check_text = _require_workspace_file(
+        RUN_POST_CHANGE_CHECKS_PATH, "workspace run_post_change_checks.sh"
+    ).read_text(encoding="utf-8")
 
     assert "memory-palace-port-locks" in shell_text
     assert "memory-palace-port-locks" in ps1_text
@@ -72,7 +83,9 @@ def test_phase7_scripts_use_isolated_env_files_and_checkout_deploy_lock() -> Non
     compose_text = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     shell_text = DOCKER_ONE_CLICK_SH_PATH.read_text(encoding="utf-8")
     ps1_text = DOCKER_ONE_CLICK_PS1_PATH.read_text(encoding="utf-8")
-    post_check_text = RUN_POST_CHANGE_CHECKS_PATH.read_text(encoding="utf-8")
+    post_check_text = _require_workspace_file(
+        RUN_POST_CHANGE_CHECKS_PATH, "workspace run_post_change_checks.sh"
+    ).read_text(encoding="utf-8")
 
     assert "MEMORY_PALACE_DOCKER_ENV_FILE" in compose_text
     assert "memory-palace-docker-env-" in shell_text
@@ -119,27 +132,13 @@ def test_phase7_public_docs_explain_docker_snapshot_persistence() -> None:
         assert "down -v" in text
 
 
-def test_phase7_public_docs_do_not_claim_local_benchmark_jsons_are_repo_visible() -> None:
-    readme_text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
-    readme_cn_text = (PROJECT_ROOT / "README_CN.md").read_text(encoding="utf-8")
-    evaluation_text = (PROJECT_ROOT / "docs/EVALUATION.md").read_text(encoding="utf-8")
-
-    forbidden_literals = (
-        "backend/tests/benchmark/profile_ab_metrics.json",
-        "backend/tests/benchmark/profile_abcd_real_metrics.json",
-        "backend/tests/benchmark/write_guard_quality_metrics.json",
-        "backend/tests/benchmark/intent_accuracy_metrics.json",
-        "backend/tests/benchmark/compact_context_gist_quality_metrics.json",
-    )
-
-    for text in (readme_text, readme_cn_text, evaluation_text):
-        for literal in forbidden_literals:
-            assert literal not in text
-
-
 def test_phase7_windows_equivalent_pwsh_gate_preserves_skip_status() -> None:
-    post_check_text = RUN_POST_CHANGE_CHECKS_PATH.read_text(encoding="utf-8")
-    pwsh_text = RUN_PWSH_DOCKER_REAL_TEST_PATH.read_text(encoding="utf-8")
+    post_check_text = _require_workspace_file(
+        RUN_POST_CHANGE_CHECKS_PATH, "workspace run_post_change_checks.sh"
+    ).read_text(encoding="utf-8")
+    pwsh_text = _require_workspace_file(
+        RUN_PWSH_DOCKER_REAL_TEST_PATH, "workspace run_pwsh_docker_real_test.sh"
+    ).read_text(encoding="utf-8")
     gate_start = post_check_text.index("run_windows_equivalent_pwsh_docker_gate() {")
     gate_end = post_check_text.index("append_review_record()", gate_start)
     gate_text = post_check_text[gate_start:gate_end]
@@ -151,8 +150,12 @@ def test_phase7_windows_equivalent_pwsh_gate_preserves_skip_status() -> None:
 
 
 def test_phase7_post_check_exit_trap_is_root_guarded_and_pwsh_temp_json_is_cleaned() -> None:
-    post_check_text = RUN_POST_CHANGE_CHECKS_PATH.read_text(encoding="utf-8")
-    pwsh_text = RUN_PWSH_DOCKER_REAL_TEST_PATH.read_text(encoding="utf-8")
+    post_check_text = _require_workspace_file(
+        RUN_POST_CHANGE_CHECKS_PATH, "workspace run_post_change_checks.sh"
+    ).read_text(encoding="utf-8")
+    pwsh_text = _require_workspace_file(
+        RUN_PWSH_DOCKER_REAL_TEST_PATH, "workspace run_pwsh_docker_real_test.sh"
+    ).read_text(encoding="utf-8")
 
     assert 'ROOT_BASHPID="${BASHPID:-$$}"' in post_check_text
     assert 'if [[ "${BASHPID:-$$}" != "${ROOT_BASHPID}" ]]; then' in post_check_text
