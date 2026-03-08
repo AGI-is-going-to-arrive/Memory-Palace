@@ -7,6 +7,7 @@ services:
       - ${MEMORY_PALACE_DOCKER_ENV_FILE:-./.env.docker}
     volumes:
       - memory_palace_data:/app/data
+      - memory_palace_snapshots:/app/snapshots
     ports:
       - "${MEMORY_PALACE_BACKEND_PORT:-${NOCTURNE_BACKEND_PORT:-18000}}:8000"
     security_opt:
@@ -28,6 +29,7 @@ services:
     command: ["python", "run_sse.py"]
     volumes:
       - memory_palace_data:/app/data
+      - memory_palace_snapshots:/app/snapshots
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
@@ -58,3 +60,5 @@ services:
 volumes:
   memory_palace_data:
     name: ${MEMORY_PALACE_DATA_VOLUME:-${NOCTURNE_DATA_VOLUME:-memory_palace_data}}
+  memory_palace_snapshots:
+    name: ${MEMORY_PALACE_SNAPSHOTS_VOLUME:-${NOCTURNE_SNAPSHOTS_VOLUME:-memory_palace_snapshots}}

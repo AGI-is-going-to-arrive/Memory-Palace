@@ -2,7 +2,7 @@
 
 本指南帮助你在 5 分钟内跑通 Memory Palace 本地开发环境或 Docker 部署。
 
-> **Memory Palace** 是一个为 AI Agent 设计的长期记忆系统，通过 [MCP（Model Context Protocol）](https://modelcontextprotocol.io/) 协议提供 9 个工具，让 Claude Code、Codex、Gemini CLI、Cursor 等 AI 客户端具备持久化记忆能力。
+> **Memory Palace** 是一个为 AI Agent 设计的长期记忆系统，通过 [MCP（Model Context Protocol）](https://modelcontextprotocol.io/) 协议提供 9 个工具，让 Claude Code、Codex、Gemini CLI、OpenCode 等客户端具备持久化记忆能力；`Cursor` 与 `Antigravity` 仍建议先参考 `docs/skills/SKILLS_QUICKSTART.md` 里的边界说明。
 
 ---
 
@@ -220,6 +220,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > 如果 Docker env 文件里的 `MCP_API_KEY` 为空，`apply_profile.*` 会自动生成一把本地 key。Docker 前端会在代理层自动带上这把 key，所以 Dashboard 默认不需要再手动点 `Set API key`。
 >
+> Docker 默认还会分别持久化两类运行期数据：`memory_palace_data` 用于数据库（容器内 `/app/data`），`memory_palace_snapshots` 用于 Review snapshots（容器内 `/app/snapshots`）。如果你执行 `docker compose down -v` 或手动删除这两个卷，这两部分都会一起清空。
+>
 > **C/D 本地联调建议**：
 >
 > - 如果你本机的 `router` 还没接好 embedding / reranker / llm，可以先直接分别配置 `RETRIEVAL_EMBEDDING_*`、`RETRIEVAL_RERANKER_*`、`WRITE_GUARD_LLM_*` / `COMPACT_GIST_LLM_*`。
@@ -231,8 +233,9 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > 1. 调用 Profile 脚本生成本次运行使用的 Docker env 文件（默认临时文件；若显式设置 `MEMORY_PALACE_DOCKER_ENV_FILE` 则复用指定路径）
 > 2. 默认不读取当前进程环境变量覆盖模板策略键（避免隐式改档）；仅在显式开启注入开关时注入 API 地址/密钥/模型字段
 > 3. 检测端口占用并自动寻找可用端口
-> 4. 对同一 checkout 的并发部署加锁，避免多次 `docker_one_click` 互相覆盖
-> 5. 通过 `docker compose` 构建并启动容器
+> 4. 解析并注入 Docker 持久化卷：数据库默认使用 `memory_palace_data`，Review snapshots 默认使用 `memory_palace_snapshots`
+> 5. 对同一 checkout 的并发部署加锁，避免多次 `docker_one_click` 互相覆盖
+> 6. 通过 `docker compose` 构建并启动容器
 
 默认访问地址：
 
@@ -248,12 +251,15 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > - 前端容器内部运行在 `8080` 端口，对外映射到 `3000`（可通过 `MEMORY_PALACE_FRONTEND_PORT` 环境变量覆盖）
 > - 后端容器内部运行在 `8000` 端口，对外映射到 `18000`（可通过 `MEMORY_PALACE_BACKEND_PORT` 环境变量覆盖）
+> - Docker 默认同时持久化数据库卷（`/app/data`）和 review snapshot 卷（`/app/snapshots`）
 
 停止服务：
 
 ```bash
 COMPOSE_PROJECT_NAME=<控制台打印出的 compose project> docker compose -f docker-compose.yml down --remove-orphans
 ```
+
+> 上面的 `down --remove-orphans` 不会删除数据卷；只有显式使用 `docker compose ... down -v`，或手动删除对应 volume 时，数据库和 review snapshots 才会一起被清空。
 
 > 如果你需要验证 Windows 路径，建议直接在目标 Windows 环境里补跑一次启动与 smoke。
 
@@ -403,7 +409,7 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 
 ### 6.3 客户端配置示例
 
-**stdio 模式**（适用于 Claude Code / Codex / Cursor 等）：
+**stdio 模式**（适用于 Claude Code / Codex / OpenCode 等常见 stdio 客户端）：
 
 ```json
 {

@@ -1,6 +1,6 @@
 # Memory Palace 文档中心
 
-> **Memory Palace** 是一套为 AI 编程助手设计的长期记忆系统，通过 MCP（Model Context Protocol）为 Codex / Claude Code / Gemini CLI / Cursor 等客户端提供统一的记忆读写、检索、审查与维护能力。
+> **Memory Palace** 是一套为 AI 编程助手设计的长期记忆系统，通过 MCP（Model Context Protocol）为 Codex / Claude Code / Gemini CLI / OpenCode 提供统一的记忆读写、检索、审查与维护路径；`Cursor` 与 `Antigravity` 仍建议先看 `docs/skills/SKILLS_QUICKSTART.md` 里的边界说明。
 >
 > 许可证：MIT
 >

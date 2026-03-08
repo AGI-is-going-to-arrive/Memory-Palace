@@ -102,7 +102,7 @@ A React-powered dashboard with four views: **Memory Browser**, **Review & Rollba
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    User / AI Agent                          │
-│        (Codex · Claude Code · Gemini CLI · Cursor)          │
+│       (Codex · Claude Code · Gemini CLI · OpenCode)         │
 └──────────────┬──────────────────────┬───────────────────────┘
                │                      │
     ┌──────────▼──────────┐  ┌────────▼─────────┐
@@ -387,7 +387,7 @@ Start the MCP server so AI clients can access Memory Palace:
 ```bash
 cd backend
 
-# stdio mode (for IDE-integrated clients like Cursor)
+# stdio mode (for common stdio clients such as Claude Code / Codex / OpenCode)
 python mcp_server.py
 
 # SSE mode (loopback example; change HOST for remote access)
@@ -424,6 +424,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > - SSE: `http://127.0.0.1:3000/sse`
 >
 > If `MCP_API_KEY` is empty in the Docker env file, the profile helper generates a local key automatically. The frontend proxy uses that key on the server side, so users do not need to click `Set API key` just to open the dashboard.
+>
+> Docker also persists two runtime data paths by default: `memory_palace_data` stores the database (`/app/data` in the container), and `memory_palace_snapshots` stores Review snapshots (`/app/snapshots` in the container). If you run `docker compose down -v` or delete those volumes manually, both are cleared together.
 
 | Service | URL |
 |---|---|
@@ -545,7 +547,7 @@ Memory Palace exposes **9 standardized tools** via the MCP protocol:
 ### Starting the MCP Server
 
 ```bash
-# stdio mode (for IDE internal calls — Cursor, Codex, etc.)
+# stdio mode (for common stdio clients — Claude Code, Codex, OpenCode, etc.)
 cd backend && python mcp_server.py
 
 # SSE mode (loopback example; change HOST for remote access)
@@ -580,8 +582,9 @@ The MCP tool layer handles **deterministic execution**; the Skills strategy laye
 
 | Client | Integration Method |
 |---|---|
-| Claude Code / Codex CLI / OpenCode | Prefer syncing `docs/skills/memory-palace` into the matching skills directory |
-| Gemini CLI | Prefer a user-scope install (`install_skill.py --targets gemini --scope user --with-mcp --force`) |
+| Claude Code | Prefer a workspace install (`install_skill.py --targets claude,codex,gemini,opencode --scope workspace --with-mcp --force`) |
+| Gemini CLI | Workspace install works for the current repo, but user-scope install is still the more stable default on fresh machines |
+| Codex CLI / OpenCode | `sync` gives repo-local skill discovery; use `--scope user --with-mcp` if you want MCP to reliably bind to this repo backend |
 | Cursor / Antigravity / Trae | Workspace Rules / Project Instructions |
 
 ### Install The Skill
@@ -589,17 +592,25 @@ The MCP tool layer handles **deterministic execution**; the Skills strategy laye
 ```bash
 python scripts/sync_memory_palace_skill.py
 python scripts/sync_memory_palace_skill.py --check
-python scripts/evaluate_memory_palace_skill.py
-cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
-python scripts/install_skill.py --targets claude,codex,opencode --scope workspace --with-mcp --force
-python scripts/install_skill.py --targets gemini --scope user --with-mcp --force
+python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope workspace --with-mcp --force
+python scripts/install_skill.py --targets gemini,codex,opencode --scope user --with-mcp --force
+python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope workspace --with-mcp --check
 ```
 
-For `Gemini CLI`, prefer a **user-scope** install for now:
+Optional local verification on your own machine:
 
 ```bash
-python scripts/install_skill.py --targets gemini --scope user --with-mcp --force
+python scripts/evaluate_memory_palace_skill.py
+cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ```
+
+For `Gemini CLI`, `Codex CLI`, and `OpenCode`, prefer a **user-scope** MCP install on fresh machines:
+
+```bash
+python scripts/install_skill.py --targets gemini,codex,opencode --scope user --with-mcp --force
+```
+
+The two verification commands above are best treated as **machine-local diagnostics**, not as a universal “must all PASS” gate. They write local reports under `docs/skills/`, and some checks can still show `PARTIAL` / `FAIL` when your current machine lacks a logged-in CLI, a user-scope MCP binding, or the larger workspace-only validation helpers.
 
 Canonical source and the local paths that appear after you run the sync/install steps:
 
@@ -635,7 +646,7 @@ Full guide: [MEMORY_PALACE_SKILLS.md](docs/skills/MEMORY_PALACE_SKILLS.md)
 
 ### Retrieval Quality — A/B/C/D Real Run
 
-Source: `profile_abcd_real_metrics.json` · Sample size = 8 per dataset · 10 distractor documents · Seed = 20260219
+Source: `profile_abcd_real_metrics.json` · Sample size = 8 per dataset · 10 distractor documents · Seed = 20260219 · typically generated as a maintainer-side benchmark artifact during local validation
 
 > 📌 These numbers summarize one current release run. Hardware, provider, and model differences may change outcomes.
 
@@ -663,7 +674,7 @@ Source: `profile_abcd_real_metrics.json` · Sample size = 8 per dataset · 10 di
 
 ### Retrieval Quality — A/B Large-Sample Gate
 
-Source: `profile_ab_metrics.json` · Sample size = 100
+Source: `profile_ab_metrics.json` · Sample size = 100 · typically generated as a maintainer-side benchmark artifact during local validation
 
 | Profile | Dataset | HR@10 | MRR | NDCG@10 | p95 (ms) |
 |---|---|---:|---:|---:|---:|
@@ -697,11 +708,11 @@ Source: `profile_ab_metrics.json` · Sample size = 100
 | Gist Quality | ROUGE-L | 0.759 | ≥ 0.40 | ✅ PASS |
 | Phase 6 Gate | Valid | true | — | ✅ PASS |
 
-> **Write Guard**: Evaluated on 6 test cases (4 TP, 0 FP, 0 FN). Source: `write_guard_quality_metrics.json`
+> **Write Guard**: Evaluated on 6 test cases (4 TP, 0 FP, 0 FN). Source: `write_guard_quality_metrics.json` (typically generated as a maintainer-side benchmark artifact during local validation)
 >
-> **Intent Classification**: 6/6 correct classifications across temporal, causal, exploratory, and factual intents using `keyword_scoring_v2`. Source: `intent_accuracy_metrics.json`
+> **Intent Classification**: 6/6 correct classifications across temporal, causal, exploratory, and factual intents using `keyword_scoring_v2`. Source: `intent_accuracy_metrics.json` (typically generated as a maintainer-side benchmark artifact during local validation)
 >
-> **Gist ROUGE-L**: Average across 5 test cases (range: 0.667 – 0.923). Source: `compact_context_gist_quality_metrics.json`
+> **Gist ROUGE-L**: Average across 5 test cases (range: 0.667 – 0.923). Source: `compact_context_gist_quality_metrics.json` (typically generated as a maintainer-side benchmark artifact during local validation)
 >
 > In plain English:
 >

@@ -170,6 +170,8 @@ def test_docker_env_file_is_parameterized_for_isolated_runs() -> None:
 
     compose_text = (project_root / "docker-compose.yml").read_text(encoding="utf-8")
     assert "${MEMORY_PALACE_DOCKER_ENV_FILE:-./.env.docker}" in compose_text
+    assert "memory_palace_snapshots:/app/snapshots" in compose_text
+    assert "${MEMORY_PALACE_SNAPSHOTS_VOLUME:-${NOCTURNE_SNAPSHOTS_VOLUME:-memory_palace_snapshots}}" in compose_text
 
     bash_smoke_text = (project_root.parent / "new" / "run_post_change_checks.sh").read_text(
         encoding="utf-8"
@@ -180,11 +182,15 @@ def test_docker_env_file_is_parameterized_for_isolated_runs() -> None:
         encoding="utf-8"
     )
     assert "MEMORY_PALACE_DOCKER_ENV_FILE" in bash_deploy_text
+    assert "MEMORY_PALACE_SNAPSHOTS_VOLUME" in bash_deploy_text
+    assert "resolve_snapshots_volume" in bash_deploy_text
 
     ps_deploy_text = (project_root / "scripts" / "docker_one_click.ps1").read_text(
         encoding="utf-8"
     )
     assert "MEMORY_PALACE_DOCKER_ENV_FILE" in ps_deploy_text
+    assert "MEMORY_PALACE_SNAPSHOTS_VOLUME" in ps_deploy_text
+    assert "Resolve-SnapshotsVolume" in ps_deploy_text
 
 
 @pytest.mark.asyncio

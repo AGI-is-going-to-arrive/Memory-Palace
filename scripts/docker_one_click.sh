@@ -194,6 +194,15 @@ resolve_data_volume() {
   echo "memory_palace_data"
 }
 
+resolve_snapshots_volume() {
+  local explicit_volume="${MEMORY_PALACE_SNAPSHOTS_VOLUME:-${NOCTURNE_SNAPSHOTS_VOLUME:-}}"
+  if [[ -n "${explicit_volume}" ]]; then
+    echo "${explicit_volume}"
+    return 0
+  fi
+  echo "memory_palace_snapshots"
+}
+
 get_env_value_from_file() {
   local env_file="$1"
   local key="$2"
@@ -471,6 +480,7 @@ if [[ ${auto_port} -eq 1 ]]; then
 fi
 
 data_volume="$(resolve_data_volume)"
+snapshots_volume="$(resolve_snapshots_volume)"
 compose_project_name="${COMPOSE_PROJECT_NAME:-$(default_compose_project_name)}"
 compose_env_file_args=()
 if [[ -n "${env_file}" ]]; then
@@ -488,18 +498,22 @@ if [[ ${no_build} -eq 1 ]]; then
   MEMORY_PALACE_FRONTEND_PORT="${frontend_port}" \
   MEMORY_PALACE_BACKEND_PORT="${backend_port}" \
   MEMORY_PALACE_DATA_VOLUME="${data_volume}" \
+  MEMORY_PALACE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
   NOCTURNE_FRONTEND_PORT="${frontend_port}" \
   NOCTURNE_BACKEND_PORT="${backend_port}" \
   NOCTURNE_DATA_VOLUME="${data_volume}" \
+  NOCTURNE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
   "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml up -d --force-recreate --remove-orphans
 else
   COMPOSE_PROJECT_NAME="${compose_project_name}" \
   MEMORY_PALACE_FRONTEND_PORT="${frontend_port}" \
   MEMORY_PALACE_BACKEND_PORT="${backend_port}" \
   MEMORY_PALACE_DATA_VOLUME="${data_volume}" \
+  MEMORY_PALACE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
   NOCTURNE_FRONTEND_PORT="${frontend_port}" \
   NOCTURNE_BACKEND_PORT="${backend_port}" \
   NOCTURNE_DATA_VOLUME="${data_volume}" \
+  NOCTURNE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
   "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml up -d --build --force-recreate --remove-orphans
 fi
 

@@ -1,6 +1,6 @@
 # Memory Palace 评测结果
 
-本文档汇总 Memory Palace 各档位（A/B/C/D）的检索质量、延迟与语义质量门禁测试结果。这里保留**摘要表 + 复核说明**；机器相关的原始 benchmark 日志、`tests/benchmark` 脚手架和阶段性重测草稿默认只在开发阶段或本地使用。
+本文档汇总 Memory Palace 各档位（A/B/C/D）的检索质量、延迟与语义质量门禁测试结果。这里保留**摘要表 + 复核说明**；公开仓库会保留 `backend/tests/benchmark/` 下的 benchmark helpers 与测试入口，机器相关的原始 benchmark 日志、一次性门禁草稿、阶段性重测记录以及部分指标 JSON 默认只在开发阶段或本地使用。
 
 > 状态说明（2026-03）：本页主要保留 2026-02 的公开基线表格，便于用户理解档位差异；当前发布口径请同时参考 `docs/changelog/release_summary_vs_old_project_2026-03-06.md`。
 
@@ -11,7 +11,8 @@
 | 来源 | 说明 |
 |---|---|
 | 本页公开摘要表 | 面向用户保留的 A/B/C/D 关键指标和门禁结果 |
-| 维护期 benchmark 产物 | 用于生成公开摘要；默认不随用户仓分发 |
+| `backend/tests/benchmark/` 下的公开 benchmark helpers 与测试用例 | 用于理解评测口径；具体指标文件通常仍以维护阶段或本地复核产物为主 |
+| 维护期 benchmark 产物 | 一次性重测日志、门禁草稿和本机运行结果；默认不随用户仓分发 |
 | 发布对比摘要 | `docs/changelog/release_summary_vs_old_project_2026-03-06.md` |
 
 > 数据生成时间：`2026-02-19T06:55:30+00:00`（门禁）/ `2026-02-18T21:22:48+00:00`（真实运行）
@@ -39,7 +40,7 @@
 
 ## 2. 检索评测（A/B/CD 小样本门禁）
 
-**来源**：`profile_ab_metrics.json`（`sample_size=100`，每档 3 个数据集 × 100 条查询）
+**来源**：`profile_ab_metrics.json`（`sample_size=100`，每档 3 个数据集 × 100 条查询；通常由 `backend/tests/benchmark/` 下的 benchmark helpers 在维护阶段生成）
 
 | 档位 | 模式 | 数据集 | HR@10 | MRR | NDCG@10 | Recall@10 | p50(ms) | p95(ms) | 降级率 |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|
@@ -57,7 +58,7 @@
 
 ## 3. 检索评测（真实 A/B/C/D 运行）
 
-**来源**：`profile_abcd_real_metrics.json`（`sample_size_requested=8`，2 个数据集 × 8 条查询）
+**来源**：`profile_abcd_real_metrics.json`（`sample_size_requested=8`，2 个数据集 × 8 条查询；通常由 `backend/tests/benchmark/` 下的 benchmark helpers 在维护阶段生成）
 
 策略：每条查询按 `first_relevant_only=true` 仅保留首个相关文档，额外灌入 `10` 条干扰文档，随机种子 `20260219`。
 
@@ -159,7 +160,7 @@
 
 ### Write Guard（写入守卫）
 
-**来源**：`write_guard_quality_metrics.json`
+**来源**：`write_guard_quality_metrics.json`（通常由 benchmark helpers 在维护阶段生成）
 
 | 指标 | 值 | 阈值 | 状态 |
 |---|---:|---:|---|
@@ -178,7 +179,7 @@
 
 ### Intent 分类（查询意图识别）
 
-**来源**：`intent_accuracy_metrics.json`
+**来源**：`intent_accuracy_metrics.json`（通常由 benchmark helpers 在维护阶段生成）
 
 | 指标 | 值 | 阈值 | 状态 |
 |---|---:|---:|---|
@@ -200,7 +201,7 @@
 
 ### Gist 质量（上下文压缩摘要）
 
-**来源**：`compact_context_gist_quality_metrics.json`
+**来源**：`compact_context_gist_quality_metrics.json`（通常由 benchmark helpers 在维护阶段生成）
 
 | 指标 | 值 | 阈值 | 状态 |
 |---|---:|---:|---|

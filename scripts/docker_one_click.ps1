@@ -190,6 +190,16 @@ function Resolve-DataVolume {
     return $newVolume
 }
 
+function Resolve-SnapshotsVolume {
+    if ($env:MEMORY_PALACE_SNAPSHOTS_VOLUME) {
+        return $env:MEMORY_PALACE_SNAPSHOTS_VOLUME
+    }
+    if ($env:NOCTURNE_SNAPSHOTS_VOLUME) {
+        return $env:NOCTURNE_SNAPSHOTS_VOLUME
+    }
+    return 'memory_palace_snapshots'
+}
+
 function Get-EnvValueFromFile {
     param(
         [string]$FilePath,
@@ -580,12 +590,15 @@ try {
     }
 
     $dataVolume = Resolve-DataVolume
+    $snapshotsVolume = Resolve-SnapshotsVolume
     $env:MEMORY_PALACE_FRONTEND_PORT = "$FrontendPort"
     $env:MEMORY_PALACE_BACKEND_PORT = "$BackendPort"
     $env:MEMORY_PALACE_DATA_VOLUME = "$dataVolume"
+    $env:MEMORY_PALACE_SNAPSHOTS_VOLUME = "$snapshotsVolume"
     $env:NOCTURNE_FRONTEND_PORT = "$FrontendPort"
     $env:NOCTURNE_BACKEND_PORT = "$BackendPort"
     $env:NOCTURNE_DATA_VOLUME = "$dataVolume"
+    $env:NOCTURNE_SNAPSHOTS_VOLUME = "$snapshotsVolume"
 
     try {
         Invoke-Compose -ComposeArgs @('-f', 'docker-compose.yml', 'down', '--remove-orphans') -ComposeProjectName $composeProjectName -EnvFile $envFile

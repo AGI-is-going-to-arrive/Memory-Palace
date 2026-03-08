@@ -286,7 +286,7 @@ cd <project-root>
 1. 调用 profile 脚本从模板生成本次运行使用的 Docker env 文件（默认是 per-run 临时文件；仅当显式设置 `MEMORY_PALACE_DOCKER_ENV_FILE` 时才复用指定路径）
 2. 默认禁用运行时环境注入，避免隐式覆盖模板；仅在显式开关注入时才覆盖运行参数。对 `profile c/d`，注入模式会额外强制 `RETRIEVAL_EMBEDDING_BACKEND=api` 用于本地联调。
 3. 自动检测端口占用，若默认端口被占用则自动递增寻找空闲端口
-4. 检测是否存在历史数据卷（`memory_palace_data` 或 `nocturne_*` 系列），自动复用以保留历史数据
+4. 检测并注入 Docker 持久化卷：数据卷默认使用 `memory_palace_data`（兼容旧 `nocturne_*` 数据卷），snapshot 卷默认使用 `memory_palace_snapshots`
 5. 对同一 checkout 的并发部署加 deployment lock，避免多次 `docker_one_click` 互相覆盖
 6. 使用 `docker compose` 构建并启动后端、SSE、前端三个容器
 
@@ -302,6 +302,8 @@ cd <project-root>
 cd <project-root>
 COMPOSE_PROJECT_NAME=<控制台打印出的 compose project> docker compose -f docker-compose.yml down --remove-orphans
 ```
+
+> 上面的 `down --remove-orphans` 不会删除 `memory_palace_data` 和 `memory_palace_snapshots`；只有显式执行 `down -v`，或手动删除对应 volume 时，数据库和 Review snapshots 才会一起清空。
 
 ---
 
@@ -492,7 +494,7 @@ curl -fsS -X POST <RETRIEVAL_RERANKER_API_BASE>/rerank \
 ### 调参提示
 
 1. **`RETRIEVAL_RERANKER_WEIGHT`**：过高会过度依赖重排序模型，建议以 `0.05` 步长调试
-2. **Docker 数据持久化**：默认使用 `memory_palace_data` 卷（见 `docker-compose.yml`）
+2. **Docker 数据持久化**：默认同时使用 `memory_palace_data`（挂载 `/app/data`）和 `memory_palace_snapshots`（挂载 `/app/snapshots`）两个卷，分别持久化数据库与 review snapshots（见 `docker-compose.yml`）
 3. **旧版兼容**：一键脚本自动识别旧版 `NOCTURNE_*` 环境变量和历史数据卷
 4. **迁移锁**：`DB_MIGRATION_LOCK_FILE`（默认 `<db_file>.migrate.lock`）和 `DB_MIGRATION_LOCK_TIMEOUT_SEC`（默认 `10` 秒）用于防止多进程并发迁移冲突
 
