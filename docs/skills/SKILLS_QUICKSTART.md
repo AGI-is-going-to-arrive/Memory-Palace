@@ -28,6 +28,14 @@
 > - `Claude / Codex / OpenCode / Gemini` 的 **smoke** 已有结果
 > - `Gemini live` 还没到可以写成“完全通过”的程度
 > - `Cursor / agent / Antigravity` 目前仍是 **PARTIAL**
+>
+> **Windows 用户先看这个前提**：
+>
+> - 当前仓库里的 repo-local MCP wrapper 是 `scripts/run_memory_palace_mcp_stdio.sh`
+> - `install_skill.py` 生成的本地 MCP 启动命令也统一走 `bash` / `/bin/zsh`
+> - 所以如果你是原生 Windows 环境，请先准备 **Git Bash** 或 **WSL**
+> - 如果你现在只有 PowerShell，先不要把下面这些 `/bin/zsh` / `bash` 示例当成“原生 Windows 直接可用”
+> - 这不是文档偷懒，而是当前代码的真实边界
 
 ---
 

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 import {
   AlertTriangle,
   BookOpenText,
@@ -27,12 +28,7 @@ import {
   updateMemoryNode,
 } from '../../lib/api';
 import GlassCard from '../../components/GlassCard';
-
-const defaultConversation = [
-  'LLM: 我今天需要记住“发布流程的回滚检查清单”。',
-  'Agent: 已记录。请补充触发条件与责任人。',
-  'LLM: 触发条件是部署后 10 分钟内关键接口错误率 > 5%。',
-].join('\n');
+import i18n from '../../i18n';
 
 const isAbortError = (error) =>
   Boolean(
@@ -43,6 +39,8 @@ const isAbortError = (error) =>
   );
 
 function CrumbBar({ items, onNavigate }) {
+  const { t } = useTranslation();
+
   return (
     <div className="flex items-center gap-1 overflow-x-auto rounded-full border border-[color:var(--palace-glass-border)] bg-white/40 backdrop-blur-md px-3 py-1.5 shadow-sm">
       <button
@@ -65,7 +63,7 @@ function CrumbBar({ items, onNavigate }) {
                 : 'text-[color:var(--palace-muted)] hover:bg-white/50 hover:text-[color:var(--palace-ink)]'
             )}
           >
-            {item.label || 'root'}
+            {!item.label || item.label === 'root' ? t('memory.rootBreadcrumb') : item.label}
           </button>
         </React.Fragment>
       ))}
@@ -74,7 +72,8 @@ function CrumbBar({ items, onNavigate }) {
 }
 
 function ChildCard({ child, onOpen }) {
-  const preview = child.gist_text || child.content_snippet || 'No preview';
+  const { t } = useTranslation();
+  const preview = child.gist_text || child.content_snippet || t('common.states.noPreview');
   return (
     <GlassCard
       as={motion.button}
@@ -100,6 +99,8 @@ function ChildCard({ child, onOpen }) {
 }
 
 export default function MemoryBrowser() {
+  const { t } = useTranslation();
+  const defaultConversation = t('memory.defaultConversation');
   const [searchParams, setSearchParams] = useSearchParams();
   const domain = searchParams.get('domain') || 'core';
   const path = searchParams.get('path') || '';
@@ -121,7 +122,8 @@ export default function MemoryBrowser() {
   const [composerTitle, setComposerTitle] = useState('');
   const [composerDisclosure, setComposerDisclosure] = useState('');
   const [composerPriority, setComposerPriority] = useState(0);
-  const [conversation, setConversation] = useState(defaultConversation);
+  const [conversation, setConversation] = useState(() => defaultConversation);
+  const [conversationDirty, setConversationDirty] = useState(false);
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [feedback, setFeedback] = useState(null);
@@ -149,7 +151,7 @@ export default function MemoryBrowser() {
     } catch (err) {
       if (requestId !== nodeRequestRef.current) return;
       if (controller.signal.aborted || isAbortError(err)) return;
-      setError(extractApiError(err, 'Failed to load memory node'));
+      setError(extractApiError(err, i18n.t('memory.errors.loadNode')));
     } finally {
       if (requestId !== nodeRequestRef.current) return;
       setLoading(false);
@@ -163,6 +165,12 @@ export default function MemoryBrowser() {
       nodeAbortControllerRef.current?.abort();
     };
   }, [refreshNode]);
+
+  useEffect(() => {
+    if (!conversationDirty) {
+      setConversation(defaultConversation);
+    }
+  }, [conversationDirty, defaultConversation]);
 
   const navigateTo = (nextPath, nextDomain = domain) => {
     const params = new URLSearchParams();
@@ -184,10 +192,12 @@ export default function MemoryBrowser() {
 
   const hasNodeGist = Boolean(data.node?.gist_text);
   const gistQualityText =
-    data.node?.gist_quality == null ? 'n/a' : Number(data.node.gist_quality).toFixed(3);
+    data.node?.gist_quality == null
+      ? t('common.states.notAvailable')
+      : Number(data.node.gist_quality).toFixed(3);
   const sourceHashShort = data.node?.source_hash
     ? `${String(data.node.source_hash).slice(0, 10)}...`
-    : 'n/a';
+    : t('common.states.notAvailable');
 
   const onStartEdit = () => {
     if (isRoot || !data.node) return;
@@ -222,15 +232,15 @@ export default function MemoryBrowser() {
       if (!result?.updated) {
         setFeedback({
           type: 'error',
-          text: result?.message || 'Skipped: write_guard blocked update_node.',
+          text: t('memory.feedback.updateGuardSkipped'),
         });
         return;
       }
       await refreshNode();
       setEditing(false);
-      setFeedback({ type: 'ok', text: 'Memory updated.' });
+      setFeedback({ type: 'ok', text: t('memory.feedback.memoryUpdated') });
     } catch (err) {
-      setFeedback({ type: 'error', text: extractApiError(err, 'Failed to update memory node') });
+      setFeedback({ type: 'error', text: extractApiError(err, t('memory.errors.updateNode')) });
     } finally {
       setSaving(false);
     }
@@ -238,7 +248,7 @@ export default function MemoryBrowser() {
 
   const onCreateFromConversation = async () => {
     if (!conversation.trim()) {
-      setFeedback({ type: 'error', text: 'Conversation content cannot be empty.' });
+      setFeedback({ type: 'error', text: t('memory.feedback.conversationEmpty') });
       return;
     }
     setCreating(true);
@@ -255,25 +265,26 @@ export default function MemoryBrowser() {
       if (!created?.created) {
         setFeedback({
           type: 'error',
-          text: created?.message || 'Skipped: write_guard blocked create_node.',
+          text: t('memory.feedback.createGuardSkipped'),
         });
         return;
       }
       if (!created?.path || !created?.domain) {
         setFeedback({
           type: 'error',
-          text: 'Create response missing destination path.',
+          text: t('memory.feedback.createResponseMissing'),
         });
         return;
       }
       setComposerTitle('');
       setComposerDisclosure('');
       setComposerPriority(0);
+      setConversationDirty(false);
       setConversation(defaultConversation);
-      setFeedback({ type: 'ok', text: `Memory created: ${created.uri}` });
+      setFeedback({ type: 'ok', text: t('memory.feedback.memoryCreated', { uri: created.uri }) });
       navigateTo(created.path, created.domain);
     } catch (err) {
-      setFeedback({ type: 'error', text: extractApiError(err, 'Failed to create memory node') });
+      setFeedback({ type: 'error', text: extractApiError(err, t('memory.errors.createNode')) });
     } finally {
       setCreating(false);
     }
@@ -281,16 +292,16 @@ export default function MemoryBrowser() {
 
   const onDeletePath = async () => {
     if (isRoot) return;
-    if (!window.confirm(`Delete path ${domain}://${path} ?`)) return;
+    if (!window.confirm(t('memory.prompts.deletePath', { target: `${domain}://${path}` }))) return;
     setDeleting(true);
     setFeedback(null);
     try {
       await deleteMemoryNode(path, domain);
       const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
       navigateTo(parent, domain);
-      setFeedback({ type: 'ok', text: 'Path deleted.' });
+      setFeedback({ type: 'ok', text: t('memory.feedback.pathDeleted') });
     } catch (err) {
-      setFeedback({ type: 'error', text: extractApiError(err, 'Failed to delete memory node') });
+      setFeedback({ type: 'error', text: extractApiError(err, t('memory.errors.deleteNode')) });
     } finally {
       setDeleting(false);
     }
@@ -308,10 +319,10 @@ export default function MemoryBrowser() {
           <div>
             <p className="mb-2 inline-flex items-center gap-2 rounded-full border border-[color:var(--palace-line)] bg-white/30 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[color:var(--palace-muted)] backdrop-blur-sm">
               <Compass size={12} />
-              Memory Console
+              {t('memory.consoleBadge')}
             </p>
             <h1 className="font-display text-3xl font-medium text-[color:var(--palace-ink)] drop-shadow-sm">
-              {isRoot ? 'Memory Hall' : (data.node?.name || path.split('/').pop())}
+              {isRoot ? t('memory.rootTitle') : (data.node?.name || path.split('/').pop())}
             </h1>
           </div>
           <div className="flex items-center gap-3">
@@ -332,21 +343,24 @@ export default function MemoryBrowser() {
             className="space-y-6"
           >
             <GlassCard className="p-5">
-              <h2 className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-[color:var(--palace-ink)]">
+             <h2 className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-[color:var(--palace-ink)]">
                 <BookOpenText size={16} className="text-[color:var(--palace-accent-2)]" />
-                Conversation Vault
+                {t('memory.conversationVault')}
               </h2>
               <div className="space-y-3">
                 <input
                   value={composerTitle}
                   onChange={(e) => setComposerTitle(e.target.value)}
-                  placeholder="Memory title (optional)"
+                  placeholder={t('memory.titlePlaceholder')}
                   className="palace-input bg-white/40 focus:bg-white/80"
                 />
                 <textarea
                   value={conversation}
-                  onChange={(e) => setConversation(e.target.value)}
-                  placeholder="Paste LLM / agent dialogue..."
+                  onChange={(e) => {
+                    setConversation(e.target.value);
+                    setConversationDirty(true);
+                  }}
+                  placeholder={t('memory.conversationPlaceholder')}
                   className="palace-input h-48 resize-none bg-white/40 focus:bg-white/80 leading-relaxed"
                 />
                 <div className="grid grid-cols-2 gap-3">
@@ -356,23 +370,24 @@ export default function MemoryBrowser() {
                     type="number"
                     min="0"
                     className="palace-input bg-white/40 focus:bg-white/80"
-                    placeholder="Priority"
+                    placeholder={t('memory.priorityPlaceholder')}
                   />
                   <input
                     value={composerDisclosure}
                     onChange={(e) => setComposerDisclosure(e.target.value)}
                     className="palace-input bg-white/40 focus:bg-white/80"
-                    placeholder="Disclosure"
+                    placeholder={t('memory.disclosurePlaceholder')}
                   />
                 </div>
                 <button
                   type="button"
                   onClick={onCreateFromConversation}
                   disabled={creating}
+                  data-testid="memory-store-button"
                   className="palace-btn-primary w-full justify-center"
                 >
                   {creating ? <Save size={14} className="animate-pulse" /> : <Plus size={14} />}
-                  Store Memory
+                  {t('memory.storeMemory')}
                 </button>
               </div>
             </GlassCard>
@@ -380,7 +395,7 @@ export default function MemoryBrowser() {
             <GlassCard className="p-5">
               <h3 className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-[color:var(--palace-ink)]">
                 <Filter size={15} className="text-[color:var(--palace-accent-2)]" />
-                Child Filters
+                {t('memory.childFilters')}
               </h3>
               <div className="space-y-3">
                 <div className="relative">
@@ -388,7 +403,7 @@ export default function MemoryBrowser() {
                   <input
                     value={searchValue}
                     onChange={(e) => setSearchValue(e.target.value)}
-                    placeholder="Search path / snippet"
+                    placeholder={t('memory.searchPlaceholder')}
                     className="palace-input pl-9 bg-white/40 focus:bg-white/80"
                   />
                 </div>
@@ -397,7 +412,7 @@ export default function MemoryBrowser() {
                   onChange={(e) => setPriorityFilter(e.target.value)}
                   type="number"
                   min="0"
-                  placeholder="Max priority (optional)"
+                  placeholder={t('memory.maxPriorityPlaceholder')}
                   className="palace-input bg-white/40 focus:bg-white/80"
                 />
               </div>
@@ -411,7 +426,7 @@ export default function MemoryBrowser() {
             className="space-y-6"
           >
             <div className="flex items-center justify-between">
-                <CrumbBar items={data.breadcrumbs || [{ path: '', label: 'root' }]} onNavigate={navigateTo} />
+                <CrumbBar items={data.breadcrumbs || [{ path: '', label: t('memory.rootBreadcrumb') }]} onNavigate={navigateTo} />
             </div>
 
             <AnimatePresence mode="wait">
@@ -439,13 +454,13 @@ export default function MemoryBrowser() {
                     transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
                     className="mx-auto mb-3 h-6 w-6 rounded-full border-2 border-[color:var(--palace-line)] border-t-[color:var(--palace-accent)]"
                 />
-                Loading memory node...
+                {t('memory.loadingNode')}
               </GlassCard>
             ) : error ? (
               <GlassCard className="p-6 border-rose-200/50 bg-rose-50/30 text-rose-700">
                 <div className="mb-2 inline-flex items-center gap-2 font-semibold">
                   <AlertTriangle size={15} />
-                  Failed to load node
+                  {t('memory.loadNodeFailed')}
                 </div>
                 <p className="opacity-90">{error}</p>
               </GlassCard>
@@ -455,11 +470,11 @@ export default function MemoryBrowser() {
                   <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
                     <div>
                       <p className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-[color:var(--palace-muted)]">
-                        Current Node Content
+                        {t('memory.currentNodeContent')}
                       </p>
                       <div className="flex items-center gap-3">
                          <h2 className="font-display text-2xl font-medium">
-                            {isRoot ? 'Root Memory Hall' : data.node?.name}
+                            {isRoot ? t('memory.rootNodeTitle') : data.node?.name}
                          </h2>
                       </div>
                       {!isRoot && hasNodeGist && (
@@ -475,7 +490,7 @@ export default function MemoryBrowser() {
                                   : 'text-[color:var(--palace-muted)] hover:bg-white/70'
                               )}
                             >
-                              Gist
+                              {t('memory.gistView')}
                             </button>
                             <button
                               type="button"
@@ -487,17 +502,17 @@ export default function MemoryBrowser() {
                                   : 'text-[color:var(--palace-muted)] hover:bg-white/70'
                               )}
                             >
-                              Original
+                              {t('memory.originalView')}
                             </button>
                           </div>
                           <span className="rounded-full border border-[color:var(--palace-line)] bg-white/50 px-2 py-1 text-[color:var(--palace-muted)]">
-                            method: {data.node?.gist_method || 'n/a'}
+                            {t('memory.method')}: {data.node?.gist_method || t('common.states.notAvailable')}
                           </span>
                           <span className="rounded-full border border-[color:var(--palace-line)] bg-white/50 px-2 py-1 text-[color:var(--palace-muted)]">
-                            quality: {gistQualityText}
+                            {t('memory.quality')}: {gistQualityText}
                           </span>
                           <span className="rounded-full border border-[color:var(--palace-line)] bg-white/50 px-2 py-1 text-[color:var(--palace-muted)]">
-                            source: {sourceHashShort}
+                            {t('memory.source')}: {sourceHashShort}
                           </span>
                         </div>
                       )}
@@ -510,19 +525,21 @@ export default function MemoryBrowser() {
                             <button
                               type="button"
                               onClick={onCancelEdit}
+                              data-testid="memory-cancel-edit"
                               className="palace-btn-ghost bg-white/50"
                             >
                               <X size={14} />
-                              Cancel
+                              {t('common.actions.cancel')}
                             </button>
                             <button
                               type="button"
                               onClick={onSaveEdit}
                               disabled={saving}
+                              data-testid="memory-save-edit"
                               className="palace-btn-primary"
                             >
                               <Save size={14} />
-                              {saving ? 'Saving...' : 'Save'}
+                              {saving ? t('memory.saving') : t('common.actions.save')}
                             </button>
                           </>
                         ) : (
@@ -530,19 +547,21 @@ export default function MemoryBrowser() {
                             <button
                               type="button"
                               onClick={onStartEdit}
+                              data-testid="memory-start-edit"
                               className="palace-btn-ghost bg-white/50"
                             >
                               <Edit3 size={14} />
-                              Edit
+                              {t('common.actions.edit')}
                             </button>
                             <button
                               type="button"
                               onClick={onDeletePath}
                               disabled={deleting}
+                              data-testid="memory-delete-path"
                               className="inline-flex cursor-pointer items-center gap-1 rounded-xl border border-rose-200/50 bg-rose-50/30 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100/50 disabled:cursor-not-allowed disabled:opacity-60"
                             >
                               <Trash2 size={14} />
-                              {deleting ? 'Deleting...' : 'Delete Path'}
+                              {deleting ? t('memory.deleting') : t('memory.deletePath')}
                             </button>
                           </>
                         )}
@@ -562,13 +581,13 @@ export default function MemoryBrowser() {
                         value={editPriority}
                         onChange={(e) => setEditPriority(Number(e.target.value) || 0)}
                         className="palace-input bg-white/60"
-                        placeholder="Priority"
+                        placeholder={t('memory.priorityPlaceholder')}
                       />
                       <input
                         value={editDisclosure}
                         onChange={(e) => setEditDisclosure(e.target.value)}
                         className="palace-input bg-white/60"
-                        placeholder="Disclosure"
+                        placeholder={t('memory.disclosurePlaceholder')}
                       />
                     </motion.div>
                   )}
@@ -583,10 +602,10 @@ export default function MemoryBrowser() {
                     <div className="rounded-xl border border-[color:var(--palace-glass-border)] bg-white/30 px-5 py-4 shadow-inner">
                         <pre className="max-h-[500px] overflow-auto whitespace-pre-wrap font-sans text-sm leading-7 text-[color:var(--palace-ink)]">
                         {isRoot
-                            ? 'Root node does not store content. Create child memories from the Conversation Vault.'
+                            ? t('memory.rootNodeNoContent')
                             : contentView === 'gist'
-                              ? data.node?.gist_text || <span className="text-[color:var(--palace-muted)] italic">(gist unavailable)</span>
-                              : data.node?.content || <span className="text-[color:var(--palace-muted)] italic">(empty content)</span>}
+                              ? data.node?.gist_text || <span className="text-[color:var(--palace-muted)] italic">{t('memory.gistUnavailable')}</span>
+                              : data.node?.content || <span className="text-[color:var(--palace-muted)] italic">{t('memory.emptyContent')}</span>}
                         </pre>
                     </div>
                   )}
@@ -594,14 +613,14 @@ export default function MemoryBrowser() {
 
                 <GlassCard className="p-6">
                   <div className="mb-4 flex items-center justify-between">
-                    <h3 className="text-sm font-semibold">Child Memories</h3>
+                    <h3 className="text-sm font-semibold">{t('memory.childMemories')}</h3>
                     <span className="rounded-full border border-[color:var(--palace-line)] bg-white/50 px-2 py-0.5 text-xs text-[color:var(--palace-muted)]">
                       {visibleChildren.length} / {data.children?.length || 0}
                     </span>
                   </div>
                   {visibleChildren.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-[color:var(--palace-line)] bg-[color:var(--palace-soft)]/50 px-4 py-12 text-center text-sm text-[color:var(--palace-muted)]">
-                      <p>No child memory matches current filter.</p>
+                      <p>{t('memory.noChildMatches')}</p>
                     </div>
                   ) : (
                     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">

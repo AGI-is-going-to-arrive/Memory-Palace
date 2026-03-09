@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
+import { useTranslation } from 'react-i18next';
 import {
   Activity,
   AlertTriangle,
@@ -24,6 +25,7 @@ import {
   triggerMemoryReindex,
   triggerSleepConsolidation,
 } from '../../lib/api';
+import { formatDateTime as formatDateTimeValue, formatNumber as formatNumberValue } from '../../lib/format';
 
 const MODE_OPTIONS = ['hybrid', 'semantic', 'keyword'];
 const PANEL_CLASS =
@@ -32,11 +34,11 @@ const INPUT_CLASS =
   'w-full rounded-lg border border-[color:var(--palace-line)] bg-white/90 px-3 py-2 text-sm text-[color:var(--palace-ink)] placeholder:text-[color:var(--palace-muted)] focus:outline-none focus:ring-2 focus:ring-[color:var(--palace-accent)]/35 focus:border-[color:var(--palace-accent)]';
 const LABEL_CLASS = 'mb-2 block text-xs font-medium uppercase tracking-[0.14em] text-[color:var(--palace-muted)]';
 
-const formatNumber = (value) => {
+const formatNumber = (value, lng) => {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return '-';
   }
-  return Number(value).toLocaleString();
+  return formatNumberValue(value, lng) || '-';
 };
 
 const formatMs = (value) => {
@@ -46,26 +48,30 @@ const formatMs = (value) => {
   return `${Number(value).toFixed(1)} ms`;
 };
 
-const formatDateTime = (value) => {
+const formatDateTime = (value, lng) => {
   if (!value || typeof value !== 'string') {
     return '-';
   }
-  const parsed = Date.parse(value);
-  if (Number.isNaN(parsed)) {
-    return value;
-  }
-  return new Date(parsed).toLocaleString();
+  return formatDateTimeValue(value, lng, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }) || value;
 };
 
-const parseOptionalNonNegativeInteger = (rawValue, label) => {
+const parseOptionalNonNegativeInteger = (rawValue, label, t) => {
   const normalized = String(rawValue ?? '').trim();
   if (!normalized) return null;
   if (!/^\d+$/.test(normalized)) {
-    throw new Error(`${label} must be a non-negative integer`);
+    throw new Error(t('observability.validation.nonNegativeInteger', { label }));
   }
   const parsed = Number(normalized);
   if (!Number.isSafeInteger(parsed)) {
-    throw new Error(`${label} must be a non-negative integer`);
+    throw new Error(t('observability.validation.nonNegativeInteger', { label }));
   }
   return parsed;
 };
@@ -73,18 +79,19 @@ const parseOptionalNonNegativeInteger = (rawValue, label) => {
 const parseRequiredIntegerInRange = (
   rawValue,
   label,
+  t,
   { min = 1, max = Number.MAX_SAFE_INTEGER } = {}
 ) => {
   const normalized = String(rawValue ?? '').trim();
   if (!normalized) {
-    throw new Error(`${label} is required`);
+    throw new Error(t('observability.validation.required', { label }));
   }
   if (!/^\d+$/.test(normalized)) {
-    throw new Error(`${label} must be an integer`);
+    throw new Error(t('observability.validation.integer', { label }));
   }
   const parsed = Number(normalized);
   if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
-    throw new Error(`${label} must be in range [${min}, ${max}]`);
+    throw new Error(t('observability.validation.range', { label, min, max }));
   }
   return parsed;
 };
@@ -174,10 +181,11 @@ function Badge({ children, tone = 'neutral' }) {
 }
 
 function ResultCard({ item }) {
+  const { t } = useTranslation();
   const finalScore = item?.scores?.final;
   const scoreText = finalScore === undefined ? '-' : Number(finalScore).toFixed(4);
   const uri = item?.uri || '-';
-  const snippet = item?.snippet || '(empty snippet)';
+  const snippet = item?.snippet || t('observability.result.emptySnippet');
   const metadata = item?.metadata || {};
   const source = metadata.source || metadata.match_type || 'global';
 
@@ -186,27 +194,28 @@ function ResultCard({ item }) {
       <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <code className="break-all text-xs text-[color:var(--palace-accent-2)]">{uri}</code>
         <div className="flex items-center gap-2">
-          <Badge tone="neutral">score {scoreText}</Badge>
+          <Badge tone="neutral">{t('observability.result.score', { value: scoreText })}</Badge>
           <Badge tone={source === 'session_queue' ? 'good' : 'neutral'}>{source}</Badge>
         </div>
       </header>
       <p className="mb-3 whitespace-pre-wrap text-sm leading-relaxed text-[color:var(--palace-ink)]">{snippet}</p>
       <footer className="flex flex-wrap gap-2 text-[11px] text-[color:var(--palace-muted)]">
-        <span>memory #{item?.memory_id ?? '-'}</span>
-        <span>priority {metadata.priority ?? '-'}</span>
-        <span>{metadata.updated_at || 'updated_at unknown'}</span>
+        <span>{t('observability.result.memory', { value: item?.memory_id ?? '-' })}</span>
+        <span>{t('observability.result.priority', { value: metadata.priority ?? '-' })}</span>
+        <span>{metadata.updated_at || t('observability.result.updatedAtUnknown')}</span>
       </footer>
     </article>
   );
 }
 
 export default function ObservabilityPage() {
+  const { t, i18n } = useTranslation();
   const [summary, setSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
-  const [summaryError, setSummaryError] = useState(null);
+  const [summaryErrorState, setSummaryErrorState] = useState(null);
 
   const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState(null);
+  const [searchErrorState, setSearchErrorState] = useState(null);
   const [searchResult, setSearchResult] = useState(null);
 
   const [rebuilding, setRebuilding] = useState(false);
@@ -215,12 +224,14 @@ export default function ObservabilityPage() {
   const [jobActionKey, setJobActionKey] = useState(null);
   const [activeJob, setActiveJob] = useState(null);
   const [activeJobLoading, setActiveJobLoading] = useState(false);
-  const [detailJobError, setDetailJobError] = useState(null);
+  const [detailJobErrorState, setDetailJobErrorState] = useState(null);
   const [inspectedJobId, setInspectedJobId] = useState(null);
   const summaryRequestSeqRef = useRef(0);
+  const initialDefaultQuery = i18n.t('observability.defaultQuery', { lng: i18n.resolvedLanguage || i18n.language || 'en' });
+  const previousDefaultQueryRef = useRef(initialDefaultQuery);
 
-  const [form, setForm] = useState({
-    query: 'memory flush queue',
+  const [form, setForm] = useState(() => ({
+    query: initialDefaultQuery,
     mode: 'hybrid',
     maxResults: '8',
     candidateMultiplier: '4',
@@ -230,23 +241,55 @@ export default function ObservabilityPage() {
     pathPrefix: '',
     scopeHint: '',
     maxPriority: '',
-  });
+  }));
   const activeJobId = summary?.health?.runtime?.index_worker?.active_job_id || null;
   const detailJobId = inspectedJobId || activeJobId || null;
   const summaryTimestamp = summary?.timestamp || '';
+  const localeKey = i18n.resolvedLanguage || i18n.language || 'en';
+  const summaryError = useMemo(() => {
+    if (!summaryErrorState) return null;
+    return extractApiError(summaryErrorState.error, i18n.t(summaryErrorState.fallbackKey, { lng: localeKey }));
+  }, [summaryErrorState, i18n, localeKey]);
+  const searchError = useMemo(() => {
+    if (!searchErrorState) return null;
+    return extractApiError(searchErrorState.error, i18n.t(searchErrorState.fallbackKey, { lng: localeKey }));
+  }, [searchErrorState, i18n, localeKey]);
+  const detailJobError = useMemo(() => {
+    if (!detailJobErrorState) return null;
+    return extractApiError(
+      detailJobErrorState.error,
+      i18n.t(detailJobErrorState.fallbackKey, {
+        lng: localeKey,
+        ...(detailJobErrorState.fallbackValues || {}),
+      })
+    );
+  }, [detailJobErrorState, i18n, localeKey]);
+
+  useEffect(() => {
+    const nextDefaultQuery = i18n.t('observability.defaultQuery', { lng: localeKey });
+    setForm((prev) => {
+      const shouldUpdate = prev.query === previousDefaultQueryRef.current;
+      previousDefaultQueryRef.current = nextDefaultQuery;
+      if (!shouldUpdate) return prev;
+      return { ...prev, query: nextDefaultQuery };
+    });
+  }, [i18n, localeKey]);
 
   const loadSummary = useCallback(async () => {
     const requestSeq = summaryRequestSeqRef.current + 1;
     summaryRequestSeqRef.current = requestSeq;
     setSummaryLoading(true);
-    setSummaryError(null);
+    setSummaryErrorState(null);
     try {
       const data = await getObservabilitySummary();
       if (requestSeq !== summaryRequestSeqRef.current) return;
       setSummary(data);
     } catch (err) {
       if (requestSeq !== summaryRequestSeqRef.current) return;
-      setSummaryError(extractApiError(err, 'Failed to load observability summary'));
+      setSummaryErrorState({
+        error: err,
+        fallbackKey: 'observability.summaryError',
+      });
     } finally {
       if (requestSeq !== summaryRequestSeqRef.current) return;
       setSummaryLoading(false);
@@ -262,7 +305,7 @@ export default function ObservabilityPage() {
     if (!detailJobId) {
       setActiveJob(null);
       setActiveJobLoading(false);
-      setDetailJobError(null);
+      setDetailJobErrorState(null);
       return () => {
         disposed = true;
       };
@@ -271,7 +314,7 @@ export default function ObservabilityPage() {
     const loadActiveJob = async () => {
       setActiveJob(null);
       setActiveJobLoading(true);
-      setDetailJobError(null);
+      setDetailJobErrorState(null);
       try {
         const payload = await getIndexJob(detailJobId);
         if (!disposed) {
@@ -280,7 +323,11 @@ export default function ObservabilityPage() {
       } catch (err) {
         if (!disposed) {
           setActiveJob(null);
-          setDetailJobError(extractApiError(err, `Failed to load job ${detailJobId}`));
+          setDetailJobErrorState({
+            error: err,
+            fallbackKey: 'observability.messages.activeJobLoadFailed',
+            fallbackValues: { job: detailJobId },
+          });
           const statusCode = err?.response?.status;
           if (statusCode === 404) {
             setInspectedJobId((prev) => (prev === detailJobId ? null : prev));
@@ -306,13 +353,17 @@ export default function ObservabilityPage() {
   const runSearch = async (event) => {
     event.preventDefault();
     setSearching(true);
-    setSearchError(null);
+    setSearchErrorState(null);
     setRebuildMessage(null);
     try {
       const filters = {};
       if (form.domain.trim()) filters.domain = form.domain.trim();
       if (form.pathPrefix.trim()) filters.path_prefix = form.pathPrefix.trim();
-      const maxPriority = parseOptionalNonNegativeInteger(form.maxPriority, 'max priority');
+      const maxPriority = parseOptionalNonNegativeInteger(
+        form.maxPriority,
+        t('observability.maxPriorityFilter'),
+        t,
+      );
       if (maxPriority !== null) {
         filters.max_priority = maxPriority;
       }
@@ -320,13 +371,14 @@ export default function ObservabilityPage() {
       const payload = {
         query: form.query,
         mode: form.mode,
-        max_results: parseRequiredIntegerInRange(form.maxResults, 'max results', {
+        max_results: parseRequiredIntegerInRange(form.maxResults, t('observability.maxResults'), t, {
           min: 1,
           max: 50,
         }),
         candidate_multiplier: parseRequiredIntegerInRange(
           form.candidateMultiplier,
-          'candidate multiplier',
+          t('observability.candidateMultiplier'),
+          t,
           { min: 1, max: 20 }
         ),
         include_session: form.includeSession,
@@ -341,7 +393,10 @@ export default function ObservabilityPage() {
       setSearchResult(data);
       await loadSummary();
     } catch (err) {
-      setSearchError(extractApiError(err, 'Diagnostic search failed'));
+      setSearchErrorState({
+        error: err,
+        fallbackKey: 'observability.diagnosticSearchFailed',
+      });
     } finally {
       setSearching(false);
     }
@@ -356,10 +411,10 @@ export default function ObservabilityPage() {
         wait: false,
       });
       const jobId = data?.job_id ? `job ${data.job_id}` : 'sync';
-      setRebuildMessage(`Rebuild requested (${jobId})`);
+      setRebuildMessage(t('observability.messages.rebuildRequested', { job: jobId }));
       await loadSummary();
     } catch (err) {
-      setRebuildMessage(`Rebuild failed: ${extractApiError(err)}`);
+      setRebuildMessage(t('observability.messages.rebuildFailed', { detail: extractApiError(err) }));
     } finally {
       setRebuilding(false);
     }
@@ -374,10 +429,10 @@ export default function ObservabilityPage() {
         wait: false,
       });
       const jobId = data?.job_id ? `job ${data.job_id}` : 'sync';
-      setRebuildMessage(`Sleep consolidation requested (${jobId})`);
+      setRebuildMessage(t('observability.messages.sleepRequested', { job: jobId }));
       await loadSummary();
     } catch (err) {
-      setRebuildMessage(`Sleep consolidation failed: ${extractApiError(err)}`);
+      setRebuildMessage(t('observability.messages.sleepFailed', { detail: extractApiError(err) }));
     } finally {
       setSleepConsolidating(false);
     }
@@ -390,11 +445,11 @@ export default function ObservabilityPage() {
     setRebuildMessage(null);
     try {
       await cancelIndexJob(jobId, { reason: 'observability_console_cancel' });
-      setRebuildMessage(`Cancel requested (${jobId})`);
+      setRebuildMessage(t('observability.messages.cancelRequested', { job: jobId }));
       await loadSummary();
     } catch (err) {
       const statusCode = err?.response?.status;
-      const detail = extractApiError(err, 'cancel request failed');
+      const detail = extractApiError(err, t('observability.messages.cancelRequestFailed'));
       const normalizedDetail = detail.trim().toLowerCase();
       const isJobNotFound =
         normalizedDetail.includes('job_not_found') ||
@@ -404,20 +459,20 @@ export default function ObservabilityPage() {
         (normalizedDetail.includes('already') && normalizedDetail.includes('final'));
       if (statusCode === 404) {
         if (isJobNotFound) {
-          setRebuildMessage(`Cancel skipped (${jobId}): job not found`);
+          setRebuildMessage(t('observability.messages.cancelSkipped', { job: jobId, detail: 'job not found' }));
           await loadSummary();
         } else {
-          setRebuildMessage(`Cancel failed (${jobId}): ${detail}`);
+          setRebuildMessage(t('observability.messages.cancelFailed', { job: jobId, detail }));
         }
       } else if (statusCode === 409) {
         if (isAlreadyFinalized) {
-          setRebuildMessage(`Cancel skipped (${jobId}): already finalized`);
+          setRebuildMessage(t('observability.messages.cancelSkipped', { job: jobId, detail: 'already finalized' }));
           await loadSummary();
         } else {
-          setRebuildMessage(`Cancel failed (${jobId}): ${detail}`);
+          setRebuildMessage(t('observability.messages.cancelFailed', { job: jobId, detail }));
         }
       } else {
-        setRebuildMessage(`Cancel failed (${jobId}): ${detail}`);
+        setRebuildMessage(t('observability.messages.cancelFailed', { job: jobId, detail }));
       }
     } finally {
       setJobActionKey(null);
@@ -456,17 +511,22 @@ export default function ObservabilityPage() {
               wait: false,
             });
           } else {
-            throw new Error(`retry for task type '${taskType || 'unknown'}' is not supported`);
+            throw new Error(t('observability.messages.retryUnsupported', {
+              taskType: taskType || 'unknown',
+            }));
           }
         } else {
           throw err;
         }
       }
       const requestedJob = payload?.job_id ? `job ${payload.job_id}` : 'sync';
-      setRebuildMessage(`Retry requested (${requestedJob})`);
+      setRebuildMessage(t('observability.messages.retryRequested', { job: requestedJob }));
       await loadSummary();
     } catch (err) {
-      setRebuildMessage(`Retry failed (${jobId}): ${extractApiError(err)}`);
+      setRebuildMessage(t('observability.messages.retryFailed', {
+        job: jobId,
+        detail: extractApiError(err),
+      }));
     } finally {
       setJobActionKey(null);
     }
@@ -510,10 +570,10 @@ export default function ObservabilityPage() {
           <div>
             <h1 className="font-display flex items-center gap-2 text-lg text-[color:var(--palace-ink)]">
               <Radar size={18} className="text-[color:var(--palace-accent)]" />
-              Retrieval Observability Console
+              {t('observability.title')}
             </h1>
             <p className="mt-1 text-sm text-[color:var(--palace-muted)]">
-              Track search latency, degrade reasons, cache hits, and index worker health.
+              {t('observability.subtitle')}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -524,7 +584,7 @@ export default function ObservabilityPage() {
               className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-[color:var(--palace-line)] bg-white/88 px-3 py-2 text-xs font-medium text-[color:var(--palace-muted)] transition-colors hover:border-[color:var(--palace-accent)] hover:text-[color:var(--palace-ink)] disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[color:var(--palace-accent)]/35"
             >
               <RefreshCw size={14} className={summaryLoading ? 'animate-spin' : ''} />
-              Refresh
+              {t('observability.refresh')}
             </button>
             <button
               type="button"
@@ -537,7 +597,7 @@ export default function ObservabilityPage() {
               ) : (
                 <Wrench size={14} />
               )}
-              Rebuild Index
+              {t('observability.rebuildIndex')}
             </button>
             <button
               type="button"
@@ -550,7 +610,7 @@ export default function ObservabilityPage() {
               ) : (
                 <TimerReset size={14} />
               )}
-              Sleep Consolidation
+              {t('observability.sleepConsolidation')}
             </button>
           </div>
         </div>
@@ -569,44 +629,55 @@ export default function ObservabilityPage() {
         <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <StatCard
             icon={Search}
-            label="Queries"
-            value={formatNumber(searchStats.total_queries)}
-            hint={`degraded ${formatNumber(searchStats.degraded_queries)}`}
+            label={t('observability.stats.queries')}
+            value={formatNumber(searchStats.total_queries, i18n.resolvedLanguage)}
+            hint={t('observability.stats.degraded', {
+              count: formatNumber(searchStats.degraded_queries, i18n.resolvedLanguage),
+            })}
             tone="neutral"
           />
           <StatCard
             icon={TimerReset}
-            label="Latency"
+            label={t('observability.stats.latency')}
             value={formatMs(latency.avg)}
             hint={`p95 ${formatMs(latency.p95)}`}
             tone="neutral"
           />
           <StatCard
             icon={Zap}
-            label="Cache Hit Ratio"
+            label={t('observability.stats.cacheHitRatio')}
             value={`${((searchStats.cache_hit_ratio || 0) * 100).toFixed(1)}%`}
-            hint={`hit queries ${formatNumber(searchStats.cache_hit_queries)}`}
+            hint={t('observability.stats.hitQueries', {
+              count: formatNumber(searchStats.cache_hit_queries, i18n.resolvedLanguage),
+            })}
             tone={searchStats.cache_hit_ratio > 0.4 ? 'good' : 'neutral'}
           />
           <StatCard
             icon={Gauge}
-            label="Index Latency"
+            label={t('observability.stats.indexLatency')}
             value={formatMs(indexLatency.avg_ms)}
-            hint={`samples ${formatNumber(indexLatency.samples)}`}
+            hint={t('observability.stats.samples', {
+              count: formatNumber(indexLatency.samples, i18n.resolvedLanguage),
+            })}
             tone={indexLatency.samples > 0 ? 'neutral' : 'warn'}
           />
           <StatCard
             icon={Database}
-            label="Cleanup p95"
+            label={t('observability.stats.cleanupP95')}
             value={formatMs(cleanupLatency.p95)}
-            hint={`slow ${formatNumber(cleanupQueryStats.slow_queries)} (>=${formatMs(cleanupQueryStats.slow_threshold_ms)})`}
+            hint={t('observability.stats.slow', {
+              count: formatNumber(cleanupQueryStats.slow_queries, i18n.resolvedLanguage),
+              threshold: formatMs(cleanupQueryStats.slow_threshold_ms),
+            })}
             tone={cleanupQueryStats.slow_queries > 0 ? 'warn' : 'neutral'}
           />
           <StatCard
             icon={Activity}
-            label="Cleanup Index Hit"
+            label={t('observability.stats.cleanupIndexHit')}
             value={`${((cleanupQueryStats.index_hit_ratio || 0) * 100).toFixed(1)}%`}
-            hint={`full scan ${formatNumber(cleanupQueryStats.full_scan_queries)}`}
+            hint={t('observability.stats.fullScan', {
+              count: formatNumber(cleanupQueryStats.full_scan_queries, i18n.resolvedLanguage),
+            })}
             tone={cleanupQueryStats.index_hit_ratio >= 0.9 ? 'good' : cleanupQueryStats.index_hit_ratio >= 0.5 ? 'neutral' : 'warn'}
           />
         </section>
@@ -620,11 +691,11 @@ export default function ObservabilityPage() {
             >
               <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-[color:var(--palace-ink)]">
                 <Activity size={15} className="text-[color:var(--palace-accent)]" />
-                Search Console
+                {t('observability.searchConsole')}
               </h2>
 
               <label htmlFor="obs-query-input" className={LABEL_CLASS}>
-                Query
+                {t('observability.query')}
               </label>
               <input
                 id="obs-query-input"
@@ -632,13 +703,13 @@ export default function ObservabilityPage() {
                 value={form.query}
                 onChange={(e) => onFieldChange('query', e.target.value)}
                 className={`mb-3 ${INPUT_CLASS}`}
-                placeholder="search terms..."
+                placeholder={t('observability.placeholders.query')}
               />
 
               <div className="mb-3 grid grid-cols-2 gap-2">
                 <div>
                   <label htmlFor="obs-mode-select" className={LABEL_CLASS}>
-                    Mode
+                    {t('observability.mode')}
                   </label>
                   <select
                     id="obs-mode-select"
@@ -649,14 +720,14 @@ export default function ObservabilityPage() {
                   >
                     {MODE_OPTIONS.map((option) => (
                       <option key={option} value={option}>
-                        {option}
+                        {t(`observability.modes.${option}`, { defaultValue: option })}
                       </option>
                     ))}
                   </select>
                 </div>
                 <div>
                   <label htmlFor="obs-session-id-input" className={LABEL_CLASS}>
-                    Session Id
+                    {t('observability.sessionId')}
                   </label>
                   <input
                     id="obs-session-id-input"
@@ -664,7 +735,7 @@ export default function ObservabilityPage() {
                     value={form.sessionId}
                     onChange={(e) => onFieldChange('sessionId', e.target.value)}
                     className={INPUT_CLASS}
-                    placeholder="api-observability"
+                    placeholder={t('observability.placeholders.sessionId')}
                   />
                 </div>
               </div>
@@ -672,7 +743,7 @@ export default function ObservabilityPage() {
               <div className="mb-3 grid grid-cols-2 gap-2">
                 <div>
                   <label htmlFor="obs-max-results-input" className={LABEL_CLASS}>
-                    Max Results
+                    {t('observability.maxResults')}
                   </label>
                   <input
                     id="obs-max-results-input"
@@ -687,7 +758,7 @@ export default function ObservabilityPage() {
                 </div>
                 <div>
                   <label htmlFor="obs-candidate-multiplier-input" className={LABEL_CLASS}>
-                    Candidate x
+                    {t('observability.candidateMultiplier')}
                   </label>
                   <input
                     id="obs-candidate-multiplier-input"
@@ -706,20 +777,20 @@ export default function ObservabilityPage() {
                 <input
                   id="obs-domain-filter-input"
                   name="domain_filter"
-                  aria-label="Domain filter"
+                  aria-label={t('observability.domainFilter')}
                   value={form.domain}
                   onChange={(e) => onFieldChange('domain', e.target.value)}
                   className={INPUT_CLASS}
-                  placeholder="domain filter"
+                  placeholder={t('observability.placeholders.domainFilter')}
                 />
                 <input
                   id="obs-path-prefix-input"
                   name="path_prefix"
-                  aria-label="Path prefix filter"
+                  aria-label={t('observability.pathPrefixFilter')}
                   value={form.pathPrefix}
                   onChange={(e) => onFieldChange('pathPrefix', e.target.value)}
                   className={INPUT_CLASS}
-                  placeholder="path prefix"
+                  placeholder={t('observability.placeholders.pathPrefix')}
                 />
               </div>
 
@@ -727,11 +798,11 @@ export default function ObservabilityPage() {
                 <input
                   id="obs-scope-hint-input"
                   name="scope_hint"
-                  aria-label="Scope hint"
+                  aria-label={t('observability.scopeHint')}
                   value={form.scopeHint}
                   onChange={(e) => onFieldChange('scopeHint', e.target.value)}
                   className={INPUT_CLASS}
-                  placeholder="scope hint (e.g. core://agent)"
+                  placeholder={t('observability.placeholders.scopeHint')}
                 />
               </div>
 
@@ -742,11 +813,11 @@ export default function ObservabilityPage() {
                   type="number"
                   min="0"
                   step="1"
-                  aria-label="Max priority filter"
+                  aria-label={t('observability.maxPriorityFilter')}
                   value={form.maxPriority}
                   onChange={(e) => onFieldChange('maxPriority', e.target.value)}
                   className={INPUT_CLASS}
-                  placeholder="max priority"
+                  placeholder={t('observability.placeholders.maxPriority')}
                 />
                 <label
                   htmlFor="obs-include-session-checkbox"
@@ -760,7 +831,7 @@ export default function ObservabilityPage() {
                     onChange={(e) => onFieldChange('includeSession', e.target.checked)}
                     className="h-4 w-4 rounded border-[color:var(--palace-line)] bg-white text-[color:var(--palace-accent)] focus:ring-[color:var(--palace-accent)]/40"
                   />
-                  session-first
+                  {t('observability.includeSessionFirst')}
                 </label>
               </div>
 
@@ -774,7 +845,7 @@ export default function ObservabilityPage() {
                 ) : (
                   <Search size={14} />
                 )}
-                Run Diagnostic Search
+                {t('observability.runDiagnosticSearch')}
               </button>
 
               {searchError && (
@@ -787,7 +858,7 @@ export default function ObservabilityPage() {
             <div className={PANEL_CLASS}>
               <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-[color:var(--palace-ink)]">
                 <Database size={15} className="text-[color:var(--palace-accent)]" />
-                Runtime Snapshot
+                {t('observability.runtimeSnapshot')}
               </h3>
               <div className="space-y-2 text-xs text-[color:var(--palace-muted)]">
                 <p className="flex items-center gap-2">
@@ -796,32 +867,32 @@ export default function ObservabilityPage() {
                   ) : (
                     <AlertTriangle size={13} className="text-[color:var(--palace-accent-2)]" />
                   )}
-                  status: {summary?.status || 'unknown'}
+                  {t('observability.runtime.status', { value: summary?.status || 'unknown' })}
                 </p>
-                <p>index degraded: {String(Boolean(indexHealth.degraded))}</p>
-                <p>queue depth: {worker.queue_depth ?? '-'}</p>
-                <p>active job: {worker.active_job_id || '-'}</p>
-                <p>cancelling jobs: {worker.cancelling_jobs ?? 0}</p>
-                <p>last worker error: {worker.last_error || '-'}</p>
-                <p>sleep pending: {String(Boolean(worker.sleep_pending))}</p>
-                <p>sleep last reason: {sleepConsolidation.reason || '-'}</p>
-                <p>sm-lite sessions: {smSession.session_count ?? '-'}</p>
-                <p>sm-lite pending events: {smFlush.pending_events ?? '-'}</p>
-                <p>sm-lite degraded: {String(Boolean(smLite.degraded))}</p>
-                <p>sm-lite reason: {smLite.reason || '-'}</p>
-                <p>cleanup queries: {formatNumber(cleanupQueryStats.total_queries)}</p>
-                <p>updated at: {summary?.timestamp || '-'}</p>
+                <p>{t('observability.runtime.indexDegraded', { value: String(Boolean(indexHealth.degraded)) })}</p>
+                <p>{t('observability.runtime.queueDepth', { value: worker.queue_depth ?? '-' })}</p>
+                <p>{t('observability.runtime.activeJob', { value: worker.active_job_id || '-' })}</p>
+                <p>{t('observability.runtime.cancellingJobs', { value: worker.cancelling_jobs ?? 0 })}</p>
+                <p>{t('observability.runtime.lastWorkerError', { value: worker.last_error || '-' })}</p>
+                <p>{t('observability.runtime.sleepPending', { value: String(Boolean(worker.sleep_pending)) })}</p>
+                <p>{t('observability.runtime.sleepLastReason', { value: sleepConsolidation.reason || '-' })}</p>
+                <p>{t('observability.runtime.smLiteSessions', { value: smSession.session_count ?? '-' })}</p>
+                <p>{t('observability.runtime.smLitePendingEvents', { value: smFlush.pending_events ?? '-' })}</p>
+                <p>{t('observability.runtime.smLiteDegraded', { value: String(Boolean(smLite.degraded)) })}</p>
+                <p>{t('observability.runtime.smLiteReason', { value: smLite.reason || '-' })}</p>
+                <p>{t('observability.runtime.cleanupQueries', { value: formatNumber(cleanupQueryStats.total_queries, i18n.resolvedLanguage) })}</p>
+                <p>{t('observability.runtime.updatedAt', { value: summary?.timestamp || '-' })}</p>
               </div>
             </div>
 
             <div className={PANEL_CLASS}>
               <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-[color:var(--palace-ink)]">
                 <Wrench size={15} className="text-[color:var(--palace-accent)]" />
-                Index Task Queue
+                {t('observability.indexTaskQueue')}
               </h3>
               {activeJobLoading && (
                 <p className="mb-2 text-xs text-[color:var(--palace-muted)]">
-                  Loading active job...
+                  {t('observability.job.loadingActive')}
                 </p>
               )}
               {detailJobError && (
@@ -846,21 +917,21 @@ export default function ObservabilityPage() {
                     <article className="mb-3 rounded-xl border border-[color:var(--palace-accent)]/45 bg-[rgba(255,248,238,0.9)] p-3 text-xs text-[color:var(--palace-muted)]">
                       <div className="mb-2 flex flex-wrap items-center gap-2">
                         <Badge tone={viewingActiveJob ? 'good' : 'neutral'}>
-                          {viewingActiveJob ? 'active' : 'detail'}
+                          {viewingActiveJob ? t('observability.job.active') : t('observability.job.detail')}
                         </Badge>
                         <code className="text-[11px] text-[color:var(--palace-accent-2)]">{jobId}</code>
                         <Badge tone={getJobStatusTone(status)}>{status}</Badge>
                         <Badge tone="neutral">{taskType}</Badge>
                       </div>
                       <div className="space-y-1">
-                        <p>reason: {activeJob?.reason || '-'}</p>
-                        <p>memory: {activeJob?.memory_id ?? '-'}</p>
-                        <p>error: {errorText}</p>
-                        <p>cancel reason: {activeJob?.cancel_reason || '-'}</p>
-                        <p>degrade reasons: {degradeReasons || '-'}</p>
-                        <p>requested: {formatDateTime(activeJob?.requested_at)}</p>
-                        <p>started: {formatDateTime(activeJob?.started_at)}</p>
-                        <p>finished: {formatDateTime(activeJob?.finished_at)}</p>
+                        <p>{t('observability.job.reason', { value: activeJob?.reason || '-' })}</p>
+                        <p>{t('observability.job.memory', { value: activeJob?.memory_id ?? '-' })}</p>
+                        <p>{t('observability.job.error', { value: errorText })}</p>
+                        <p>{t('observability.job.cancelReason', { value: activeJob?.cancel_reason || '-' })}</p>
+                        <p>{t('observability.job.degradeReasons', { value: degradeReasons || '-' })}</p>
+                        <p>{t('observability.job.requested', { value: formatDateTime(activeJob?.requested_at, i18n.resolvedLanguage) })}</p>
+                        <p>{t('observability.job.started', { value: formatDateTime(activeJob?.started_at, i18n.resolvedLanguage) })}</p>
+                        <p>{t('observability.job.finished', { value: formatDateTime(activeJob?.finished_at, i18n.resolvedLanguage) })}</p>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button
@@ -870,7 +941,7 @@ export default function ObservabilityPage() {
                           className="inline-flex cursor-pointer items-center gap-1 rounded border border-[color:var(--palace-line)] bg-white/90 px-2 py-1 text-[11px] text-[color:var(--palace-muted)] transition-colors hover:border-[color:var(--palace-accent)] hover:text-[color:var(--palace-ink)] disabled:cursor-not-allowed disabled:opacity-45"
                         >
                           {cancelPending ? <RefreshCw size={12} className="animate-spin" /> : <AlertTriangle size={12} />}
-                          Cancel
+                          {t('observability.job.cancel')}
                         </button>
                         <button
                           type="button"
@@ -879,7 +950,7 @@ export default function ObservabilityPage() {
                           className="inline-flex cursor-pointer items-center gap-1 rounded border border-[color:var(--palace-line)] bg-white/90 px-2 py-1 text-[11px] text-[color:var(--palace-muted)] transition-colors hover:border-[color:var(--palace-accent)] hover:text-[color:var(--palace-ink)] disabled:cursor-not-allowed disabled:opacity-45"
                         >
                           {retryPending ? <RefreshCw size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                          Retry
+                          {t('observability.job.retry')}
                         </button>
                         {inspectedJobId && (
                           <button
@@ -887,7 +958,7 @@ export default function ObservabilityPage() {
                             onClick={() => setInspectedJobId(null)}
                             className="inline-flex cursor-pointer items-center gap-1 rounded border border-[color:var(--palace-line)] bg-white/90 px-2 py-1 text-[11px] text-[color:var(--palace-muted)] transition-colors hover:border-[color:var(--palace-accent)] hover:text-[color:var(--palace-ink)]"
                           >
-                            {activeJobId ? 'Back to Active' : 'Clear Detail'}
+                            {activeJobId ? t('observability.job.backToActive') : t('observability.job.clearDetail')}
                           </button>
                         )}
                       </div>
@@ -897,7 +968,7 @@ export default function ObservabilityPage() {
               )}
               {recentJobs.length === 0 ? (
                 <p className="text-xs text-[color:var(--palace-muted)]">
-                  No recent index jobs.
+                  {t('observability.job.noRecentJobs')}
                 </p>
               ) : (
                 <div className="space-y-2">
@@ -922,12 +993,12 @@ export default function ObservabilityPage() {
                           <Badge tone="neutral">{taskType}</Badge>
                         </div>
                         <div className="space-y-1">
-                          <p>reason: {job?.reason || '-'}</p>
-                          <p>memory: {job?.memory_id ?? '-'}</p>
-                          <p>error: {errorText}</p>
-                          <p>requested: {formatDateTime(job?.requested_at)}</p>
-                          <p>started: {formatDateTime(job?.started_at)}</p>
-                          <p>finished: {formatDateTime(job?.finished_at)}</p>
+                          <p>{t('observability.job.reason', { value: job?.reason || '-' })}</p>
+                          <p>{t('observability.job.memory', { value: job?.memory_id ?? '-' })}</p>
+                          <p>{t('observability.job.error', { value: errorText })}</p>
+                          <p>{t('observability.job.requested', { value: formatDateTime(job?.requested_at, i18n.resolvedLanguage) })}</p>
+                          <p>{t('observability.job.started', { value: formatDateTime(job?.started_at, i18n.resolvedLanguage) })}</p>
+                          <p>{t('observability.job.finished', { value: formatDateTime(job?.finished_at, i18n.resolvedLanguage) })}</p>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button
@@ -937,7 +1008,7 @@ export default function ObservabilityPage() {
                             className="inline-flex cursor-pointer items-center gap-1 rounded border border-[color:var(--palace-line)] bg-white/90 px-2 py-1 text-[11px] text-[color:var(--palace-muted)] transition-colors hover:border-[color:var(--palace-accent)] hover:text-[color:var(--palace-ink)] disabled:cursor-not-allowed disabled:opacity-45"
                           >
                             {cancelPending ? <RefreshCw size={12} className="animate-spin" /> : <AlertTriangle size={12} />}
-                            Cancel
+                            {t('observability.job.cancel')}
                           </button>
                           <button
                             type="button"
@@ -946,14 +1017,14 @@ export default function ObservabilityPage() {
                             className="inline-flex cursor-pointer items-center gap-1 rounded border border-[color:var(--palace-line)] bg-white/90 px-2 py-1 text-[11px] text-[color:var(--palace-muted)] transition-colors hover:border-[color:var(--palace-accent)] hover:text-[color:var(--palace-ink)] disabled:cursor-not-allowed disabled:opacity-45"
                           >
                             {retryPending ? <RefreshCw size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                            Retry
+                            {t('observability.job.retry')}
                           </button>
                           <button
                             type="button"
                             onClick={() => setInspectedJobId(jobId)}
                             className="inline-flex cursor-pointer items-center gap-1 rounded border border-[color:var(--palace-line)] bg-white/90 px-2 py-1 text-[11px] text-[color:var(--palace-muted)] transition-colors hover:border-[color:var(--palace-accent)] hover:text-[color:var(--palace-ink)]"
                           >
-                            Inspect
+                            {t('observability.job.inspect')}
                           </button>
                         </div>
                       </article>
@@ -965,7 +1036,7 @@ export default function ObservabilityPage() {
 
             {modeBreakdown.length > 0 && (
               <div className={PANEL_CLASS}>
-                <h3 className="mb-3 text-sm font-semibold text-[color:var(--palace-ink)]">Mode Breakdown</h3>
+                <h3 className="mb-3 text-sm font-semibold text-[color:var(--palace-ink)]">{t('observability.breakdown.mode')}</h3>
                 <div className="flex flex-wrap gap-2">
                   {modeBreakdown.map(([mode, count]) => (
                     <Badge key={mode} tone="neutral">
@@ -978,7 +1049,7 @@ export default function ObservabilityPage() {
 
             {intentBreakdown.length > 0 && (
               <div className={PANEL_CLASS}>
-                <h3 className="mb-3 text-sm font-semibold text-[color:var(--palace-ink)]">Intent Breakdown</h3>
+                <h3 className="mb-3 text-sm font-semibold text-[color:var(--palace-ink)]">{t('observability.breakdown.intent')}</h3>
                 <div className="flex flex-wrap gap-2">
                   {intentBreakdown.map(([intent, count]) => (
                     <Badge key={intent} tone="neutral">
@@ -991,7 +1062,7 @@ export default function ObservabilityPage() {
 
             {strategyBreakdown.length > 0 && (
               <div className={PANEL_CLASS}>
-                <h3 className="mb-3 text-sm font-semibold text-[color:var(--palace-ink)]">Strategy Hits</h3>
+                <h3 className="mb-3 text-sm font-semibold text-[color:var(--palace-ink)]">{t('observability.breakdown.strategy')}</h3>
                 <div className="flex flex-wrap gap-2">
                   {strategyBreakdown.map(([strategy, count]) => (
                     <Badge key={strategy} tone="neutral">
@@ -1005,33 +1076,41 @@ export default function ObservabilityPage() {
 
           <div className="space-y-4">
             <div className={PANEL_CLASS}>
-              <h2 className="mb-3 text-sm font-semibold text-[color:var(--palace-ink)]">Search Diagnostics</h2>
+              <h2 className="mb-3 text-sm font-semibold text-[color:var(--palace-ink)]">{t('observability.searchDiagnostics')}</h2>
               {!searchResult ? (
                 <p className="text-sm text-[color:var(--palace-muted)]">
-                  Run a search to inspect latency, degrade reasons, and ranked snippets.
+                  {t('observability.noSearchRun')}
                 </p>
               ) : (
                 <div className="space-y-3 text-xs text-[color:var(--palace-muted)]">
                   <div className="flex flex-wrap gap-2">
-                    <Badge tone="neutral">latency {formatMs(searchResult.latency_ms)}</Badge>
-                    <Badge tone="neutral">mode {searchResult.mode_applied}</Badge>
+                    <Badge tone="neutral">{t('observability.diagnostics.latency', { value: formatMs(searchResult.latency_ms) })}</Badge>
+                    <Badge tone="neutral">{t('observability.diagnostics.mode', { value: searchResult.mode_applied })}</Badge>
                     <Badge tone="neutral">
-                      intent {searchResult.intent_applied || searchResult.intent || 'unknown'}
+                      {t('observability.diagnostics.intent', {
+                        value: searchResult.intent_applied || searchResult.intent || 'unknown',
+                      })}
                     </Badge>
                     <Badge tone="neutral">
-                      strategy {searchResult.strategy_template_applied || searchResult.strategy_template || searchResult.intent_profile?.strategy_template || 'default'}
+                      {t('observability.diagnostics.strategy', {
+                        value: searchResult.strategy_template_applied || searchResult.strategy_template || searchResult.intent_profile?.strategy_template || 'default',
+                      })}
                     </Badge>
                     <Badge tone={searchResult.degraded ? 'warn' : 'good'}>
-                      degraded {String(Boolean(searchResult.degraded))}
+                      {t('observability.diagnostics.degraded', { value: String(Boolean(searchResult.degraded)) })}
                     </Badge>
                     <Badge tone="neutral">
-                      counts s:{searchResult.counts?.session ?? 0} g:{searchResult.counts?.global ?? 0} r:{searchResult.counts?.returned ?? 0}
+                      {t('observability.diagnostics.counts', {
+                        session: searchResult.counts?.session ?? 0,
+                        global: searchResult.counts?.global ?? 0,
+                        returned: searchResult.counts?.returned ?? 0,
+                      })}
                     </Badge>
                   </div>
                   {Array.isArray(searchResult.degrade_reasons) && searchResult.degrade_reasons.length > 0 && (
                     <div className="rounded-lg border border-[rgba(198,165,126,0.55)] bg-[rgba(240,230,215,0.78)] p-3">
                       <div className="mb-2 text-[11px] uppercase tracking-[0.14em] text-[color:var(--palace-accent-2)]">
-                        degrade reasons
+                        {t('observability.diagnostics.degradeReasons')}
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {searchResult.degrade_reasons.map((reason) => (
@@ -1050,12 +1129,12 @@ export default function ObservabilityPage() {
               {searching && (
                 <div className="flex items-center gap-2 rounded-lg border border-[color:var(--palace-line)] bg-[rgba(255,250,244,0.86)] px-3 py-2 text-sm text-[color:var(--palace-muted)]">
                   <RefreshCw size={14} className="animate-spin" />
-                  running diagnostic query...
+                  {t('observability.runningQuery')}
                 </div>
               )}
               {!searching && searchResult?.results?.length === 0 && (
                 <div className="rounded-lg border border-[color:var(--palace-line)] bg-[rgba(255,250,244,0.86)] px-3 py-3 text-sm text-[color:var(--palace-muted)]">
-                  No matched snippets.
+                  {t('observability.noMatchedSnippets')}
                 </div>
               )}
               {(searchResult?.results || []).map((item, idx) => (

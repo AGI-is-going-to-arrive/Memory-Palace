@@ -22,27 +22,22 @@
   - 面向想快速搞懂 skill + MCP 关系的人
   - 重点回答“哪些客户端现在能怎么用、哪些地方还有边界”
 - `MEMORY_PALACE_SKILLS.md`
-  - 面向维护者和深度使用者
-  - 重点讲 canonical bundle、variants、设计原则和维护边界
+  - 面向想看完整设计的人
+  - 重点讲 canonical bundle、variants 和工作流边界
 - `CLI_COMPATIBILITY_GUIDE.md`
   - 面向多 CLI 接入场景
   - 重点看 Claude / Gemini / Codex / OpenCode 的差异
 
 ---
 
-## 本地验证产物怎么理解
+## 本地验证报告
 
 - `TRIGGER_SMOKE_REPORT.md`
-  - 运行 `python scripts/evaluate_memory_palace_skill.py` 后在本地生成（默认不提交到仓库）
+  - 运行 `python scripts/evaluate_memory_palace_skill.py` 后生成
 - `MCP_LIVE_E2E_REPORT.md`
-  - 运行 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py` 后在本地生成（默认不提交到仓库）
+  - 运行 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py` 后生成
 
-它们的定位是：
-
-- **报告当前机器上的验证结果**
-- **帮助你本地复核**
-- **默认不当成主说明入口文档**
-- **默认被 `.gitignore` 排除，公开仓库里看不到也正常**
+它们主要用来帮你复核当前环境的接通结果，不是主入口文档。
 
 ---
 

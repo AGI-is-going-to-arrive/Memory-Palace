@@ -17,8 +17,8 @@
     },
     {
       "path": "backend/tests/datasets/raw/msmarco_passages/msmarco_qrels_dev.tsv",
-      "sha256": "a1befe0a99974b166b9e09408ccccae471fda5df4953fd6dd86ce4caac691752",
-      "size_bytes": 1201626
+      "sha256": "7b9085a7fa87f6e7f15d73074eb2ce5c77628c80711513ae8a21f42e97e2f729",
+      "size_bytes": 1142353
     }
   ],
   "processed_files": {

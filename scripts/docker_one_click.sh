@@ -258,6 +258,10 @@ apply_profile_runtime_overrides() {
     "COMPACT_GIST_LLM_API_BASE"
     "COMPACT_GIST_LLM_API_KEY"
     "COMPACT_GIST_LLM_MODEL"
+    "INTENT_LLM_ENABLED"
+    "INTENT_LLM_API_BASE"
+    "INTENT_LLM_API_KEY"
+    "INTENT_LLM_MODEL"
     "MCP_API_KEY"
     "MCP_API_KEY_ALLOW_INSECURE_LOCAL"
   )
@@ -273,6 +277,27 @@ apply_profile_runtime_overrides() {
   if [[ "${selected_profile}" == "c" || "${selected_profile}" == "d" ]]; then
     upsert_env_value_in_file "${env_file}" "RETRIEVAL_EMBEDDING_BACKEND" "api"
     echo "[override] RETRIEVAL_EMBEDDING_BACKEND=api forced for local profile ${selected_profile} runtime injection."
+
+    if [[ -z "${RETRIEVAL_EMBEDDING_API_BASE:-}" && -n "${ROUTER_API_BASE:-}" ]]; then
+      upsert_env_value_in_file "${env_file}" "RETRIEVAL_EMBEDDING_API_BASE" "${ROUTER_API_BASE}"
+      echo "[override] RETRIEVAL_EMBEDDING_API_BASE copied from ROUTER_API_BASE for local profile ${selected_profile} runtime injection."
+    fi
+    if [[ -z "${RETRIEVAL_EMBEDDING_API_KEY:-}" && -n "${ROUTER_API_KEY:-}" ]]; then
+      upsert_env_value_in_file "${env_file}" "RETRIEVAL_EMBEDDING_API_KEY" "${ROUTER_API_KEY}"
+      echo "[override] RETRIEVAL_EMBEDDING_API_KEY copied from ROUTER_API_KEY for local profile ${selected_profile} runtime injection."
+    fi
+    if [[ -z "${RETRIEVAL_EMBEDDING_MODEL:-}" && -n "${ROUTER_EMBEDDING_MODEL:-}" ]]; then
+      upsert_env_value_in_file "${env_file}" "RETRIEVAL_EMBEDDING_MODEL" "${ROUTER_EMBEDDING_MODEL}"
+      echo "[override] RETRIEVAL_EMBEDDING_MODEL copied from ROUTER_EMBEDDING_MODEL for local profile ${selected_profile} runtime injection."
+    fi
+    if [[ -z "${RETRIEVAL_RERANKER_API_BASE:-}" && -n "${ROUTER_API_BASE:-}" ]]; then
+      upsert_env_value_in_file "${env_file}" "RETRIEVAL_RERANKER_API_BASE" "${ROUTER_API_BASE}"
+      echo "[override] RETRIEVAL_RERANKER_API_BASE copied from ROUTER_API_BASE for local profile ${selected_profile} runtime injection."
+    fi
+    if [[ -z "${RETRIEVAL_RERANKER_API_KEY:-}" && -n "${ROUTER_API_KEY:-}" ]]; then
+      upsert_env_value_in_file "${env_file}" "RETRIEVAL_RERANKER_API_KEY" "${ROUTER_API_KEY}"
+      echo "[override] RETRIEVAL_RERANKER_API_KEY copied from ROUTER_API_KEY for local profile ${selected_profile} runtime injection."
+    fi
   fi
 }
 

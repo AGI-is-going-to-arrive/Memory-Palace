@@ -1,7 +1,8 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../../lib/api';
+import i18n, { LOCALE_STORAGE_KEY } from '../../i18n';
 import ObservabilityPage from './ObservabilityPage';
 
 vi.mock('../../lib/api', () => ({
@@ -69,8 +70,10 @@ describe('ObservabilityPage', () => {
     return card;
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    window.localStorage?.removeItem?.(LOCALE_STORAGE_KEY);
+    await i18n.changeLanguage('en');
     api.getObservabilitySummary.mockResolvedValue(buildSummary());
     api.getIndexJob.mockResolvedValue({ job: null });
     api.retryIndexJob.mockResolvedValue({ job_id: 'retry-default' });
@@ -79,6 +82,22 @@ describe('ObservabilityPage', () => {
     api.triggerMemoryReindex.mockResolvedValue({ job_id: 'reindex-default' });
     api.triggerSleepConsolidation.mockResolvedValue({ job_id: 'sleep-default' });
     api.cancelIndexJob.mockResolvedValue({});
+  });
+
+  it('shows translated validation errors in zh-CN for invalid integer inputs', async () => {
+    const user = userEvent.setup();
+    await i18n.changeLanguage('zh-CN');
+    render(<ObservabilityPage />);
+
+    const maxResultsInput = await screen.findByLabelText(i18n.t('observability.maxResults'));
+    await user.clear(maxResultsInput);
+    await user.type(maxResultsInput, '999');
+    await user.click(screen.getByRole('button', { name: i18n.t('observability.runDiagnosticSearch') }));
+
+    expect(
+      await screen.findByText((content) => content.includes('最大结果数') && content.includes('[1, 50]'))
+    ).toBeInTheDocument();
+    expect(api.runObservabilitySearch).not.toHaveBeenCalled();
   });
 
   it('uses unified retry endpoint when retry API is available', async () => {
@@ -107,6 +126,43 @@ describe('ObservabilityPage', () => {
     expect(api.triggerIndexRebuild).not.toHaveBeenCalled();
     expect(api.triggerSleepConsolidation).not.toHaveBeenCalled();
     expect(await screen.findByText(/Retry requested/i)).toBeInTheDocument();
+  });
+
+  it('does not refetch summary when only the language changes', async () => {
+    render(<ObservabilityPage />);
+
+    await screen.findByText('Search Console');
+    const initialCalls = api.getObservabilitySummary.mock.calls.length;
+    expect(initialCalls).toBeGreaterThan(0);
+
+    await act(async () => {
+      await i18n.changeLanguage('zh-CN');
+    });
+
+    await screen.findByText('搜索控制台');
+    expect(api.getObservabilitySummary.mock.calls.length).toBe(initialCalls);
+  });
+
+  it('relocalizes visible errors and untouched default query when only the language changes', async () => {
+    api.getObservabilitySummary.mockRejectedValueOnce({ message: 'Network Error' });
+    api.extractApiError.mockImplementation((error, fallback = 'Request failed') => {
+      const locale = i18n.resolvedLanguage || i18n.language || 'en';
+      return `${locale}:${error?.message || fallback}`;
+    });
+
+    render(<ObservabilityPage />);
+
+    expect(await screen.findByText('en:Network Error')).toBeInTheDocument();
+    expect(screen.getByLabelText('Query')).toHaveValue('memory flush queue');
+    const initialCalls = api.getObservabilitySummary.mock.calls.length;
+
+    await act(async () => {
+      await i18n.changeLanguage('zh-CN');
+    });
+
+    expect(api.getObservabilitySummary.mock.calls.length).toBe(initialCalls);
+    expect(await screen.findByText('zh-CN:Network Error')).toBeInTheDocument();
+    expect(screen.getByLabelText('查询词')).toHaveValue(i18n.t('observability.defaultQuery'));
   });
 
   it('falls back to old backend endpoint when retry API is unsupported', async () => {
@@ -347,7 +403,7 @@ describe('ObservabilityPage', () => {
     await user.click(screen.getByRole('button', { name: /Run Diagnostic Search/i }));
 
     expect(api.runObservabilitySearch).not.toHaveBeenCalled();
-    expect(await screen.findByText(/max priority must be a non-negative integer/i)).toBeInTheDocument();
+    expect(await screen.findByText(/max priority filter must be a non-negative integer/i)).toBeInTheDocument();
   });
 
   it('sends max priority as an integer filter', async () => {

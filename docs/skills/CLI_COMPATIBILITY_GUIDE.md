@@ -2,10 +2,10 @@
 
 ## Summary
 
-- `Claude Code`：在当前工作区跑完 `sync/install` 后，可获得 **repo-local skill 自动发现** + **workspace MCP 直连**
-- `Gemini CLI`：在当前工作区跑完 `sync/install` 后，可获得 **repo-local skill 自动发现** + **workspace MCP 直连**
-- `Codex CLI`：在当前工作区跑完 `sync` 后，可获得 **repo-local skill 自动发现**；`MCP` 仍以 **user-scope 注册** 为主
-- `OpenCode`：在当前工作区跑完 `sync` 后，可获得 **repo-local skill 自动发现**；`MCP` 仍以 **user-scope 注册** 为主
+- `Claude Code`：完成 `sync/install` 后，可获得 **repo-local skill 自动发现** + **workspace MCP 直连**
+- `Gemini CLI`：完成 `sync/install` 后，可获得 **repo-local skill 自动发现** + **workspace MCP 直连**
+- `Codex CLI`：完成 `sync` 后，可获得 **repo-local skill 自动发现**；`MCP` 仍以 **user-scope 注册** 为主
+- `OpenCode`：完成 `sync` 后，可获得 **repo-local skill 自动发现**；`MCP` 仍以 **user-scope 注册** 为主
 - `Cursor` / `.agent`：当前仍以 mirror 结构兼容为主，未提升为统一直连入口
 - 当前设计已对齐 `Anthropic skill-creator` 的核心要求：`frontmatter`、`trigger description`、`references`、`eval/smoke`
 
@@ -28,18 +28,18 @@
 
 ## Current Local Baseline After Sync / Install
 
-公开仓库默认只带 canonical bundle；你执行 `sync_memory_palace_skill.py` / `install_skill.py` 之后，本地工作区通常会出现这些入口：
+执行 `sync_memory_palace_skill.py` / `install_skill.py` 之后，通常会出现这些入口：
 
 - `Claude Code`
-  - `.claude/skills/memory-palace/`（本地生成）
-  - `.mcp.json`（workspace 安装后生成）
+  - `.claude/skills/memory-palace/`
+  - `.mcp.json`
 - `Codex CLI`
-  - `.codex/skills/memory-palace/`（本地生成）
+  - `.codex/skills/memory-palace/`
 - `OpenCode`
-  - `.opencode/skills/memory-palace/`（本地生成）
+  - `.opencode/skills/memory-palace/`
 - `Gemini CLI`
-  - `.gemini/skills/memory-palace/`（本地生成）
-  - `.gemini/settings.json`（workspace 安装后生成）
+  - `.gemini/skills/memory-palace/`
+  - `.gemini/settings.json`
 
 对应的 canonical skill 真源是：
 
@@ -47,7 +47,14 @@
 docs/skills/memory-palace/
 ```
 
-> 注意：`docs/skills/memory-palace/` 是仓库里稳定存在的公开路径；`.claude/.codex/.gemini/.opencode/...`、`.mcp.json` 等隐藏目录/配置默认属于你本地工作区产物，`.gitignore` 已默认排除。
+> 注意：`docs/skills/memory-palace/` 是仓库里稳定存在的公开路径；`.claude/.codex/.gemini/.opencode/...`、`.mcp.json` 等隐藏目录/配置是在安装后生成的本地产物。
+>
+> **Windows 前提说明**：
+>
+> - 当前 repo-local MCP wrapper 实际是 `scripts/run_memory_palace_mcp_stdio.sh`
+> - `install_skill.py` 为 Claude / Codex / Gemini / OpenCode 生成的本地 MCP 配置也都调用 `bash` 风格命令
+> - 所以原生 Windows 如果没有 **Git Bash** 或 **WSL**，不要直接照抄 `/bin/zsh` / `bash` 版本的示例
+> - 当前更稳妥的口径是：在 Git Bash / WSL 中接这条本地 stdio 链，或使用 Docker / `pwsh-in-docker` 做等效验证
 
 ## install_skill.py 现在负责什么
 
@@ -142,7 +149,7 @@ python scripts/install_skill.py \
 
 结论：
 
-- **先在当前工作区跑一次 workspace 安装，再打开当前仓库即可直接用**
+- **先跑一次 workspace 安装，再打开当前仓库即可直接用**
 - 如果要带去别的仓库，再补 `--scope user --with-mcp`
 
 ### Gemini CLI
@@ -235,9 +242,7 @@ python ../scripts/evaluate_memory_palace_mcp_e2e.py
 docs/skills/MCP_LIVE_E2E_REPORT.md
 ```
 
-这两份报告默认建议留在你自己的机器上，用来复核当前机器的结果，不作为主入口文档。
-
-它们默认也被 `.gitignore` 排除，所以公开 GitHub 仓库里通常不会带上这两份文件。
+这两份报告主要用来补做验证，不作为主入口文档。
 
 ## 正向 / 反向 prompt
 
@@ -263,5 +268,5 @@ For this repository's memory-palace skill, answer with exactly three bullets:
 
 ## 一句话口径
 
-- `Claude/Gemini`：当前工作区跑完 workspace 安装后即可获得 **repo-local 直连**
-- `Codex/OpenCode`：当前工作区跑完 sync 后即可获得 **repo-local 自动发现**，但要做到“真能用当前仓库 MCP”，仍应补 **user-scope MCP 注册**
+- `Claude/Gemini`：跑完 workspace 安装后即可获得 **repo-local 直连**
+- `Codex/OpenCode`：跑完 sync 后即可获得 **repo-local 自动发现**，但要做到“真能用当前仓库 MCP”，仍应补 **user-scope MCP 注册**

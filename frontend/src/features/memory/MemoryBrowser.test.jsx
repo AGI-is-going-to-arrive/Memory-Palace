@@ -1,9 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 
 import MemoryBrowser from './MemoryBrowser';
+import i18n, { LOCALE_STORAGE_KEY } from '../../i18n';
 import * as api from '../../lib/api';
 
 vi.mock('../../lib/api', () => ({
@@ -72,8 +73,10 @@ function RaceHarness() {
 }
 
 describe('MemoryBrowser', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    window.localStorage?.removeItem?.(LOCALE_STORAGE_KEY);
+    await i18n.changeLanguage('zh-CN');
     api.getMemoryNode.mockResolvedValue(ROOT_PAYLOAD);
     api.createMemoryNode.mockResolvedValue({ success: true, created: true, path: 'created/path', domain: 'core', uri: 'core://created/path' });
     api.updateMemoryNode.mockResolvedValue({ success: true, updated: true });
@@ -90,10 +93,10 @@ describe('MemoryBrowser', () => {
 
     renderMemoryBrowser('/memory?domain=core');
 
-    const storeButton = await screen.findByRole('button', { name: /Store Memory/i });
+    const storeButton = await screen.findByRole('button', { name: i18n.t('memory.storeMemory') });
     await user.click(storeButton);
 
-    await screen.findByText(/Skipped: write_guard blocked create_node/i);
+    await screen.findByText(i18n.t('memory.feedback.createGuardSkipped'));
     expect(api.createMemoryNode).toHaveBeenCalledTimes(1);
     expect(api.getMemoryNode).toHaveBeenCalledTimes(1);
     expect(
@@ -112,16 +115,16 @@ describe('MemoryBrowser', () => {
 
     renderMemoryBrowser('/memory?domain=core&path=path-a');
 
-    const editButton = await screen.findByRole('button', { name: /Edit/i });
+    const editButton = await screen.findByRole('button', { name: i18n.t('common.actions.edit') });
     await user.click(editButton);
 
     const textarea = await screen.findByDisplayValue('old content');
     await user.clear(textarea);
     await user.type(textarea, 'old content changed');
-    await user.click(screen.getByRole('button', { name: /Save/i }));
+    await user.click(screen.getByRole('button', { name: i18n.t('common.actions.save') }));
 
-    await screen.findByText(/Skipped: write_guard blocked update_node/i);
-    expect(screen.queryByText('Memory updated.')).not.toBeInTheDocument();
+    await screen.findByText(i18n.t('memory.feedback.updateGuardSkipped'));
+    expect(screen.queryByText(i18n.t('memory.feedback.memoryUpdated'))).not.toBeInTheDocument();
     expect(api.updateMemoryNode).toHaveBeenCalledTimes(1);
     expect(api.getMemoryNode).toHaveBeenCalledTimes(1);
   });
@@ -155,5 +158,43 @@ describe('MemoryBrowser', () => {
       expect(screen.queryByText('stale content A')).not.toBeInTheDocument();
     });
     expect(screen.getByText('fresh content B')).toBeInTheDocument();
+  });
+
+  it('refreshes the default conversation when language changes before the user edits it', async () => {
+    await i18n.changeLanguage('en');
+    renderMemoryBrowser('/memory?domain=core');
+
+    const composer = await screen.findByPlaceholderText('Paste LLM / agent dialogue...');
+    const englishDefault = i18n.getFixedT('en')('memory.defaultConversation');
+    const chineseDefault = i18n.getFixedT('zh-CN')('memory.defaultConversation');
+
+    expect(composer).toHaveValue(englishDefault);
+
+    await act(async () => {
+      await i18n.changeLanguage('zh-CN');
+    });
+
+    await waitFor(() => {
+      expect(composer).toHaveValue(chineseDefault);
+    });
+  });
+
+  it('does not refetch the current node when only the language changes', async () => {
+    api.getMemoryNode.mockResolvedValueOnce(makeNodePayload('path-a', 'stable content'));
+
+    renderMemoryBrowser('/memory?domain=core&path=path-a');
+
+    await screen.findByText('path-a');
+    const initialCalls = api.getMemoryNode.mock.calls.length;
+    expect(initialCalls).toBe(1);
+
+    await act(async () => {
+      await i18n.changeLanguage('en');
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText('path-a').length).toBeGreaterThan(0);
+    });
+    expect(api.getMemoryNode.mock.calls.length).toBe(initialCalls);
   });
 });

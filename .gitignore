@@ -28,7 +28,9 @@ backups/
 assets/
 
 # Python
+.venv
 .venv/
+backend/.venv
 **/.venv/
 __pycache__/
 *.py[cod]
@@ -40,6 +42,7 @@ backend/.pytest_cache/
 # Frontend artifacts
 frontend/node_modules/
 frontend/dist/
+frontend/.venv
 frontend/.venv/
 frontend/src/*.tmp.test.jsx
 
@@ -67,8 +70,6 @@ backend/tests/benchmark_results.md
 docs/images/IMAGE_PROMPTS_LOCAL.md
 
 # Generated benchmark outputs (keep local, do not track)
-backend/tests/benchmark/baseline_manifest.md
-backend/tests/benchmark/thresholds_v1.json
 backend/tests/benchmark/benchmark_results_*.md
 backend/tests/benchmark/profile_*.json
 backend/tests/benchmark/profile_*.md

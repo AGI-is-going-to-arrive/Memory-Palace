@@ -1,0 +1,28 @@
+{
+  "version": "v1",
+  "frozen_source": "backend/tests/benchmark_results.md",
+  "frozen_at_utc": "2026-02-17T23:16:01Z",
+  "profile_a": {
+    "enabled": true
+  },
+  "profile_b": {
+    "enabled": true
+  },
+  "profile_cd": {
+    "enabled": true,
+    "p95_ms_lt": 2000
+  },
+  "global": {
+    "degrade_rate_lt": 0.05
+  },
+  "write_guard": {
+    "precision_gte": 0.9,
+    "recall_gte": 0.85
+  },
+  "intent": {
+    "accuracy_gte": 0.8
+  },
+  "gist": {
+    "rouge_l_gte": 0.4
+  }
+}

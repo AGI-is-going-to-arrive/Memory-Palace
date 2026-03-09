@@ -1,8 +1,9 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { ShieldCheck, Database, LibraryBig, Feather, Eye } from 'lucide-react';
+import { ShieldCheck, Database, LibraryBig, Feather, Eye, Languages } from 'lucide-react';
 import clsx from 'clsx';
 import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 
 import ReviewPage from './features/review/ReviewPage';
 import MemoryBrowser from './features/memory/MemoryBrowser';
@@ -15,6 +16,7 @@ import {
   getMaintenanceAuthState,
   saveStoredMaintenanceAuth,
 } from './lib/api';
+import { CHINESE_LOCALE, DEFAULT_LOCALE } from './i18n';
 
 function NavItem({ to, icon: Icon, label }) {
   return (
@@ -47,10 +49,12 @@ function NavItem({ to, icon: Icon, label }) {
 }
 
 function AuthControls({ authState, onSetApiKey, onClearApiKey }) {
+  const { t } = useTranslation();
+
   if (authState?.source === 'runtime') {
     return (
       <div className="hidden md:flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-700 shadow-sm">
-        Runtime key active
+        {t('app.auth.runtimeBadge')}
       </div>
     );
   }
@@ -60,24 +64,57 @@ function AuthControls({ authState, onSetApiKey, onClearApiKey }) {
       <button
         type="button"
         onClick={onSetApiKey}
+        data-testid="auth-set-api-key"
         className="rounded-full border border-white/40 bg-white/40 px-3 py-2 text-xs font-medium text-[color:var(--palace-ink)] backdrop-blur-md transition hover:bg-white/60"
       >
-        {authState ? 'Update API key' : 'Set API key'}
+        {authState ? t('app.auth.updateApiKey') : t('app.auth.setApiKey')}
       </button>
       {authState ? (
         <button
           type="button"
           onClick={onClearApiKey}
+          data-testid="auth-clear-api-key"
           className="rounded-full border border-white/30 bg-white/20 px-3 py-2 text-xs font-medium text-[color:var(--palace-muted)] backdrop-blur-md transition hover:bg-white/40 hover:text-[color:var(--palace-ink)]"
         >
-          Clear key
+          {t('app.auth.clearKey')}
         </button>
       ) : null}
     </div>
   );
 }
 
+function LanguageToggle() {
+  const { t, i18n } = useTranslation();
+  const currentLocale = i18n.resolvedLanguage || DEFAULT_LOCALE;
+  const nextLocale = currentLocale === DEFAULT_LOCALE ? CHINESE_LOCALE : DEFAULT_LOCALE;
+  const nextLabel = nextLocale === CHINESE_LOCALE
+    ? t('common.language.chinese')
+    : t('common.language.english');
+  const ariaLabel = nextLocale === CHINESE_LOCALE
+    ? t('common.language.switchToChinese')
+    : t('common.language.switchToEnglish');
+
+  const handleToggle = React.useCallback(() => {
+    void i18n.changeLanguage(nextLocale);
+  }, [i18n, nextLocale]);
+
+  return (
+    <button
+      type="button"
+      onClick={handleToggle}
+      data-testid="language-toggle"
+      aria-label={ariaLabel}
+      title={ariaLabel}
+      className="inline-flex items-center gap-2 rounded-full border border-white/40 bg-white/40 px-3 py-2 text-xs font-medium text-[color:var(--palace-ink)] backdrop-blur-md transition hover:bg-white/60"
+    >
+      <Languages size={14} />
+      <span>{nextLabel}</span>
+    </button>
+  );
+}
+
 function Layout({ authState, onSetApiKey, onClearApiKey }) {
+  const { t } = useTranslation();
   const routesKey = authState
     ? `${authState.source}:${authState.mode}:${authState.key}`
     : 'no-auth';
@@ -97,7 +134,7 @@ function Layout({ authState, onSetApiKey, onClearApiKey }) {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[linear-gradient(135deg,var(--palace-accent),var(--palace-accent-2))] text-white shadow-md">
               <LibraryBig size={18} />
             </div>
-            <span className="font-display text-lg font-semibold tracking-wide text-[color:var(--palace-ink)]">Memory Palace</span>
+            <span className="font-display text-lg font-semibold tracking-wide text-[color:var(--palace-ink)]">{t('common.appName')}</span>
           </motion.div>
 
           <motion.nav
@@ -105,17 +142,20 @@ function Layout({ authState, onSetApiKey, onClearApiKey }) {
             animate={{ opacity: 1, y: 0 }}
             className="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto rounded-full border border-white/30 bg-white/20 p-1.5 backdrop-blur-xl shadow-[0_8px_32px_rgba(179,133,79,0.05)] scrollbar-hide"
           >
-            <NavItem to="/memory" icon={Database} label="Memory" />
-            <NavItem to="/review" icon={ShieldCheck} label="Review" />
-            <NavItem to="/maintenance" icon={Feather} label="Maintenance" />
-            <NavItem to="/observability" icon={Eye} label="Observability" />
+            <NavItem to="/memory" icon={Database} label={t('app.nav.memory')} />
+            <NavItem to="/review" icon={ShieldCheck} label={t('app.nav.review')} />
+            <NavItem to="/maintenance" icon={Feather} label={t('app.nav.maintenance')} />
+            <NavItem to="/observability" icon={Eye} label={t('app.nav.observability')} />
           </motion.nav>
 
-          <AuthControls
-            authState={authState}
-            onSetApiKey={onSetApiKey}
-            onClearApiKey={onClearApiKey}
-          />
+          <div className="flex items-center gap-2">
+            <LanguageToggle />
+            <AuthControls
+              authState={authState}
+              onSetApiKey={onSetApiKey}
+              onClearApiKey={onClearApiKey}
+            />
+          </div>
         </div>
       </div>
 
@@ -139,22 +179,27 @@ function Layout({ authState, onSetApiKey, onClearApiKey }) {
 }
 
 function App() {
+  const { t, i18n } = useTranslation();
   const [authState, setAuthState] = React.useState(() => getMaintenanceAuthState());
+
+  React.useEffect(() => {
+    document.title = t('app.documentTitle');
+  }, [i18n.resolvedLanguage, t]);
 
   const handleSetApiKey = React.useCallback(() => {
     const nextValue = window.prompt(
-      'Enter the MCP API key for protected dashboard routes.',
+      t('app.auth.prompt'),
       authState?.source === 'stored' ? authState.key : ''
     );
     if (typeof nextValue !== 'string') return;
 
     const saved = saveStoredMaintenanceAuth(nextValue, authState?.mode ?? 'header');
     if (!saved) {
-      window.alert('API key cannot be empty.');
+      window.alert(t('app.auth.emptyKey'));
       return;
     }
     setAuthState(saved);
-  }, [authState]);
+  }, [authState, t]);
 
   const handleClearApiKey = React.useCallback(() => {
     clearStoredMaintenanceAuth();

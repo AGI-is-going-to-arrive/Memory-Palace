@@ -12,18 +12,18 @@
   "raw_files": [
     {
       "path": "backend/tests/datasets/raw/beir_fiqa/train.tsv",
-      "sha256": "e46a99529aa61b12e086a5c057e4e0ecaeda9502e53d5fe855efce778f1ec59a",
-      "size_bytes": 209842
+      "sha256": "e1a5a7d8a26068c278b30bfbb747725ff297b2ad702d3ed1c50d2ca908f57cf6",
+      "size_bytes": 195675
     },
     {
       "path": "backend/tests/datasets/raw/beir_fiqa/test.tsv",
-      "sha256": "6adc2a640dcdd22bb8b3858f89107adef2a7c3db20a63550dfa7a0f71e379e44",
-      "size_bytes": 25256
+      "sha256": "eea88080cf91d63c81d43f28ee301f617304b61f4aaceac310d7385e90d5c060",
+      "size_bytes": 23549
     },
     {
       "path": "backend/tests/datasets/raw/beir_fiqa/dev.tsv",
-      "sha256": "03b27e547cd29dc721c3b93ce8ddd70df6b2d0ce954d8ef3659d386e8cd72c11",
-      "size_bytes": 18327
+      "sha256": "40ac42f684805bf19835ab5e3ac374c14fb2fb571712335c884f6adfc0a570dd",
+      "size_bytes": 17088
     },
     {
       "path": "backend/tests/datasets/raw/beir_fiqa/queries.jsonl",

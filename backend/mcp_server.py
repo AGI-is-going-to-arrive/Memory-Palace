@@ -28,6 +28,7 @@ from dotenv import load_dotenv
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from db.sqlite_client import get_sqlite_client
 from db.snapshot import get_snapshot_manager
 from runtime_state import runtime_state
@@ -41,8 +42,44 @@ dotenv_path = os.path.join(root_dir, ".env")
 if os.path.exists(dotenv_path):
     load_dotenv(dotenv_path)
 
+
+def _read_mcp_host() -> str:
+    raw = os.getenv("HOST", "127.0.0.1").strip()
+    return raw or "127.0.0.1"
+
+
+def _read_mcp_port() -> int:
+    raw = os.getenv("PORT", "8000").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return 8000
+    return value if value > 0 else 8000
+
+
+def _build_transport_security(host: str) -> TransportSecuritySettings:
+    if host in {"127.0.0.1", "localhost", "::1"}:
+        return TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"],
+            allowed_origins=[
+                "http://127.0.0.1:*",
+                "http://localhost:*",
+                "http://[::1]:*",
+            ],
+        )
+    return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+
 # Initialize FastMCP server
-mcp = FastMCP("Memory Palace Interface")
+MCP_HOST = _read_mcp_host()
+MCP_PORT = _read_mcp_port()
+mcp = FastMCP(
+    "Memory Palace Interface",
+    host=MCP_HOST,
+    port=MCP_PORT,
+    transport_security=_build_transport_security(MCP_HOST),
+)
 
 # =============================================================================
 # Domain Configuration

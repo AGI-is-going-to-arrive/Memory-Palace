@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../../lib/api';
+import i18n, { LOCALE_STORAGE_KEY } from '../../i18n';
 import ReviewPage from './ReviewPage';
 
 vi.mock('../../lib/api', async (importOriginal) => {
@@ -63,8 +64,10 @@ const DEFAULT_DIFF = {
 };
 
 describe('ReviewPage', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    window.localStorage?.removeItem?.(LOCALE_STORAGE_KEY);
+    await i18n.changeLanguage('zh-CN');
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     vi.spyOn(window, 'alert').mockImplementation(() => {});
 
@@ -83,9 +86,9 @@ describe('ReviewPage', () => {
 
     render(<ReviewPage />);
 
-    const integrateButton = await screen.findByRole('button', { name: /^Integrate$/i });
-    const rejectButton = screen.getByRole('button', { name: /^Reject$/i });
-    const integrateAllButton = screen.getByRole('button', { name: /^Integrate All$/i });
+    const integrateButton = await screen.findByRole('button', { name: i18n.t('review.integrate') });
+    const rejectButton = screen.getByRole('button', { name: i18n.t('review.reject') });
+    const integrateAllButton = screen.getByRole('button', { name: i18n.t('review.integrateAll') });
 
     await user.dblClick(integrateButton);
 
@@ -105,7 +108,7 @@ describe('ReviewPage', () => {
 
     render(<ReviewPage />);
 
-    const rejectButton = await screen.findByRole('button', { name: /^Reject$/i });
+    const rejectButton = await screen.findByRole('button', { name: i18n.t('review.reject') });
     await user.dblClick(rejectButton);
 
     expect(window.confirm).toHaveBeenCalledTimes(1);
@@ -124,14 +127,14 @@ describe('ReviewPage', () => {
 
     render(<ReviewPage />);
 
-    const rejectButton = await screen.findByRole('button', { name: /^Reject$/i });
+    const rejectButton = await screen.findByRole('button', { name: i18n.t('review.reject') });
     await user.click(rejectButton);
 
     await waitFor(() => {
       expect(api.approveSnapshot).not.toHaveBeenCalled();
     });
     expect(window.alert).toHaveBeenCalledWith(
-      'Rejection failed: Rollback failed in backend'
+      '拒绝失败：Rollback failed in backend'
     );
   });
 
@@ -141,13 +144,13 @@ describe('ReviewPage', () => {
 
     render(<ReviewPage />);
 
-    const rejectButton = await screen.findByRole('button', { name: /^Reject$/i });
+    const rejectButton = await screen.findByRole('button', { name: i18n.t('review.reject') });
     await user.click(rejectButton);
 
     await waitFor(() => {
       expect(api.approveSnapshot).not.toHaveBeenCalled();
     });
-    expect(window.alert).toHaveBeenCalledWith('Rejection failed: network down');
+    expect(window.alert).toHaveBeenCalledWith('拒绝失败：network down');
   });
 
   it('surfaces partial success when rollback succeeds but snapshot cleanup fails', async () => {
@@ -156,7 +159,7 @@ describe('ReviewPage', () => {
 
     render(<ReviewPage />);
 
-    const rejectButton = await screen.findByRole('button', { name: /^Reject$/i });
+    const rejectButton = await screen.findByRole('button', { name: i18n.t('review.reject') });
     await user.click(rejectButton);
 
     await waitFor(() => {
@@ -164,7 +167,7 @@ describe('ReviewPage', () => {
       expect(api.approveSnapshot).toHaveBeenCalledTimes(1);
     });
     expect(window.alert).toHaveBeenCalledWith(
-      'Rollback succeeded but snapshot cleanup failed: cleanup failed'
+      '回滚成功，但快照清理失败：清理失败'
     );
   });
 
@@ -186,7 +189,7 @@ describe('ReviewPage', () => {
 
     render(<ReviewPage />);
 
-    const sessionSelect = await screen.findByRole('combobox', { name: /target session/i });
+    const sessionSelect = await screen.findByRole('combobox', { name: i18n.t('review.targetSession') });
     await user.selectOptions(sessionSelect, 'session-b');
 
     deferredB.resolve([snapshotB]);
@@ -220,12 +223,12 @@ describe('ReviewPage', () => {
     render(<ReviewPage />);
     await screen.findByRole('button', { name: 'res-a' });
 
-    const sessionSelect = await screen.findByRole('combobox', { name: /target session/i });
+    const sessionSelect = await screen.findByRole('combobox', { name: i18n.t('review.targetSession') });
     await user.selectOptions(sessionSelect, 'session-b');
 
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'res-a' })).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /^Integrate$/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: i18n.t('review.integrate') })).not.toBeInTheDocument();
     });
   });
 
@@ -250,14 +253,14 @@ describe('ReviewPage', () => {
     });
 
     render(<ReviewPage />);
-    await screen.findByText('Memory Retrieval Failed');
+    await screen.findByText(i18n.t('review.currentDiffFailure'));
 
-    const sessionSelect = await screen.findByRole('combobox', { name: /target session/i });
+    const sessionSelect = await screen.findByRole('combobox', { name: i18n.t('review.targetSession') });
     await user.selectOptions(sessionSelect, 'session-b');
 
     await waitFor(() => {
-      expect(screen.queryByText('Connection Lost')).not.toBeInTheDocument();
-      expect(screen.getByText('Awaiting Input')).toBeInTheDocument();
+      expect(screen.queryByText(i18n.t('common.states.connectionLost'))).not.toBeInTheDocument();
+      expect(screen.getByText(i18n.t('common.states.awaitingInput'))).toBeInTheDocument();
     });
   });
 
@@ -268,7 +271,7 @@ describe('ReviewPage', () => {
 
     await waitFor(() => {
       expect(api.getSessions).toHaveBeenCalledTimes(1);
-      expect(screen.getByText('Awaiting Input')).toBeInTheDocument();
+      expect(screen.getByText(i18n.t('common.states.awaitingInput'))).toBeInTheDocument();
     });
   });
 
@@ -294,8 +297,8 @@ describe('ReviewPage', () => {
     await waitFor(() => {
       expect(api.getSnapshots).toHaveBeenCalledWith('session-1');
     });
-    expect(await screen.findByText('Memory Fully Orphaned')).toBeInTheDocument();
-    expect(screen.getByText('Unknown')).toBeInTheDocument();
+    expect(await screen.findByText(i18n.t('review.memoryFullyOrphaned'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('common.states.unknown'))).toBeInTheDocument();
   });
 
   it('renders object detail from loadDiff without crashing', async () => {
@@ -305,11 +308,11 @@ describe('ReviewPage', () => {
 
     render(<ReviewPage />);
 
-    await screen.findByText('Memory Retrieval Failed');
-    expect(screen.getByText('backend_failed')).toBeInTheDocument();
+    await screen.findByText(i18n.t('review.currentDiffFailure'));
+    expect(screen.getByText('后端处理失败')).toBeInTheDocument();
     expect(api.extractApiError).toHaveBeenCalledWith(
       expect.anything(),
-      'Failed to retrieve memory fragment.'
+      i18n.t('review.errors.retrieveFragment')
     );
   });
 
@@ -320,7 +323,7 @@ describe('ReviewPage', () => {
 
     render(<ReviewPage />);
 
-    await screen.findByText('Memory Retrieval Failed');
+    await screen.findByText(i18n.t('review.currentDiffFailure'));
     expect(screen.getByText('{"foo":"bar"}')).toBeInTheDocument();
   });
 
@@ -340,13 +343,13 @@ describe('ReviewPage', () => {
 
     render(<ReviewPage />);
 
-    await screen.findByText('Connection Lost');
+    await screen.findByText(i18n.t('common.states.connectionLost'));
     expect(
-      screen.getByText(/unauthorized \| missing_api_key \| operation=list_review_sessions/)
+      screen.getByText(/unauthorized \| missing_api_key \| 操作=list_review_sessions/)
     ).toBeInTheDocument();
     expect(api.extractApiError).toHaveBeenCalledWith(
       expect.anything(),
-      'Failed to load review sessions.'
+      i18n.t('review.errors.loadSessions')
     );
   });
 });

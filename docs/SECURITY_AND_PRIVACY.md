@@ -37,7 +37,7 @@
 
 ### 受保护的接口范围
 
-当配置 `MCP_API_KEY` 后，以下接口需要鉴权：
+以下接口默认都受保护：
 
 | 接口前缀 | 保护范围 | 代码出处 |
 |---|---|---|
@@ -92,7 +92,7 @@ Authorization: Bearer <MCP_API_KEY>
 
 ## 4. 前端密钥注入（运行时）
 
-前端不在构建时写死密钥，而是通过运行时注入。在 `index.html` 或部署脚本中添加：
+前端不在构建时写死密钥，而是通过运行时注入读取。这个方式更适合本地调试或你自己控制的私有部署环境：
 
 ```html
 <script>
@@ -102,6 +102,8 @@ Authorization: Bearer <MCP_API_KEY>
   };
 </script>
 ```
+
+> ⚠️ 这适合本地调试或你自己控制的部署环境。不要把真实 `MCP_API_KEY` 直接写进公开页面或任何会暴露给最终用户的静态资源里，因为浏览器里可以直接读到这个全局对象。
 
 **工作原理**（参见 `frontend/src/lib/api.js`）：
 
@@ -155,8 +157,6 @@ Authorization: Bearer <MCP_API_KEY>
 
    该脚本会检查：本地敏感产物是否存在、是否被 git 跟踪、已跟踪文件中的密钥模式、个人绝对路径泄露、`.env.example` 的 API key 占位状态。
 
-   脚本会把检查结果直接输出在当前终端；如果你另外运行 `python scripts/evaluate_memory_palace_skill.py` 或 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`，对应的 Markdown 摘要会在 `<repo-root>/docs/skills/` 下本地生成或更新，通常更适合当成你自己机器上的验证记录；这些摘要默认也被 `.gitignore` 排除，所以公开 GitHub 仓库里通常不会带上。
-
 1. **检查工作区状态** — 确认无意外暴露：
 
    ```bash
@@ -202,9 +202,7 @@ Authorization: Bearer <MCP_API_KEY>
 
 ---
 
-## 7. 通常只在自己机器上使用的文件与维护文档
-
-以下内容分为两类：一类已在 [`.gitignore`](../.gitignore) 中配置排除；另一类是运行脚本后在你自己的工作区生成或更新、通常更适合只留在当前机器上的摘要。
+## 7. 通常不应提交的本地文件
 
 | 文件 / 目录 | 说明 |
 |---|---|
@@ -220,14 +218,14 @@ Authorization: Bearer <MCP_API_KEY>
 | `frontend/node_modules` | NPM 依赖 |
 | `frontend/dist/` | 前端构建产物 |
 | `.DS_Store` | macOS 系统文件 |
-| `backups/` | 本地备份目录，通常只在你自己的机器上使用 |
-| `docs/improvement/` | 阶段性实施计划、重测草稿、内部排障记录 |
-| `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` | 运行 `python scripts/evaluate_memory_palace_skill.py` 后本地生成或更新的 skill smoke 摘要（默认 `.gitignore` 排除） |
-| `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` | 运行 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py` 后本地生成或更新的 MCP e2e 摘要（默认 `.gitignore` 排除） |
+| `backups/` | 本地备份目录 |
+| `docs/improvement/` | 阶段性计划、重测草稿、排障记录 |
+| `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` | 本地 skill smoke 摘要 |
+| `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` | 本地 MCP e2e 摘要 |
 | `backend/docs/benchmark_*.md` | 本地 benchmark 分析笔记 |
 | `backend/tests/benchmark_results.md` | 一次性 benchmark 汇总草稿 |
-| `docs/evaluation_old_vs_new_executive_summary_2026-03-05.md` | 一次性对照摘要，更适合作为维护阶段材料；公开 GitHub 仓库里可能不存在这一类本地文件 |
-| `docs/changelog/current_code_improvements_vs_legacy_docs.md` | 面向维护者的补充差异清单；公开 GitHub 仓库里可能不存在这一类本地文件 |
+| `docs/evaluation_old_vs_new_executive_summary_2026-03-05.md` | 一次性对照摘要 |
+| `docs/changelog/current_code_improvements_vs_legacy_docs.md` | 补充差异清单 |
 
 > 💡 保留 `.env.example` 作为配置模板提交到仓库。
 >

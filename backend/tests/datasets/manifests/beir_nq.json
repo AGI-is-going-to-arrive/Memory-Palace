@@ -17,8 +17,8 @@
     },
     {
       "path": "backend/tests/datasets/raw/beir_nq/test.tsv",
-      "sha256": "6df0cd2cbbe88504b64c68f21e946a759b62c4d864225720cec256f0196e2210",
-      "size_bytes": 87138
+      "sha256": "13019a7c1f74721d075bfefa0433c81e84f004d5a9c30f0c80eba955473fda92",
+      "size_bytes": 82936
     }
   ],
   "processed_files": {

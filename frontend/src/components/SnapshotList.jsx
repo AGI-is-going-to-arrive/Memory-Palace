@@ -1,5 +1,7 @@
 import React from 'react';
 import clsx from 'clsx';
+import { useTranslation } from 'react-i18next';
+import { formatTime } from '../lib/format';
 
 const OP_CONFIG = {
   create: { label: 'Create', color: 'accent' },
@@ -29,10 +31,12 @@ const COLOR_CLASSES = {
 };
 
 const SnapshotList = ({ snapshots, selectedId, onSelect }) => {
+  const { t, i18n } = useTranslation();
+
   if (snapshots.length === 0) {
     return (
       <div className="py-10 text-center text-xs uppercase tracking-[0.18em] text-[color:var(--palace-muted)]">
-        Empty Sequence
+        {t('common.states.emptySequence')}
       </div>
     );
   }
@@ -44,6 +48,12 @@ const SnapshotList = ({ snapshots, selectedId, onSelect }) => {
         const opConfig = OP_CONFIG[snap.operation_type] || OP_CONFIG.modify;
         const colors = COLOR_CLASSES[opConfig.color];
         const displayName = snap.uri || snap.resource_id;
+        const operationLabel = t(`snapshotList.operations.${snap.operation_type}`, {
+          defaultValue: opConfig.label,
+        });
+        const resourceTypeLabel = t(`resourceTypes.${snap.resource_type}`, {
+          defaultValue: snap.resource_type,
+        });
 
         return (
           <button
@@ -81,9 +91,9 @@ const SnapshotList = ({ snapshots, selectedId, onSelect }) => {
                 </div>
                 <div className="mt-0.5 flex items-center gap-2">
                   <span className={clsx('text-[10px] font-bold uppercase tracking-[0.14em]', colors.label)}>
-                    {opConfig.label}
+                    {operationLabel}
                   </span>
-                  <span className="text-[10px] text-[color:var(--palace-muted)]">{snap.resource_type}</span>
+                  <span className="text-[10px] text-[color:var(--palace-muted)]">{resourceTypeLabel}</span>
                 </div>
               </div>
 
@@ -95,7 +105,11 @@ const SnapshotList = ({ snapshots, selectedId, onSelect }) => {
                     : 'opacity-0 text-[color:var(--palace-muted)] group-hover:opacity-100'
                 )}
               >
-                {new Date(snap.snapshot_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {formatTime(
+                  snap.snapshot_time,
+                  i18n.resolvedLanguage,
+                  { hour: '2-digit', minute: '2-digit' }
+                ) || t('common.states.unknown')}
               </div>
             </div>
           </button>

@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../../lib/api';
+import i18n, { LOCALE_STORAGE_KEY } from '../../i18n';
 import MaintenancePage from './MaintenancePage';
 
 vi.mock('../../lib/api', () => ({
@@ -32,8 +33,10 @@ vi.mock('../../lib/api', () => ({
 }));
 
 describe('MaintenancePage', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    window.localStorage?.removeItem?.(LOCALE_STORAGE_KEY);
+    await i18n.changeLanguage('zh-CN');
     vi.spyOn(window, 'alert').mockImplementation(() => {});
     vi.spyOn(window, 'confirm').mockImplementation(() => true);
     vi.spyOn(window, 'prompt').mockReturnValue(null);
@@ -75,8 +78,8 @@ describe('MaintenancePage', () => {
     render(<MaintenancePage />);
 
     await screen.findByText(/orphan snippet/i);
-    await user.click(screen.getByTitle('Select all'));
-    await user.click(screen.getByRole('button', { name: /delete 1 orphans/i }));
+    await user.click(screen.getByTitle(i18n.t('maintenance.selectAll')));
+    await user.click(screen.getByRole('button', { name: i18n.t('maintenance.deleteOrphans', { count: 1 }) }));
 
     await waitFor(() => {
       expect(window.confirm).toHaveBeenCalledTimes(1);
@@ -93,9 +96,9 @@ describe('MaintenancePage', () => {
     });
     api.queryVitalityCleanupCandidates.mockClear();
 
-    await user.type(screen.getByLabelText(/vitality domain/i), 'notes');
-    await user.type(screen.getByLabelText(/vitality path prefix/i), 'scope/');
-    await user.click(screen.getByRole('button', { name: /apply filters/i }));
+    await user.type(screen.getByLabelText(i18n.t('maintenance.vitality.domain')), 'notes');
+    await user.type(screen.getByLabelText(i18n.t('maintenance.vitality.pathPrefix')), 'scope/');
+    await user.click(screen.getByRole('button', { name: i18n.t('maintenance.vitality.applyFilters') }));
 
     await waitFor(() => {
       expect(api.queryVitalityCleanupCandidates).toHaveBeenCalledTimes(1);
@@ -107,6 +110,38 @@ describe('MaintenancePage', () => {
       domain: 'notes',
       path_prefix: 'scope/',
     });
+  });
+
+  it('shows translated error when vitality prepare selection exceeds limit', async () => {
+    const user = userEvent.setup();
+    api.queryVitalityCleanupCandidates.mockResolvedValue({
+      status: 'ok',
+      items: Array.from({ length: 101 }, (_, index) => ({
+        memory_id: index + 1,
+        vitality_score: 0.12,
+        inactive_days: 30,
+        access_count: 0,
+        can_delete: true,
+        uri: `core://agent/${index + 1}`,
+        content_snippet: `candidate-${index + 1}`,
+        state_hash: `hash-${index + 1}`,
+      })),
+    });
+
+    render(<MaintenancePage />);
+    await screen.findByText('candidate-1');
+
+    expect(screen.getByLabelText(i18n.t('maintenance.vitality.domain'))).toBeInTheDocument();
+    expect(screen.getByLabelText(i18n.t('maintenance.vitality.pathPrefix'))).toBeInTheDocument();
+
+    const selectAllButtons = screen.getAllByRole('button', { name: i18n.t('maintenance.selectAll') });
+    await user.click(selectAllButtons[selectAllButtons.length - 1]);
+    await user.click(screen.getByRole('button', { name: i18n.t('maintenance.vitality.prepareDelete', { count: 101 }) }));
+
+    expect(
+      await screen.findByText('选择数量过多：101。最多只能选择 100 条。')
+    ).toBeInTheDocument();
+    expect(api.prepareVitalityCleanup).not.toHaveBeenCalled();
   });
 
   it('handles invalid created_at and migration_target paths without crashing', async () => {
@@ -135,8 +170,8 @@ describe('MaintenancePage', () => {
 
     render(<MaintenancePage />);
 
-    expect(await screen.findByText('Unknown')).toBeInTheDocument();
-    expect(screen.getByText('target #2 also has no paths')).toBeInTheDocument();
+    expect(await screen.findByText(i18n.t('common.states.unknown'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('maintenance.card.targetNoPaths', { id: 2 }))).toBeInTheDocument();
 
     await user.click(screen.getByText(/legacy orphan/i));
     await waitFor(() => {
@@ -145,7 +180,7 @@ describe('MaintenancePage', () => {
 
     const detailContentNodes = await screen.findAllByText(/legacy full content/i);
     expect(detailContentNodes.length).toBeGreaterThan(0);
-    expect(screen.getByText(/Diff: #1 → #2/i)).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('maintenance.card.diffTitle', { from: 1, to: 2 }))).toBeInTheDocument();
   });
 
   it('keeps prepared review for retry when confirm returns structured confirmation_phrase_mismatch detail', async () => {
@@ -191,12 +226,12 @@ describe('MaintenancePage', () => {
     render(<MaintenancePage />);
     await screen.findByText(/legacy candidate/i);
 
-    const selectAllButtons = screen.getAllByRole('button', { name: /^Select all$/i });
+    const selectAllButtons = screen.getAllByRole('button', { name: i18n.t('maintenance.selectAll') });
     await user.click(selectAllButtons[selectAllButtons.length - 1]);
-    await user.click(screen.getByRole('button', { name: /Prepare Delete \(1\)/i }));
-    await screen.findByText(/review_id: review-1/i);
+    await user.click(screen.getByRole('button', { name: i18n.t('maintenance.vitality.prepareDelete', { count: 1 }) }));
+    await screen.findByText(i18n.t('maintenance.vitality.reviewId', { value: 'review-1' }));
 
-    await user.click(screen.getByRole('button', { name: /Confirm delete/i }));
+    await user.click(screen.getByRole('button', { name: i18n.t('maintenance.vitality.confirmAction', { action: 'delete' }) }));
 
     await waitFor(() => {
       expect(api.confirmVitalityCleanup).toHaveBeenCalledWith({
@@ -205,7 +240,7 @@ describe('MaintenancePage', () => {
         confirmation_phrase: 'CONFIRM DELETE',
       });
     });
-    expect(screen.getByText(/review_id: review-1/i)).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('maintenance.vitality.reviewId', { value: 'review-1' }))).toBeInTheDocument();
     expect(screen.getByText('confirmation phrase mismatch')).toBeInTheDocument();
     expect(api.queryVitalityCleanupCandidates).toHaveBeenCalledTimes(1);
   });

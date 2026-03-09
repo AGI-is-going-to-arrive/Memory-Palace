@@ -1,6 +1,8 @@
 # Memory Palace Skills 快速上手
 
 > 如果你只想把当前仓库这条 skill + MCP 链路接通，按这份做就够了。
+>
+> **先补一个边界说明**：当前仓库里的 repo-local MCP wrapper 是 `scripts/run_memory_palace_mcp_stdio.sh`，安装脚本生成的本地 MCP 启动命令也统一走 `bash` / `/bin/zsh`。如果你是原生 Windows 环境，请先准备 **Git Bash** 或 **WSL**；不要把下面这些 shell 示例理解成“PowerShell 直接可用”。
 
 ## 🎯 先记住一句话
 
@@ -35,20 +37,7 @@ docs/skills/memory-palace/
 - `variants/`
 - `agents/openai.yaml`
 
-你运行同步 / 安装命令后，本地工作区里出现的 `.claude/.codex/.gemini/.opencode/...` 都是 **mirror**。
-
-要特别注意：
-
-- 这些 hidden mirror / 配置文件默认被 `.gitignore` 排除
-- 公开 GitHub 仓库里通常只带 `docs/skills/memory-palace/` 这份 canonical bundle
-- 所以 clone 下来后，如果你还没跑下面的命令，看不到 `.claude` / `.codex` / `.gemini` 这些本地镜像，属于正常现象
-
-这套设计已经对齐 `Anthropic skill-creator` 的核心要求：
-
-- 有 `frontmatter`
-- `description` 承担触发契约
-- 细节放在 `references/`
-- 有 `eval / smoke / e2e` 回归入口
+你运行同步 / 安装命令后，`.claude/.codex/.gemini/.opencode/...` 这些镜像目录才会出现在本地。刚 clone 下来、还没执行命令前看不到它们，属于正常现象。
 
 ---
 
@@ -92,10 +81,10 @@ python scripts/install_skill.py \
   --check
 ```
 
-这一步会明确做两件事：
+这一步会做两件事：
 
 1. 继续保持 repo-local skill mirrors
-2. 给 **你当前工作区本地** 落两个直连入口：
+2. 给当前仓库补两个直连入口：
    - `Claude Code` → `.mcp.json`
    - `Gemini CLI` → `.gemini/settings.json`
 
@@ -139,7 +128,7 @@ python scripts/install_skill.py \
 
 ## 5. 四个客户端现在怎么理解
 
-下面这些结论默认你已经在当前工作区跑完了上面的 `sync/install` 命令。刚 clone 下来的公开仓库，不会自动带上这些隐藏目录和本地 MCP 配置。
+下面这些结论默认你已经跑完了上面的 `sync/install` 命令。
 
 ### Claude Code
 
@@ -230,9 +219,7 @@ python ../scripts/evaluate_memory_palace_mcp_e2e.py
 docs/skills/MCP_LIVE_E2E_REPORT.md
 ```
 
-这两份报告默认建议留在你自己的机器上，不把它们当成主入口文档。
-
-它们默认也被 `.gitignore` 排除，所以你从公开 GitHub 仓库 fresh clone 下来时，看不到这两份文件也属于正常情况。
+这两份报告主要用来复核当前环境的结果，不是主入口文档。
 
 ---
 

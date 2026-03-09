@@ -56,6 +56,7 @@ Through the unified [MCP (Model Context Protocol)](https://modelcontextprotocol.
 - **skills + MCP now feel productized**: installation, sync, smoke, and live e2e are all part of the documented path.
 - **Deployment is safer**: the Docker one-click scripts now use deployment locks, runtime env injection is opt-in, and there is a dedicated repository hygiene check before sharing or publishing your workspace.
 - **High-noise retrieval looks stronger in the current benchmark set**: compared with the old project, the C/D profiles show better recall in harder `s8,d200` and `s100,d200` style scenarios.
+- **Dashboard language is now easier to control**: the frontend defaults to English and adds a one-click English / Chinese toggle in the top-right corner, with the selection remembered in the browser.
 - **Public claims stay conservative**: the docs only describe verified paths, and still ask you to re-check your own Windows / remote deployment environment.
 - **Client boundaries are explicit**: `Claude/Codex/OpenCode/Gemini` have documented paths; `Gemini live`, `Cursor`, and `Antigravity` still carry explicit caveats.
 
@@ -90,6 +91,8 @@ Four deployment profiles (A/B/C/D) from pure local to cloud-connected, with Dock
 ### 📊 Built-in Observability Dashboard
 
 A React-powered dashboard with four views: **Memory Browser**, **Review & Rollback**, **Maintenance**, and **Observability**.
+
+The current frontend now defaults to English. Use the top-right language button to switch between English and Chinese; the browser remembers your choice and applies it to common UI copy, date/number formatting, and common API error hints.
 
 ---
 
@@ -283,9 +286,9 @@ DATABASE_URL=sqlite+aiosqlite:////absolute/path/to/demo.db
 DATABASE_URL=sqlite+aiosqlite:///C:/absolute/path/to/demo.db
 ```
 
-If you want to use the Dashboard or call `/browse` / `/review` / `/maintenance` locally right away, choose **one** of these before starting the backend:
+If you want to use the Dashboard or call `/browse` / `/review` / `/maintenance` locally right away, add **one** of these lines to your `.env` before starting the backend:
 
-```bash
+```dotenv
 # Option A: set a local API key (recommended)
 MCP_API_KEY=change-this-local-key
 
@@ -296,7 +299,7 @@ MCP_API_KEY_ALLOW_INSECURE_LOCAL=true
 **Method B — Use the profile script (recommended):**
 
 ```bash
-# macOS / Linux
+# macOS / Linux (use the `macos` template value here)
 bash scripts/apply_profile.sh macos b
 
 # Windows PowerShell
@@ -477,13 +480,13 @@ Configure these parameters in your `.env` file. All endpoints support the **Open
 RETRIEVAL_EMBEDDING_BACKEND=api
 RETRIEVAL_EMBEDDING_API_BASE=http://localhost:11434/v1   # e.g., Ollama
 RETRIEVAL_EMBEDDING_API_KEY=your-api-key
-RETRIEVAL_EMBEDDING_MODEL=Qwen3-Embedding-8B
+RETRIEVAL_EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B
 
 # ── Reranker Model ───────────────────────────────────────────
 RETRIEVAL_RERANKER_ENABLED=true
 RETRIEVAL_RERANKER_API_BASE=http://localhost:11434/v1
 RETRIEVAL_RERANKER_API_KEY=your-api-key
-RETRIEVAL_RERANKER_MODEL=Qwen3-Reranker-8B
+RETRIEVAL_RERANKER_MODEL=Qwen/Qwen3-Reranker-8B
 
 # ── Tuning (recommended 0.20 ~ 0.40) ────────────────────────
 RETRIEVAL_RERANKER_WEIGHT=0.25
@@ -493,6 +496,12 @@ RETRIEVAL_RERANKER_WEIGHT=0.25
 > - `RETRIEVAL_EMBEDDING_BACKEND` controls only the embedding path.
 > - There is no `RETRIEVAL_RERANKER_BACKEND` switch; reranker activation is controlled by `RETRIEVAL_RERANKER_ENABLED`.
 > - Reranker connection settings are resolved from `RETRIEVAL_RERANKER_API_BASE/API_KEY/MODEL` first, and fall back to `ROUTER_*` only when missing (with base/key then able to fall back to `OPENAI_*`).
+>
+> Recommended model IDs: `Qwen/Qwen3-Embedding-8B` for embedding, `Qwen/Qwen3-Reranker-8B` for reranking, and `gpt-5.4` for the optional LLM path.
+>
+> If your provider uses a different model ID format, keep the same model family but replace the value with your provider's exact ID.
+>
+> If you use `--allow-runtime-env-injection` for local `profile c/d` debugging, the script switches that run into explicit API mode, reuses `ROUTER_API_BASE/ROUTER_API_KEY` as the fallback source for embedding / reranker API base+key when the explicit `RETRIEVAL_*` values are not set, and also forwards optional `INTENT_LLM_*` values when present.
 >
 > Advanced switch guidance:
 > - `INTENT_LLM_ENABLED`: experimental; keep `false` unless you are validating a stable chat model and want better intent classification on ambiguous queries
@@ -507,13 +516,13 @@ RETRIEVAL_RERANKER_WEIGHT=0.25
 WRITE_GUARD_LLM_ENABLED=true
 WRITE_GUARD_LLM_API_BASE=http://localhost:11434/v1
 WRITE_GUARD_LLM_API_KEY=your-api-key
-WRITE_GUARD_LLM_MODEL=Qwen3.5-35B-A3B
+WRITE_GUARD_LLM_MODEL=gpt-5.4
 
 # ── Compact Gist LLM (falls back to Write Guard if empty) ──
 COMPACT_GIST_LLM_ENABLED=true
 COMPACT_GIST_LLM_API_BASE=
 COMPACT_GIST_LLM_API_KEY=
-COMPACT_GIST_LLM_MODEL=Qwen3.5-35B-A3B
+COMPACT_GIST_LLM_MODEL=gpt-5.4
 ```
 
 Profile templates are located at: `deploy/profiles/{macos,windows,docker}/profile-{a,b,c,d}.env`
@@ -620,7 +629,7 @@ For `Gemini CLI`, `Codex CLI`, and `OpenCode`, prefer a **user-scope** MCP insta
 python scripts/install_skill.py --targets gemini,codex,opencode --scope user --with-mcp --force
 ```
 
-The two verification commands above are best treated as **machine-local diagnostics**, not as a universal “must all PASS” gate. They write local reports under `docs/skills/`, and some checks can still show `PARTIAL` / `FAIL` when your current machine lacks a logged-in CLI, a user-scope MCP binding, or the larger workspace-only validation helpers.
+The two verification commands above are best treated as **extra validation**, not as the first thing every user must run.
 
 Canonical source and the local paths that appear after you run the sync/install steps:
 
@@ -631,7 +640,7 @@ Canonical source and the local paths that appear after you run the sync/install 
 - Cursor: `<repo-root>/.cursor/skills/memory-palace/`
 - Compatible agent CLI: `<repo-root>/.agent/skills/memory-palace/`
 
-These hidden client directories are **local generated mirrors**, not public source files. They are ignored by git, so a fresh GitHub checkout normally starts with only the canonical bundle under `docs/skills/memory-palace/`; run the commands above to create the local mirrors on your machine.
+These hidden client directories are local mirrors generated after install. A new clone normally starts with only the canonical bundle under `docs/skills/memory-palace/`.
 
 The canonical skill is aligned with the current code contract:
 
@@ -642,7 +651,7 @@ The canonical skill is aligned with the current code contract:
 - when `guard_action=NOOP`, stop writing, inspect the suggested target, and only then decide whether to switch to `update_memory`
 - the trigger sample set lives at `<repo-root>/docs/skills/memory-palace/references/trigger-samples.md`
 
-If you want to re-check the local skill smoke or the live MCP path on your own machine, run `python scripts/evaluate_memory_palace_skill.py` and `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`. They generate `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` and `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` locally by default. Both reports are meant to stay local, are ignored by `.gitignore`, and may be absent in the public GitHub repo.
+If you want to re-check skill smoke or the live MCP path, run `python scripts/evaluate_memory_palace_skill.py` and `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`. They generate local reports under `docs/skills/`.
 
 Full guide: [MEMORY_PALACE_SKILLS.md](docs/skills/MEMORY_PALACE_SKILLS.md)
 
@@ -650,15 +659,15 @@ Full guide: [MEMORY_PALACE_SKILLS.md](docs/skills/MEMORY_PALACE_SKILLS.md)
 
 ## 📊 Benchmark Results
 
-> This section keeps the **user-facing summary tables** from the current public benchmark suite and local release runs. More detailed benchmark logs, one-off re-baseline notes, and machine-specific artifacts stay local by default and are not treated as public guarantees or universal outcomes.
+> This section keeps the **user-facing summary tables** from the current benchmark suite.
 >
 > For methodology, caveats, and reproduction commands, see `docs/EVALUATION.md`. For the same-setup old-vs-current summary used in this release note, see `docs/changelog/release_summary_vs_old_project_2026-03-06.md`.
 >
-> The raw `*_metrics.json` files behind these tables stay local by default and are gitignored, so they may be absent in the public GitHub repo.
+> The numbers below are a release summary, not a guarantee for every hardware or provider setup.
 
 ### Retrieval Quality — A/B/C/D Real Run
 
-Source: `profile_abcd_real_metrics.json` · Sample size = 8 per dataset · 10 distractor documents · Seed = 20260219 · typically generated as a maintainer-side benchmark artifact during local validation
+Source: `profile_abcd_real_metrics.json` · Sample size = 8 per dataset · 10 distractor documents · Seed = 20260219
 
 > 📌 These numbers summarize one current release run. Hardware, provider, and model differences may change outcomes.
 
@@ -686,7 +695,7 @@ Source: `profile_abcd_real_metrics.json` · Sample size = 8 per dataset · 10 di
 
 ### Retrieval Quality — A/B Large-Sample Gate
 
-Source: `profile_ab_metrics.json` · Sample size = 100 · typically generated as a maintainer-side benchmark artifact during local validation
+Source: `profile_ab_metrics.json` · Sample size = 100
 
 | Profile | Dataset | HR@10 | MRR | NDCG@10 | p95 (ms) |
 |---|---|---:|---:|---:|---:|
@@ -720,11 +729,11 @@ Source: `profile_ab_metrics.json` · Sample size = 100 · typically generated as
 | Gist Quality | ROUGE-L | 0.759 | ≥ 0.40 | ✅ PASS |
 | Phase 6 Gate | Valid | true | — | ✅ PASS |
 
-> **Write Guard**: Evaluated on 6 test cases (4 TP, 0 FP, 0 FN). Source: `write_guard_quality_metrics.json` (typically generated as a maintainer-side benchmark artifact during local validation)
+> **Write Guard**: Evaluated on 6 test cases (4 TP, 0 FP, 0 FN). Source: `write_guard_quality_metrics.json`
 >
-> **Intent Classification**: 6/6 correct classifications across temporal, causal, exploratory, and factual intents using `keyword_scoring_v2`. Source: `intent_accuracy_metrics.json` (typically generated as a maintainer-side benchmark artifact during local validation)
+> **Intent Classification**: 6/6 correct classifications across temporal, causal, exploratory, and factual intents using `keyword_scoring_v2`. Source: `intent_accuracy_metrics.json`
 >
-> **Gist ROUGE-L**: Average across 5 test cases (range: 0.667 – 0.923). Source: `compact_context_gist_quality_metrics.json` (typically generated as a maintainer-side benchmark artifact during local validation)
+> **Gist ROUGE-L**: Average across 5 test cases (range: 0.667 – 0.923). Source: `compact_context_gist_quality_metrics.json`
 >
 > In plain English:
 >
@@ -757,13 +766,14 @@ than part of the public user package.
 > 📌 These images are here to help you quickly understand the main dashboard areas.
 >
 > - They show the **typical post-entry dashboard state**
+> - The current frontend defaults to English; the screenshots below show the Chinese mode after switching from the top-right language button
 > - The top bar now provides a unified auth entry (`Set API key` / `Update API key` / `Clear key`, or `Runtime key active` when injected at runtime)
 > - If auth is not configured yet, the page shell still opens, but protected data requests show an auth hint, empty state, or `401` until credentials are available
 
 <details>
 <summary>📂 Memory — Tree Browser & Editor</summary>
 
-<img src="docs/images/memory-palace-memory-page.png" width="900" alt="Memory Palace — Memory Browser Page" />
+<img src="docs/images/memory-zh.png" width="900" alt="Memory Palace — Memory Browser Page (Chinese mode)" />
 
 Tree-structured memory browser with inline editor and Gist view. Navigate by domain → path hierarchy.
 </details>
@@ -771,7 +781,7 @@ Tree-structured memory browser with inline editor and Gist view. Navigate by dom
 <details>
 <summary>📋 Review — Diff & Rollback</summary>
 
-<img src="docs/images/memory-palace-review-page.png" width="900" alt="Memory Palace — Review Page" />
+<img src="docs/images/review-zh.png" width="900" alt="Memory Palace — Review Page (Chinese mode)" />
 
 Side-by-side diff comparison of snapshots with one-click rollback and integrate actions. The current version also adds more explicit error handling and session-state behavior here.
 </details>
@@ -779,7 +789,7 @@ Side-by-side diff comparison of snapshots with one-click rollback and integrate 
 <details>
 <summary>🔧 Maintenance — Vitality Governance</summary>
 
-<img src="docs/images/memory-palace-maintenance-page.png" width="900" alt="Memory Palace — Maintenance Page" />
+<img src="docs/images/maintenance-zh.png" width="900" alt="Memory Palace — Maintenance Page (Chinese mode)" />
 
 Monitor memory vitality scores, trigger cleanup tasks, and manage decay parameters. The current version also adds domain / path-prefix filters and a more explicit human-confirmation flow.
 </details>
@@ -787,7 +797,7 @@ Monitor memory vitality scores, trigger cleanup tasks, and manage decay paramete
 <details>
 <summary>📊 Observability — Search & Task Monitoring</summary>
 
-<img src="docs/images/memory-palace-observability-page.png" width="900" alt="Memory Palace — Observability Page" />
+<img src="docs/images/observability-zh.png" width="900" alt="Memory Palace — Observability Page (Chinese mode)" />
 
 Real-time search query monitoring, retrieval quality insights, and task queue status. The current version also adds `scope hint`, runtime snapshot details, and richer index-task visibility.
 </details>

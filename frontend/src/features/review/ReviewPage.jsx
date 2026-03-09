@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { format } from 'date-fns';
+import { useTranslation } from 'react-i18next';
 import {
   approveSnapshot,
   clearSession,
@@ -27,6 +27,7 @@ import {
   Trash2
 } from 'lucide-react';
 import clsx from 'clsx';
+import { formatTime } from '../../lib/format';
 
 const normalizeSessionList = (value) => {
   if (!Array.isArray(value)) return [];
@@ -44,13 +45,18 @@ const normalizeSessionList = (value) => {
   });
 };
 
-const formatSnapshotTime = (value) => {
+const formatSnapshotTime = (value, lng, fallback) => {
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return 'Unknown';
-  return format(parsed, 'HH:mm:ss');
+  if (Number.isNaN(parsed.getTime())) return fallback;
+  return formatTime(parsed, lng, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }) || fallback;
 };
 
 function ReviewPage() {
+  const { t, i18n } = useTranslation();
   const [sessions, setSessions] = useState([]);
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [snapshots, setSnapshots] = useState([]);
@@ -108,7 +114,7 @@ function ReviewPage() {
       setCurrentSessionId(list[0].session_id);
     } catch (err) {
       if (requestId !== sessionsRequestRef.current) return;
-      setDiffError(extractApiError(err, 'Failed to load review sessions.'));
+      setDiffError(extractApiError(err, t('review.errors.loadSessions')));
     }
   };
 
@@ -144,7 +150,7 @@ function ReviewPage() {
       setSnapshots([]);
       setSelectedSnapshot(null);
       setDiffData(null);
-      setDiffError(extractApiError(err, 'Failed to load snapshots.'));
+      setDiffError(extractApiError(err, t('review.errors.loadSnapshots')));
     } finally {
       if (requestId !== snapshotsRequestRef.current) return;
       setLoading(false);
@@ -166,7 +172,7 @@ function ReviewPage() {
       if (requestId === diffRequestRef.current) setDiffData(data);
     } catch (err) {
       if (requestId === diffRequestRef.current) {
-        setDiffError(extractApiError(err, 'Failed to retrieve memory fragment.'));
+        setDiffError(extractApiError(err, t('review.errors.retrieveFragment')));
         setDiffData(null);
       }
     }
@@ -176,14 +182,14 @@ function ReviewPage() {
   const handleRollback = async () => {
     if (!currentSessionId || !selectedSnapshot) return;
     if (!beginMutation()) return;
-    if (!confirm(`Reject changes to ${selectedSnapshot.resource_id}? This will revert the memory.`)) {
+    if (!confirm(t('review.prompts.rejectChanges', { resourceId: selectedSnapshot.resource_id }))) {
       endMutation();
       return;
     }
     try {
       const rollbackResult = await rollbackResource(currentSessionId, selectedSnapshot.resource_id);
       if (!rollbackResult?.success) {
-        throw new Error(rollbackResult?.message || 'Rollback failed.');
+        throw new Error(rollbackResult?.message || t('review.errors.rollback'));
       }
       // Rollback and snapshot cleanup are split calls; surface partial success explicitly.
       let cleanupError = null;
@@ -196,12 +202,15 @@ function ReviewPage() {
       await loadSessions();
       if (cleanupError) {
         alert(
-          "Rollback succeeded but snapshot cleanup failed: "
-            + extractApiError(cleanupError, cleanupError?.message || 'Approve request failed.')
+          t('review.alerts.rollbackCleanupFailed', {
+            detail: extractApiError(cleanupError, cleanupError?.message || t('review.errors.approve')),
+          })
         );
       }
     } catch (err) {
-      alert("Rejection failed: " + extractApiError(err, err?.message || 'Rollback request failed.'));
+      alert(t('review.alerts.rejectionFailed', {
+        detail: extractApiError(err, err?.message || t('review.errors.rollback')),
+      }));
     } finally {
       endMutation();
     }
@@ -215,7 +224,9 @@ function ReviewPage() {
       await loadSnapshots(currentSessionId);
       await loadSessions();
     } catch (err) {
-      alert("Integration failed: " + extractApiError(err, err?.message || 'Approve request failed.'));
+      alert(t('review.alerts.integrationFailed', {
+        detail: extractApiError(err, err?.message || t('review.errors.approve')),
+      }));
     } finally {
       endMutation();
     }
@@ -224,7 +235,7 @@ function ReviewPage() {
   const handleClearSession = async () => {
     if (!currentSessionId) return;
     if (!beginMutation()) return;
-    if (!confirm("Integrate ALL pending memories from this session?")) {
+    if (!confirm(t('review.prompts.integrateAll'))) {
       endMutation();
       return;
     }
@@ -232,11 +243,13 @@ function ReviewPage() {
       await clearSession(currentSessionId);
       await loadSessions();
     } catch (err) {
-      alert("Mass integration failed: " + extractApiError(err, err?.message || 'Clear session request failed.'));
+      alert(t('review.alerts.massIntegrationFailed', {
+        detail: extractApiError(err, err?.message || t('review.errors.clearSession')),
+      }));
     } finally {
       endMutation();
     }
-  }
+  };
 
   // --- Render Helpers ---
   
@@ -262,24 +275,24 @@ function ReviewPage() {
           {isFullDeletion ? (
             <>
               <Trash2 size={12} className="text-rose-500" />
-              <span className="text-rose-400">Memory Fully Orphaned</span>
+              <span className="text-rose-400">{t('review.memoryFullyOrphaned')}</span>
             </>
           ) : (
             <>
               <Link2 size={12} className="text-stone-500" />
-              <span className="text-stone-500">Surviving Paths</span>
+              <span className="text-stone-500">{t('review.survivingPaths')}</span>
             </>
           )}
         </h3>
         
         {isFullDeletion ? (
           <p className="text-xs text-rose-300/70">
-            No other paths point to this memory. This deletion removes all access to the content.
+            {t('review.noOtherPaths')}
           </p>
         ) : (
           <div className="space-y-1.5">
             <p className="text-xs text-stone-500 mb-2">
-              This memory is still reachable via {survivingPaths.length} other path{survivingPaths.length > 1 ? 's' : ''}:
+              {t('review.stillReachable', { count: survivingPaths.length })}
             </p>
             {survivingPaths.map((path, idx) => (
               <div key={idx} className="flex items-center gap-2 text-xs font-mono text-emerald-400/80 bg-emerald-950/20 rounded px-2.5 py-1.5 border border-emerald-900/30">
@@ -308,7 +321,7 @@ function ReviewPage() {
     return (
       <div className="mb-8 p-4 bg-stone-900/40 border border-stone-800/60 rounded-lg backdrop-blur-sm">
         <h3 className="text-xs font-bold text-stone-500 uppercase mb-4 flex items-center gap-2 tracking-widest">
-          <Activity size={12} /> Metadata Shifts
+          <Activity size={12} /> {t('review.metadataShifts')}
         </h3>
         <div className="space-y-3">
           {changes.map(key => {
@@ -316,13 +329,15 @@ function ReviewPage() {
             const newVal = diffData.current_data[key];
             return (
               <div key={key} className="grid grid-cols-[100px_1fr_20px_1fr] gap-4 text-sm items-start">
-                <span className="text-stone-400 font-medium capitalize text-xs pt-0.5">{key}</span>
+                <span className="text-stone-400 font-medium capitalize text-xs pt-0.5">
+                  {key === 'priority' ? t('common.labels.priority') : t('common.labels.disclosure')}
+                </span>
                 <div className="text-rose-400/70 line-through text-xs font-mono text-right break-words">
-                  {oldVal != null ? String(oldVal) : '∅'}
+                  {oldVal != null ? String(oldVal) : t('common.states.empty')}
                 </div>
                 <div className="text-center text-stone-700 pt-0.5">→</div>
                 <div className="text-emerald-400 text-xs font-mono font-bold break-words">
-                  {newVal != null ? String(newVal) : '∅'}
+                  {newVal != null ? String(newVal) : t('common.states.empty')}
                 </div>
               </div>
             );
@@ -339,11 +354,11 @@ function ReviewPage() {
       <div className="w-72 flex-shrink-0 flex flex-col border-r border-[color:var(--palace-line)] bg-[rgba(255,250,244,0.9)] backdrop-blur-sm">
         {/* Header */}
         <div className="border-b border-[color:var(--palace-line)]/90 bg-[linear-gradient(180deg,rgba(255,252,247,0.88),rgba(244,235,223,0.68))] p-5">
-          <div className="flex items-center gap-3 text-stone-100 mb-6">
+            <div className="flex items-center gap-3 text-stone-100 mb-6">
             <div className="w-8 h-8 rounded bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center shadow-lg shadow-amber-900/20">
               <ShieldCheck className="w-4 h-4 text-white" />
             </div>
-            <span className="font-display text-sm tracking-wide text-amber-50">Review Ledger</span>
+            <span className="font-display text-sm tracking-wide text-amber-50">{t('review.ledgerTitle')}</span>
           </div>
           
           <div className="relative group">
@@ -351,7 +366,7 @@ function ReviewPage() {
               htmlFor="review-session-select"
               className="text-[10px] text-stone-600 uppercase font-bold mb-1.5 block tracking-widest pl-1"
             >
-              Target Session
+              {t('review.targetSession')}
             </label>
             <div className="relative">
               <select 
@@ -364,7 +379,7 @@ function ReviewPage() {
                   setCurrentSessionId(e.target.value);
                 }}
               >
-                {sessions.length === 0 && <option>No active sessions</option>}
+                {sessions.length === 0 && <option>{t('review.noActiveSessions')}</option>}
                 {sessions.map(s => (
                   <option key={s.session_id} value={s.session_id}>
                     {s.session_id}
@@ -402,7 +417,7 @@ function ReviewPage() {
                     className="group flex w-full items-center justify-center gap-2 rounded-md border border-[color:var(--palace-line)] bg-white/90 py-2.5 text-xs font-medium text-[color:var(--palace-muted)] transition-all duration-300 hover:border-[color:var(--palace-accent)] hover:bg-[rgba(237,226,211,0.72)] hover:text-[color:var(--palace-ink)]"
                  >
                      <Check size={14} className="group-hover:scale-110 transition-transform" /> 
-                     <span>Integrate All</span>
+                     <span>{t('review.integrateAll')}</span>
                  </button>
              </div>
         )}
@@ -443,11 +458,19 @@ function ReviewPage() {
                         {selectedSnapshot.uri || selectedSnapshot.resource_id}
                     </h2>
                     <div className="flex items-center gap-2 text-xs text-stone-500">
-                        <span className="bg-stone-800/50 px-1.5 py-0.5 rounded text-stone-400">{selectedSnapshot.resource_type}</span>
+                        <span className="bg-stone-800/50 px-1.5 py-0.5 rounded text-stone-400">
+                          {t(`resourceTypes.${selectedSnapshot.resource_type}`, {
+                            defaultValue: selectedSnapshot.resource_type,
+                          })}
+                        </span>
                         <span>•</span>
                         <span className="flex items-center gap-1 font-mono opacity-70">
                             <Clock size={10} />
-                            {formatSnapshotTime(selectedSnapshot.snapshot_time)}
+                            {formatSnapshotTime(
+                              selectedSnapshot.snapshot_time,
+                              i18n.resolvedLanguage,
+                              t('common.states.unknown')
+                            )}
                         </span>
                     </div>
                  </div>
@@ -459,14 +482,14 @@ function ReviewPage() {
                     disabled={mutationInFlight}
                     className="flex items-center gap-2 px-5 py-2 bg-stone-900 hover:bg-rose-950/30 border border-stone-700 hover:border-rose-800 text-stone-400 hover:text-rose-400 rounded-md transition-all duration-200 text-xs font-medium uppercase tracking-wider"
                 >
-                    <RotateCcw size={14} /> Reject
+                    <RotateCcw size={14} /> {t('review.reject')}
                 </button>
                 <button 
                     onClick={handleApprove}
                     disabled={mutationInFlight}
                     className="flex items-center gap-2 rounded-md border border-amber-600/40 bg-amber-950/35 px-6 py-2 text-xs font-bold uppercase tracking-wider text-amber-100 transition-all duration-200 hover:bg-amber-900/45 hover:border-amber-500/60 shadow-[0_0_15px_rgba(245,158,11,0.18)] hover:shadow-[0_0_20px_rgba(245,158,11,0.28)]"
                 >
-                    <Check size={14} /> Integrate
+                    <Check size={14} /> {t('review.integrate')}
                 </button>
               </div>
             </div>
@@ -481,14 +504,14 @@ function ReviewPage() {
                                 <Activity size={32} />
                            </div>
                            <div className="text-center">
-                                <p className="text-lg font-medium text-rose-200">Memory Retrieval Failed</p>
+                                <p className="text-lg font-medium text-rose-200">{t('review.currentDiffFailure')}</p>
                                 <p className="text-rose-400/60 mt-2 max-w-md text-sm">{diffError}</p>
                            </div>
                            <button 
                                onClick={() => loadDiff(currentSessionId, selectedSnapshot.resource_id)} 
                                className="px-6 py-2 bg-stone-800/50 hover:bg-stone-800 rounded-full text-stone-300 text-xs transition-colors border border-stone-700"
                            >
-                               Retry Connection
+                               {t('review.retryConnection')}
                            </button>
                        </div>
                    ) : diffData ? (
@@ -501,7 +524,7 @@ function ReviewPage() {
                                     ? "bg-amber-500/5 border-amber-500/20 text-amber-500" 
                                     : "bg-stone-800/50 border-stone-700 text-stone-500"
                                )}>
-                                   {diffData.has_changes ? "Modification Detected" : "No Content Deviation"}
+                                   {diffData.has_changes ? t('review.modificationDetected') : t('review.noContentDeviation')}
                                </div>
                            </div>
 
@@ -522,7 +545,7 @@ function ReviewPage() {
                    ) : (
                        <div className="flex flex-col items-center justify-center h-64 text-stone-700">
                            <div className="w-2 h-2 bg-amber-500 rounded-full animate-ping mb-4"></div>
-                           <span className="text-xs tracking-widest uppercase opacity-50">Synchronizing...</span>
+                           <span className="text-xs tracking-widest uppercase opacity-50">{t('review.synchronizing')}</span>
                        </div>
                    )}
                </div>
@@ -531,7 +554,7 @@ function ReviewPage() {
         ) : diffError ? (
            <div className="flex-1 flex flex-col items-center justify-center text-rose-500 gap-4">
              <Activity size={48} className="opacity-20" />
-             <p className="text-sm font-medium opacity-50">Connection Lost</p>
+             <p className="text-sm font-medium opacity-50">{t('common.states.connectionLost')}</p>
              <p className="max-w-md px-6 text-center text-xs text-rose-400/80">{diffError}</p>
            </div>
         ) : (
@@ -541,14 +564,14 @@ function ReviewPage() {
                 <Layout size={64} className="opacity-20 relative z-10" />
             </div>
             <div className="text-center">
-                <p className="text-lg font-light text-stone-500">Awaiting Input</p>
-                <p className="text-xs text-stone-600 mt-2 tracking-wide uppercase">Select a memory fragment to inspect</p>
+                <p className="text-lg font-light text-stone-500">{t('common.states.awaitingInput')}</p>
+                <p className="text-xs text-stone-600 mt-2 tracking-wide uppercase">{t('review.selectFragment')}</p>
             </div>
           </div>
         )}
       </div>
     </div>
-  )
+  );
 }
 
 export default ReviewPage

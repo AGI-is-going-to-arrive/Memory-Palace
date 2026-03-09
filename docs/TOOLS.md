@@ -585,14 +585,14 @@ Memory Palace 支持多种检索 Profile。Profile C 和 D 使用混合检索路
 RETRIEVAL_EMBEDDING_BACKEND=none      # 可选: none / hash / router / api / openai
 RETRIEVAL_EMBEDDING_API_BASE=         # API 地址
 RETRIEVAL_EMBEDDING_API_KEY=          # API 密钥
-RETRIEVAL_EMBEDDING_MODEL=Qwen3-Embedding-8B
-RETRIEVAL_EMBEDDING_DIM=1024            # 向量维度
+RETRIEVAL_EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B
+RETRIEVAL_EMBEDDING_DIM=4096            # 向量维度
 
 # ── Reranker 配置 ──
 RETRIEVAL_RERANKER_ENABLED=false      # 是否启用 Reranker
 RETRIEVAL_RERANKER_API_BASE=          # API 地址
 RETRIEVAL_RERANKER_API_KEY=           # API 密钥
-RETRIEVAL_RERANKER_MODEL=Qwen3-Reranker-8B
+RETRIEVAL_RERANKER_MODEL=Qwen/Qwen3-Reranker-8B
 
 # ── 权重调参 ──
 RETRIEVAL_RERANKER_WEIGHT=0.25        # Reranker 权重（首要调参项）
@@ -604,7 +604,9 @@ RETRIEVAL_HYBRID_SEMANTIC_WEIGHT=0.3  # 语义权重
 >
 > 配置语义说明：`RETRIEVAL_EMBEDDING_BACKEND` 仅控制 Embedding 路径；Reranker 没有 `RETRIEVAL_RERANKER_BACKEND` 开关。Reranker 参数优先使用 `RETRIEVAL_RERANKER_*`，缺失时才回退 `ROUTER_*`（最后回退 `OPENAI_*` 的 base/key）。
 >
-> 推荐模型：Embedding 使用 `Qwen3-Embedding-8B`，Reranker 使用 `Qwen3-Reranker-8B`；如启用可选 LLM，推荐 `Qwen3.5-35B-A3B`。
+> 推荐模型：Embedding 使用 `Qwen/Qwen3-Embedding-8B`，Reranker 使用 `Qwen/Qwen3-Reranker-8B`；如启用可选 LLM，推荐 `gpt-5.4`。
+>
+> 如果你的 provider 使用了不同的 model id 写法，请保持同一模型家族，并改成你自己的 provider 实际 model id。
 >
 > 进阶配置（例如 `INTENT_LLM_*`、`RETRIEVAL_MMR_*`、`CORS_ALLOW_*`、运行时观测/睡眠整合开关）请以 `.env.example` 为准；本节只保留最常用主配置。
 >

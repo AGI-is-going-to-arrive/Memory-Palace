@@ -171,7 +171,11 @@ backend/
 frontend/src/
 ├── App.jsx                                    # 路由与页面骨架
 ├── main.jsx                                   # React 入口
+├── i18n.js                                    # react-i18next 初始化、默认语言与持久化
 ├── index.css                                  # 全局样式（TailwindCSS）
+├── locales/
+│   ├── en.js                                  # 英文文案
+│   └── zh-CN.js                               # 中文文案
 ├── features/
 │   ├── memory/MemoryBrowser.jsx               # 树形浏览、编辑、gist 视图
 │   ├── review/ReviewPage.jsx                  # diff、rollback、integrate
@@ -185,6 +189,7 @@ frontend/src/
 │   └── SnapshotList.jsx                       # 快照列表
 ├── lib/
 │   ├── api.js                                 # 统一 API 客户端与运行时鉴权注入
+│   ├── format.js                              # 跟随当前语言的日期/数字格式化
 │   ├── api.test.js                            # API 客户端单元测试
 │   └── api.contract.test.js                   # API 鉴权契约测试
 └── test/                                      # 前端测试目录
@@ -201,7 +206,9 @@ frontend/src/
 
 补充说明：
 
-- 当前版本的应用壳层右上角有统一的鉴权入口：`Set API key` / `Update API key` / `Clear key`
+- 当前版本的前端默认英文；应用壳层右上角同时提供语言切换入口与统一鉴权入口
+- 语言切换支持英文 / 中文一键切换，结果会保存在浏览器 `localStorage` 的 `memory-palace.locale`
+- 常见静态文案、日期/数字格式，以及前端侧的常见错误映射会跟随当前语言切换
 - 如果还没配置鉴权，页面外壳仍会打开，但受保护的数据请求会先显示授权提示、空态或 `401`
 - Docker 一键部署默认不需要手动点 `Set API key`：前端代理会在服务端自动转发同一把 `MCP_API_KEY`
 

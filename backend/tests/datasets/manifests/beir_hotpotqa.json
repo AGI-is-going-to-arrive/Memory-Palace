@@ -12,18 +12,18 @@
   "raw_files": [
     {
       "path": "backend/tests/datasets/raw/beir_hotpotqa/train.tsv",
-      "sha256": "12d4f4898fe7888669f6ccc1feec5c31b42bc0985d9a445e2a442e28d1fd3918",
-      "size_bytes": 6117535
+      "sha256": "bb59cff902d1b6b0784f6136b8f96eab5ab9e8543d4cf035b06da2f9901e0224",
+      "size_bytes": 5947534
     },
     {
       "path": "backend/tests/datasets/raw/beir_hotpotqa/test.tsv",
-      "sha256": "20d35d40a234e9bd0a561344b76077cea07a2f74d9cb80b8ce1e75408b596247",
-      "size_bytes": 532620
+      "sha256": "e8e5fa27d6253bc47e89df47af1a9c7cecafc5b0672fb69b2f6a7b4e9c0f7e34",
+      "size_bytes": 517809
     },
     {
       "path": "backend/tests/datasets/raw/beir_hotpotqa/dev.tsv",
-      "sha256": "e0220b5405ba8a2a8719071b9389169c849a14164aa2d63976142f1f3c04ee3b",
-      "size_bytes": 392210
+      "sha256": "cfb5b12cfcd47fc7b182069f6820323e99bb8aa806eb20940a28c18f09f08f9c",
+      "size_bytes": 381315
     },
     {
       "path": "backend/tests/datasets/raw/beir_hotpotqa/queries.jsonl",

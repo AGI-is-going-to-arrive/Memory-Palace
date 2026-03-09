@@ -12,18 +12,18 @@
   "raw_files": [
     {
       "path": "backend/tests/datasets/raw/beir_nfcorpus/train.tsv",
-      "sha256": "6336b80f9bffc4f063f3aa450047ad35c0b7c534efe4a6ba35e16dbace047f6a",
-      "size_bytes": 2504643
+      "sha256": "3f12c9f6bd56f05fa9887263ca45175c24a8754ed03c86bed5e5d581c6ac1d3a",
+      "size_bytes": 2394067
     },
     {
       "path": "backend/tests/datasets/raw/beir_nfcorpus/test.tsv",
-      "sha256": "f8fba6ef3d4dd9c3a242a8ba4ae38276fc3622fce7dcbae764766d564542fd2a",
-      "size_bytes": 279572
+      "sha256": "680b4cb9f2f3b02a98f4f4f59fc55c57f534fde405335a34e9de2e64ac8a8193",
+      "size_bytes": 267237
     },
     {
       "path": "backend/tests/datasets/raw/beir_nfcorpus/dev.tsv",
-      "sha256": "b1d38b5e8f78c4a5820bce2b7ec2db54911d7690dc601e76811846b211180bd8",
-      "size_bytes": 258218
+      "sha256": "e28db4337c8f195b9fda0168759b12de5a051d57e5a08356344a86d730efc8ee",
+      "size_bytes": 246832
     },
     {
       "path": "backend/tests/datasets/raw/beir_nfcorpus/queries.jsonl",

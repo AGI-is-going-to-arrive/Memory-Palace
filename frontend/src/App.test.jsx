@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { render, screen, waitFor } from '@testing-library/react';
 
 import App from './App';
+import i18n, { LOCALE_STORAGE_KEY } from './i18n';
 
 vi.mock('./features/memory/MemoryBrowser', () => ({
   default: () => <div>memory-page</div>,
@@ -25,9 +26,12 @@ vi.mock('./components/AgentationLite', () => ({
 }));
 
 describe('App routing', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     window.localStorage?.removeItem?.('memory-palace.dashboardAuth');
+    window.localStorage?.removeItem?.(LOCALE_STORAGE_KEY);
     delete window.__MEMORY_PALACE_RUNTIME__;
+    await i18n.changeLanguage('en');
+    window.localStorage?.removeItem?.(LOCALE_STORAGE_KEY);
     vi.spyOn(window, 'prompt').mockReturnValue(null);
     vi.spyOn(window, 'alert').mockImplementation(() => {});
   });
@@ -62,10 +66,19 @@ describe('App routing', () => {
 
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: /set api key/i }));
+    await user.click(screen.getByRole('button', { name: i18n.t('app.auth.setApiKey') }));
 
     expect(window.localStorage.getItem('memory-palace.dashboardAuth')).toContain('stored-key');
-    expect(await screen.findByRole('button', { name: /update api key/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: i18n.t('app.auth.updateApiKey') })).toBeInTheDocument();
+  });
+
+  it('defaults to english when no stored locale exists', async () => {
+    window.history.pushState({}, '', '/memory');
+
+    render(<App />);
+
+    expect(await screen.findByRole('button', { name: 'Set API key' })).toBeInTheDocument();
+    expect(document.documentElement.lang).toBe('en');
   });
 
   it('shows runtime status badge when runtime config is present', async () => {
@@ -77,7 +90,26 @@ describe('App routing', () => {
 
     render(<App />);
 
-    expect(await screen.findByText(/runtime key active/i)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /set api key/i })).not.toBeInTheDocument();
+    expect(await screen.findByText(i18n.t('app.auth.runtimeBadge'))).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('app.auth.setApiKey') })).not.toBeInTheDocument();
+  });
+
+  it('toggles language and persists the selection across remounts', async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/memory');
+
+    const firstRender = render(<App />);
+
+    expect(await screen.findByRole('button', { name: 'Set API key' })).toBeInTheDocument();
+    await user.click(screen.getByTestId('language-toggle'));
+
+    expect(await screen.findByRole('button', { name: '设置 API 密钥' })).toBeInTheDocument();
+    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('zh-CN');
+
+    firstRender.unmount();
+
+    render(<App />);
+
+    expect(await screen.findByRole('button', { name: '设置 API 密钥' })).toBeInTheDocument();
   });
 });

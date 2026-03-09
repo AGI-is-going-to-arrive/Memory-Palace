@@ -85,6 +85,15 @@ def _should_suppress_stream_shutdown_runtime_error(scope: Scope, exc: RuntimeErr
     )
 
 
+def _should_suppress_request_validation_value_error(scope: Scope, exc: ValueError) -> bool:
+    if scope.get("type") != "http":
+        return False
+    path = str(scope.get("path") or "")
+    if path not in {"/sse", "/messages", "/sse/messages"}:
+        return False
+    return str(exc).strip() == "Request validation failed"
+
+
 def apply_mcp_api_key_middleware(app: ASGIApp) -> ASGIApp:
     async def _auth_middleware(scope: Scope, receive: Receive, send: Send) -> None:
         if scope.get("type") != "http":
@@ -132,6 +141,10 @@ def apply_mcp_api_key_middleware(app: ASGIApp) -> ASGIApp:
             await app(scope, receive, send)
         except RuntimeError as exc:
             if _should_suppress_stream_shutdown_runtime_error(scope, exc):
+                return
+            raise
+        except ValueError as exc:
+            if _should_suppress_request_validation_value_error(scope, exc):
                 return
             raise
 
