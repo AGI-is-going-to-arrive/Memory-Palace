@@ -1,3 +1,5 @@
+import builtins
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -313,6 +315,33 @@ def test_compare_text_hides_internal_error_details(
         "reason": "internal_error",
         "operation": "compare_text",
     }
+
+
+def test_utils_module_imports_without_diff_match_patch() -> None:
+    module_path = Path(review_api.__file__).with_name("utils.py")
+    original_import = builtins.__import__
+
+    def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "diff_match_patch":
+            raise ModuleNotFoundError("No module named 'diff_match_patch'")
+        return original_import(name, globals, locals, fromlist, level)
+
+    spec = importlib.util.spec_from_file_location("review_utils_without_dmp", module_path)
+    assert spec is not None
+    assert spec.loader is not None
+
+    module = importlib.util.module_from_spec(spec)
+    builtins.__import__ = _guarded_import
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        builtins.__import__ = original_import
+
+    diff_html, diff_unified, summary = module.get_text_diff("old line\n", "new line\n")
+    assert "<table class=\"diff\"" in diff_html
+    assert "--- old_version" in diff_unified
+    assert "+++ new_version" in diff_unified
+    assert "新增" in summary
 
 
 def test_diff_endpoint_rejects_invalid_session_id_with_400(

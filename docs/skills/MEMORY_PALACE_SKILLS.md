@@ -145,6 +145,8 @@ Gemini 端当前有一个已知边界：
 - 把 canonical bundle 分发到各 CLI 目录
 - 检查 mirrors 是否漂移
 - 当前工作区镜像包括 `.claude`、`.codex`、`.opencode`、`.cursor`、`.agent`
+- 如果 `--check` 报 drift，先跑一次同步，再重新跑 `evaluate_memory_palace_skill.py`
+- 如果只剩 `claude(user)` 绑定失败，优先补当前项目在 `~/.claude.json` 下的 project-scoped `mcpServers.memory-palace`，不要直接去改兄弟仓的项目块
 
 ### `scripts/install_skill.py`
 
@@ -191,6 +193,12 @@ search_memory(query="...", include_session=True)
 - `update_memory`
 - `delete_memory`
 - `add_alias`
+
+默认写法建议：
+
+- 新建时优先给 `create_memory` 显式填写 `title`
+- 普通改写优先用 `update_memory` 的 patch
+- 只有真的要把一段新内容补到末尾时，再用 `append`
 
 ### Guard-aware write
 

@@ -139,6 +139,46 @@
    taskkill /PID <PID> /F
    ```
 
+---
+
+## 3.1 后端启动时报 `No module named 'diff_match_patch'`
+
+**现象**：
+
+- 本地启动 `uvicorn main:app` 时，日志里出现：
+
+  ```text
+  ModuleNotFoundError: No module named 'diff_match_patch'
+  ```
+
+**现在的实际行为**：
+
+- 当前代码会优先使用 `diff_match_patch`
+- 如果这个包在你的 Python 环境里缺失，`/review/diff` 会自动退回到 `difflib.HtmlDiff` 表格 diff
+- 这不应该再把整个后端启动直接打死
+
+**如果你还是看到了这个错误**，优先排查这两件事：
+
+1. 你是不是在用项目自己的虚拟环境启动：
+
+   ```bash
+   cd backend
+   source .venv/bin/activate
+   python -m uvicorn main:app --reload --port 8000
+   ```
+
+2. 依赖是不是装在了别的 Python 解释器里：
+
+   ```bash
+   cd backend
+   .venv/bin/python -m pip install -r requirements.txt
+   ```
+
+**补充说明**：
+
+- `diff_match_patch` 仍然在 `backend/requirements.txt` 里，正常安装时最好带上
+- 现在加的 fallback 只是为了把故障从“后端起不来”降成“review diff 降级”，不是建议长期缺着这个依赖
+
 3. Docker 一键部署时，优先检查前端入口：
 
    ```bash
@@ -150,6 +190,21 @@
    ```text
    event: endpoint
    data: /messages/?session_id=...
+   ```
+
+4. 如果你是远程客户端接入，请再确认这三件事：
+
+   - `run_sse.py` 启动时不要继续绑在 `HOST=127.0.0.1`
+   - 请求里带了正确的 `X-MCP-API-Key` 或 `Authorization: Bearer ...`
+   - 反向代理 / 防火墙没有把请求拦掉
+
+   可以先用一条最小请求排查：
+
+   ```bash
+   curl -i \
+     -H 'Accept: text/event-stream' \
+     -H 'X-MCP-API-Key: <YOUR_MCP_API_KEY>' \
+     http://<YOUR_HOST>:<YOUR_PORT>/sse
    ```
 
 ---

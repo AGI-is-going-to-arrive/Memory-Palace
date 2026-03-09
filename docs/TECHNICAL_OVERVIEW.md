@@ -32,7 +32,7 @@ backend/
 │   ├── browse.py          # 记忆浏览与写入接口（prefix: /browse）
 │   ├── review.py          # 审查、回滚与集成接口（prefix: /review）
 │   ├── maintenance.py     # 维护、观测与 vitality 清理接口（prefix: /maintenance）
-│   └── utils.py           # Diff 计算工具（基于 diff-match-patch）
+│   └── utils.py           # Diff 计算工具（优先 diff-match-patch，缺失时回退到 difflib.HtmlDiff）
 ├── db/
 │   ├── __init__.py        # 客户端工厂（get_sqlite_client / close_sqlite_client）
 │   ├── sqlite_client.py   # 核心数据库层（CRUD、检索、write_guard、gist、vitality、embedding、rerank）
@@ -49,7 +49,7 @@ backend/
 ### 核心模块说明
 
 - **`main.py`**：FastAPI 应用入口，负责生命周期管理（数据库初始化、legacy 数据库文件兼容恢复）、CORS 配置、路由注册（`review`、`browse`、`maintenance`）和健康检查（含索引状态、write lane 与 index worker 运行时状态报告）。默认 CORS origin 收敛为本地常用列表（`localhost/127.0.0.1` 的 `5173/3000`）；显式配置 wildcard（`*`）时会自动禁用 credentials；legacy sqlite 恢复前会执行 regular-file + quick_check + 核心表存在校验。
-- **`mcp_server.py`**：实现 9 个 MCP 工具，包括 URI 解析（`domain://path` 格式）、快照管理、write guard 决策、会话缓存、异步索引入队等核心逻辑。同时提供系统 URI（`system://boot`、`system://index`、`system://index-lite`、`system://audit`、`system://recent`）资源。
+- **`mcp_server.py`**：实现 9 个 MCP 工具，包括 URI 解析（`domain://path` 格式）、快照管理、write guard 决策、会话缓存、异步索引入队等核心逻辑。同时提供系统 URI（`system://boot`、`system://index`、`system://index-lite`、`system://audit`、`system://recent`）资源。`stdio` 直接连工具进程；SSE / streamable HTTP 的远程访问则跟随 `HOST` 配置，并继续受 API Key 与网络侧安全控制约束。
 - **`runtime_state.py`**：管理写入 lane（串行化写操作）、索引 worker（异步队列处理索引重建任务）、vitality 衰减调度、cleanup review 审批流程和 sleep consolidation 调度等运行时状态。
 - **`db/sqlite_client.py`**：SQLite 数据库操作层，包含记忆 CRUD、keyword/semantic/hybrid 三种检索模式、write_guard 逻辑（支持语义匹配 + 关键词匹配 + LLM 决策三级判定）、gist 生成与缓存、vitality 评分与衰减、embedding 获取（支持远程 API 和本地 hash 两种模式）、reranker 集成。
 
@@ -152,8 +152,8 @@ backend/
 | 工具 | 类型 | 说明 |
 |---|---|---|
 | `read_memory` | 读取 | 读取记忆内容，支持整段与分片（chunk_id / range / max_chars），支持系统 URI（`system://boot`、`system://index`、`system://index-lite`、`system://audit`、`system://recent`） |
-| `create_memory` | 写入 | 创建新记忆节点（含 write_guard，进入 write lane 串行化） |
-| `update_memory` | 写入 | 更新已有记忆（old_string/new_string 精准替换 或 append 追加，含 write_guard） |
+| `create_memory` | 写入 | 创建新记忆节点（含 write_guard，进入 write lane 串行化；建议显式填写 `title`） |
+| `update_memory` | 写入 | 更新已有记忆（优先用 `old_string/new_string` 做精确替换；`append` 只用于真实尾追加，含 write_guard） |
 | `delete_memory` | 写入 | 删除记忆路径（进入 write lane 串行化） |
 | `add_alias` | 写入 | 为同一记忆添加别名路径（可跨 domain） |
 | `search_memory` | 检索 | 统一检索入口（keyword/semantic/hybrid），支持意图分类与策略模板 |
@@ -281,6 +281,10 @@ Docker 端口环境变量：
 
 - Backend：`MEMORY_PALACE_BACKEND_PORT`（回退到 `NOCTURNE_BACKEND_PORT`，默认 `18000`）
 - Frontend：`MEMORY_PALACE_FRONTEND_PORT`（回退到 `NOCTURNE_FRONTEND_PORT`，默认 `3000`）
+
+补充一句：
+
+- 把 SSE 监听地址改成 `0.0.0.0`（或其他非 loopback 地址）只表示远程客户端可以连到这个监听地址，不表示可以跳过 `MCP_API_KEY`、反向代理、防火墙或 TLS 等安全控制。
 
 相关文件：
 

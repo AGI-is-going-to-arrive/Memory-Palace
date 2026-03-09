@@ -150,7 +150,7 @@ A React-powered dashboard with four views: **Memory Browser**, **Review & Rollba
 | MCP Protocol | `mcp (FastMCP)` | ≥ 0.1 | Exposes 9 standardized tools via stdio / SSE transport |
 | HTTP Client | [httpx](https://www.python-httpx.org/) | ≥ 0.26 | Async HTTP for embedding / reranker API calls |
 | Validation | [Pydantic](https://docs.pydantic.dev/) | ≥ 2.5 | Request/response validation |
-| Diff Engine | `diff_match_patch` | — | Google's diff algorithm for snapshot comparison |
+| Diff Engine | `diff_match_patch` + `difflib` fallback | — | Prefer semantic HTML diff when `diff_match_patch` is installed; fall back to `difflib.HtmlDiff` table output if that optional package is missing |
 
 ### Frontend
 
@@ -396,7 +396,7 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 
 > Note: `stdio` connects directly to the MCP tool process and does not pass through the HTTP/SSE auth middleware, so MCP tools can still be used locally without `MCP_API_KEY`. This applies to `stdio` only — protected HTTP/SSE routes still follow the normal API key rules.
 >
-> This `HOST=127.0.0.1` example is intentionally loopback-only. If you really need remote access, switch `HOST` to `0.0.0.0` (or your bind address) and apply your own API key, firewall, reverse proxy, and transport security controls.
+> This `HOST=127.0.0.1` example is intentionally loopback-only. If you really need remote access, switch `HOST` to `0.0.0.0` (or your bind address). That opens the listener for remote clients, but it does **not** remove the normal safety requirements — you still need your own API key, firewall, reverse proxy, and transport security controls.
 
 See [Multi-Client Integration](#-multi-client-integration) for detailed client configuration.
 
@@ -524,8 +524,8 @@ Memory Palace exposes **9 standardized tools** via the MCP protocol:
 | Category | Tool | Description |
 |---|---|---|
 | **Read/Write** | `read_memory` | Read memory content (full or chunked by `RETRIEVAL_CHUNK_SIZE`) |
-| | `create_memory` | Create new memory node (passes through Write Guard first) |
-| | `update_memory` | Update existing memory (Patch / Append modes) |
+| | `create_memory` | Create new memory node (passes through Write Guard first; prefer giving an explicit `title`) |
+| | `update_memory` | Update existing memory (prefer Patch mode; use Append only for real tail appends) |
 | | `delete_memory` | Delete a memory path |
 | | `add_alias` | Add an alias path for a memory |
 | **Retrieval** | `search_memory` | Unified search entry with `keyword` / `semantic` / `hybrid` modes |
@@ -573,7 +573,7 @@ The MCP tool layer handles **deterministic execution**; the Skills strategy laye
 ```
 1. 🚀 Boot    → read_memory("system://boot")               # Load core memories
 2. 🔍 Recall  → search_memory(include_session=true)         # Topic recall
-3. ✍️ Write   → prefer update_memory; create_memory if new  # Read before write
+3. ✍️ Write   → prefer update_memory patch; create_memory if new (with title)  # Read before write
 4. 📦 Compact → compact_context(force=false)                 # Session compression
 5. 🔧 Recover → rebuild_index(wait=true) + index_status()   # Degradation recovery
 ```

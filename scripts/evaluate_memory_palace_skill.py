@@ -113,6 +113,81 @@ def run_command_capture(cmd: list[str], *, cwd: Path, input_text: str | None = N
         return CommandCapture(returncode=-9, stdout=stdout, stderr=stderr, timed_out=True)
 
 
+def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        if os.name != "nt":
+            os.killpg(process.pid, signal.SIGTERM)
+        else:  # pragma: no cover
+            process.terminate()
+    except ProcessLookupError:
+        return
+
+
+def _run_command_capture_until_output_file(
+    cmd: list[str],
+    *,
+    cwd: Path,
+    output_path: Path,
+    input_text: str | None = None,
+    timeout: int = 120,
+) -> CommandCapture:
+    process = subprocess.Popen(
+        cmd,
+        cwd=str(cwd),
+        stdin=subprocess.PIPE if input_text is not None else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=(os.name != "nt"),
+    )
+    pending_input = input_text
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            stdout, stderr = process.communicate(
+                input=pending_input,
+                timeout=min(1.0, remaining),
+            )
+            return CommandCapture(
+                returncode=process.returncode,
+                stdout=stdout,
+                stderr=stderr,
+                timed_out=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            pending_input = None
+            if output_path.is_file():
+                try:
+                    payload = output_path.read_text(encoding="utf-8").strip()
+                    if payload:
+                        json.loads(payload)
+                        _terminate_process_tree(process)
+                        stdout, stderr = process.communicate(timeout=5)
+                        return CommandCapture(
+                            returncode=process.returncode or 0,
+                            stdout=(exc.stdout or "") + stdout,
+                            stderr=(exc.stderr or "") + stderr,
+                            timed_out=False,
+                        )
+                except Exception:
+                    pass
+    _terminate_process_tree(process)
+    try:
+        stdout, stderr = process.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        if os.name != "nt":
+            os.killpg(process.pid, signal.SIGKILL)
+        else:  # pragma: no cover
+            process.kill()
+        stdout, stderr = process.communicate()
+    return CommandCapture(returncode=-9, stdout=stdout, stderr=stderr, timed_out=True)
+
+
 def _gemini_capacity_error(text: str) -> bool:
     lowered = text.lower()
     return any(
@@ -327,7 +402,31 @@ def _frontmatter_data(path: Path) -> dict[str, Any] | None:
         except Exception:
             return None
         return payload if isinstance(payload, dict) else None
-    return None
+    name_match = re.search(r"(?m)^name:\s*(.+?)\s*$", block)
+    if not name_match:
+        return None
+    description_match = re.search(r"(?m)^description:\s*(.+?)\s*$", block)
+    if not description_match:
+        return None
+    description_value = description_match.group(1).strip()
+    if description_value in {">", ">-", "|", "|-"}:
+        lines = block.splitlines()
+        collected: list[str] = []
+        start_collect = False
+        for line in lines:
+            if start_collect:
+                if line.startswith("  "):
+                    collected.append(line.strip())
+                    continue
+                if line.strip():
+                    break
+            if line.startswith("description:"):
+                start_collect = True
+        description_value = " ".join(collected).strip()
+    return {
+        "name": name_match.group(1).strip().strip("\"'"),
+        "description": description_value,
+    }
 
 
 def check_structure() -> CheckResult:
@@ -608,10 +707,14 @@ def check_client_mcp_bindings() -> CheckResult:
 
 def classify_skill_answer(text: str) -> tuple[bool, str]:
     lowered = text.lower()
+    trigger_sample_paths = (
+        "docs/skills/memory-palace/references/trigger-samples.md",
+        "memory-palace/docs/skills/memory-palace/references/trigger-samples.md",
+    )
     checks = [
         'read_memory("system://boot")' in text or "system://boot" in lowered,
         (any(token in lowered for token in ["guard_target_uri", "guard_target_id"]) and any(token in lowered for token in ["stop", "inspect", "重复", "停止"])),
-        "memory-palace/docs/skills/memory-palace/references/trigger-samples.md" in lowered,
+        any(path in lowered for path in trigger_sample_paths),
     ]
     if all(checks):
         return True, "命中 first move / NOOP / trigger sample"
@@ -648,10 +751,12 @@ def smoke_codex() -> CheckResult:
             "additionalProperties": False,
         }
         schema_path.write_text(json.dumps(schema), encoding="utf-8")
-        proc = run_command_capture(
+        proc = _run_command_capture_until_output_file(
             [
                 "codex",
                 "exec",
+                "-c",
+                "mcp_servers.playwright.startup_timeout_sec=45",
                 "--ephemeral",
                 "--color",
                 "never",
@@ -666,11 +771,19 @@ def smoke_codex() -> CheckResult:
                 PROMPT,
             ],
             cwd=REPO_ROOT,
+            output_path=output_path,
             timeout=60,
         )
-        if proc.timed_out:
-            return CheckResult("FAIL", "Codex smoke 超时", (proc.stdout + "\n" + proc.stderr).strip())
         if proc.returncode != 0 or not output_path.is_file():
+            if proc.timed_out and output_path.is_file():
+                data = json.loads(output_path.read_text(encoding="utf-8"))
+                joined = json.dumps(data, ensure_ascii=False)
+                success, details = classify_skill_answer(joined)
+                if success:
+                    return CheckResult("PASS", "Codex smoke 通过（结果已落盘，CLI 进程超时退出）", joined)
+                return CheckResult("FAIL", "Codex smoke 输出不符合预期", details)
+            if proc.timed_out:
+                return CheckResult("FAIL", "Codex smoke 超时", (proc.stdout + "\n" + proc.stderr).strip())
             return CheckResult("FAIL", "Codex smoke 未通过", (proc.stdout + "\n" + proc.stderr).strip())
         data = json.loads(output_path.read_text(encoding="utf-8"))
         joined = json.dumps(data, ensure_ascii=False)
