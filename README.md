@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <a href="README_CN.md">中文</a> · <a href="docs/README.md">Docs</a> · <a href="docs/GETTING_STARTED.md">Quick Start</a> · <a href="docs/EVALUATION.md">Benchmarks</a>
+  <a href="README_CN.md">中文</a> · <a href="docs/README_EN.md">Docs</a> · <a href="docs/GETTING_STARTED_EN.md">Quick Start</a> · <a href="docs/EVALUATION_EN.md">Benchmarks</a>
 </p>
 
 ---
@@ -33,7 +33,7 @@
 
 **Memory Palace** provides AI agents with persistent context and seamless cross-session continuity. It gives LLMs **persistent, searchable, and auditable** historical context — so your Agent never "starts from scratch" in each conversation.
 
-Through the unified [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) interface, Memory Palace provides integration paths for **Codex, Claude Code, Gemini CLI, and OpenCode**, with documented caveats for `Cursor` and `Antigravity`. The currently verified scope and known boundaries are documented in `docs/skills/SKILLS_QUICKSTART.md`.
+Through the unified [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) interface, Memory Palace provides integration paths for **Codex, Claude Code, Gemini CLI, and OpenCode**, with documented caveats for `Cursor` and `Antigravity`. The currently verified scope and known boundaries are documented in `docs/skills/SKILLS_QUICKSTART_EN.md`.
 
 ### Why Memory Palace?
 
@@ -56,6 +56,7 @@ Through the unified [MCP (Model Context Protocol)](https://modelcontextprotocol.
 - **skills + MCP now feel productized**: installation, sync, smoke, and live e2e are all part of the documented path.
 - **Deployment is safer**: the Docker one-click scripts now use deployment locks, runtime env injection is opt-in, and there is a dedicated repository hygiene check before sharing or publishing your workspace.
 - **High-noise retrieval looks stronger in the current benchmark set**: compared with the old project, the C/D profiles show better recall in harder `s8,d200` and `s100,d200` style scenarios.
+- **Dashboard language is now easier to control**: the frontend defaults to English and adds a one-click English / Chinese toggle in the top-right corner, with the selection remembered in the browser.
 - **Public claims stay conservative**: the docs only describe verified paths, and still ask you to re-check your own Windows / remote deployment environment.
 - **Client boundaries are explicit**: `Claude/Codex/OpenCode/Gemini` have documented paths; `Gemini live`, `Cursor`, and `Antigravity` still carry explicit caveats.
 
@@ -90,6 +91,10 @@ Four deployment profiles (A/B/C/D) from pure local to cloud-connected, with Dock
 ### 📊 Built-in Observability Dashboard
 
 A React-powered dashboard with four views: **Memory Browser**, **Review & Rollback**, **Maintenance**, and **Observability**.
+
+The current frontend now defaults to English. Use the top-right language button to switch between English and Chinese; the browser remembers your choice and applies it to common UI copy, date/number formatting, and common API error hints.
+
+If you want a page-by-page walkthrough of the Dashboard, see [Dashboard User Guide (English)](docs/DASHBOARD_GUIDE_EN.md).
 
 ---
 
@@ -162,7 +167,7 @@ A React-powered dashboard with four views: **Memory Browser**, **Review & Rollba
 | Animation | [Framer Motion](https://www.framer.com/motion/) | 12.x | Smooth page transitions and micro-interactions |
 | Routing | React Router DOM | 6.x | Client-side routing for four dashboard views |
 | API Client | [Axios](https://axios-http.com/) | 1.x | Dashboard API requests and auth header injection |
-| Markdown | react-markdown + remark-gfm | — | Renders memory content with GitHub Flavored Markdown |
+| Markdown | react-markdown + remark-gfm | — | Reserved for optional Markdown rendering workflows; the current dashboard still renders memory bodies as plain text |
 | Icons | [Lucide React](https://lucide.dev/) | — | Consistent icon set across all views |
 
 ### How Each Layer Works
@@ -283,9 +288,9 @@ DATABASE_URL=sqlite+aiosqlite:////absolute/path/to/demo.db
 DATABASE_URL=sqlite+aiosqlite:///C:/absolute/path/to/demo.db
 ```
 
-If you want to use the Dashboard or call `/browse` / `/review` / `/maintenance` locally right away, choose **one** of these before starting the backend:
+If you want to use the Dashboard or call `/browse` / `/review` / `/maintenance` locally right away, add **one** of these lines to your `.env` before starting the backend:
 
-```bash
+```dotenv
 # Option A: set a local API key (recommended)
 MCP_API_KEY=change-this-local-key
 
@@ -296,7 +301,7 @@ MCP_API_KEY_ALLOW_INSECURE_LOCAL=true
 **Method B — Use the profile script (recommended):**
 
 ```bash
-# macOS / Linux
+# macOS / Linux (use the `macos` template value here)
 bash scripts/apply_profile.sh macos b
 
 # Windows PowerShell
@@ -401,6 +406,8 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 >
 > The plain `python mcp_server.py` form assumes you are still using the same `backend/.venv` where you ran `pip install -r requirements.txt`. If you launch MCP from a new terminal or a client config, it is safer to point to the project venv directly. Otherwise the process can fail before startup with errors like `ModuleNotFoundError: No module named 'sqlalchemy'`.
 >
+> If you are wiring MCP into a client config, prefer `scripts/run_memory_palace_mcp_stdio.sh`. That wrapper reuses the repository's current `.env` / `DATABASE_URL` first, so your MCP client and the Dashboard/API do not accidentally write to two different SQLite files.
+>
 > This `HOST=127.0.0.1` example is intentionally loopback-only. If you really need remote access, switch `HOST` to `0.0.0.0` (or your bind address). That opens the listener for remote clients, but it does **not** remove the normal safety requirements — you still need your own API key, firewall, reverse proxy, and transport security controls.
 
 See [Multi-Client Integration](#-multi-client-integration) for detailed client configuration.
@@ -428,7 +435,9 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > - Backend API: `http://127.0.0.1:18000`
 > - SSE: `http://127.0.0.1:3000/sse`
 >
-> If `MCP_API_KEY` is empty in the Docker env file, the profile helper generates a local key automatically. The frontend proxy uses that key on the server side, so users do not need to click `Set API key` just to open the dashboard.
+> If `MCP_API_KEY` is empty in the Docker env file, the profile helper generates a local key automatically. The frontend proxy uses that key on the server side, so on the recommended one-click path you usually do not need to click `Set API key` just to use protected dashboard requests. If you started containers some other way, or changed env / proxy wiring manually, you may still see the button.
+>
+> The Docker frontend now waits for both the backend and the SSE service to pass their own `/health` checks before it is treated as ready. If containers are already up but the page still looks unavailable, wait a few more seconds and re-check the printed URLs.
 >
 > Docker also persists two runtime data paths by default: `memory_palace_data` stores the database (`/app/data` in the container), and `memory_palace_snapshots` stores Review snapshots (`/app/snapshots` in the container). If you run `docker compose down -v` or delete those volumes manually, both are cleared together.
 
@@ -477,13 +486,13 @@ Configure these parameters in your `.env` file. All endpoints support the **Open
 RETRIEVAL_EMBEDDING_BACKEND=api
 RETRIEVAL_EMBEDDING_API_BASE=http://localhost:11434/v1   # e.g., Ollama
 RETRIEVAL_EMBEDDING_API_KEY=your-api-key
-RETRIEVAL_EMBEDDING_MODEL=Qwen3-Embedding-8B
+RETRIEVAL_EMBEDDING_MODEL=your-embedding-model-id
 
 # ── Reranker Model ───────────────────────────────────────────
 RETRIEVAL_RERANKER_ENABLED=true
 RETRIEVAL_RERANKER_API_BASE=http://localhost:11434/v1
 RETRIEVAL_RERANKER_API_KEY=your-api-key
-RETRIEVAL_RERANKER_MODEL=Qwen3-Reranker-8B
+RETRIEVAL_RERANKER_MODEL=your-reranker-model-id
 
 # ── Tuning (recommended 0.20 ~ 0.40) ────────────────────────
 RETRIEVAL_RERANKER_WEIGHT=0.25
@@ -493,6 +502,10 @@ RETRIEVAL_RERANKER_WEIGHT=0.25
 > - `RETRIEVAL_EMBEDDING_BACKEND` controls only the embedding path.
 > - There is no `RETRIEVAL_RERANKER_BACKEND` switch; reranker activation is controlled by `RETRIEVAL_RERANKER_ENABLED`.
 > - Reranker connection settings are resolved from `RETRIEVAL_RERANKER_API_BASE/API_KEY/MODEL` first, and fall back to `ROUTER_*` only when missing (with base/key then able to fall back to `OPENAI_*`).
+>
+> The model IDs above are placeholders only. Memory Palace does not require a specific provider or model family; use the exact embedding / reranker / chat model IDs exposed by your own OpenAI-compatible service.
+>
+> If you use `--allow-runtime-env-injection` for local `profile c/d` debugging, the script switches that run into explicit API mode, reuses `ROUTER_API_BASE/ROUTER_API_KEY` as the fallback source for embedding / reranker API base+key when the explicit `RETRIEVAL_*` values are not set, and also forwards optional `INTENT_LLM_*` values when present.
 >
 > Advanced switch guidance:
 > - `INTENT_LLM_ENABLED`: experimental; keep `false` unless you are validating a stable chat model and want better intent classification on ambiguous queries
@@ -507,18 +520,18 @@ RETRIEVAL_RERANKER_WEIGHT=0.25
 WRITE_GUARD_LLM_ENABLED=true
 WRITE_GUARD_LLM_API_BASE=http://localhost:11434/v1
 WRITE_GUARD_LLM_API_KEY=your-api-key
-WRITE_GUARD_LLM_MODEL=Qwen3.5-35B-A3B
+WRITE_GUARD_LLM_MODEL=your-chat-model-id
 
 # ── Compact Gist LLM (falls back to Write Guard if empty) ──
 COMPACT_GIST_LLM_ENABLED=true
 COMPACT_GIST_LLM_API_BASE=
 COMPACT_GIST_LLM_API_KEY=
-COMPACT_GIST_LLM_MODEL=Qwen3.5-35B-A3B
+COMPACT_GIST_LLM_MODEL=your-chat-model-id
 ```
 
 Profile templates are located at: `deploy/profiles/{macos,windows,docker}/profile-{a,b,c,d}.env`
 
-Full parameter reference: [DEPLOYMENT_PROFILES.md](docs/DEPLOYMENT_PROFILES.md)
+Full parameter reference: [DEPLOYMENT_PROFILES_EN.md](docs/DEPLOYMENT_PROFILES_EN.md)
 
 ---
 
@@ -566,7 +579,7 @@ cd backend && HOST=127.0.0.1 PORT=8010 python run_sse.py
 >
 > Use `HOST=0.0.0.0` only when you really need remote clients and have already added the usual network protections.
 
-Full tool semantics: [TOOLS.md](docs/TOOLS.md)
+Full tool semantics: [TOOLS_EN.md](docs/TOOLS_EN.md)
 
 ---
 
@@ -620,7 +633,7 @@ For `Gemini CLI`, `Codex CLI`, and `OpenCode`, prefer a **user-scope** MCP insta
 python scripts/install_skill.py --targets gemini,codex,opencode --scope user --with-mcp --force
 ```
 
-The two verification commands above are best treated as **machine-local diagnostics**, not as a universal “must all PASS” gate. They write local reports under `docs/skills/`, and some checks can still show `PARTIAL` / `FAIL` when your current machine lacks a logged-in CLI, a user-scope MCP binding, or the larger workspace-only validation helpers.
+The two verification commands above are best treated as **extra validation**, not as the first thing every user must run.
 
 Canonical source and the local paths that appear after you run the sync/install steps:
 
@@ -631,7 +644,7 @@ Canonical source and the local paths that appear after you run the sync/install 
 - Cursor: `<repo-root>/.cursor/skills/memory-palace/`
 - Compatible agent CLI: `<repo-root>/.agent/skills/memory-palace/`
 
-These hidden client directories are **local generated mirrors**, not public source files. They are ignored by git, so a fresh GitHub checkout normally starts with only the canonical bundle under `docs/skills/memory-palace/`; run the commands above to create the local mirrors on your machine.
+These hidden client directories are local mirrors generated after install. A new clone normally starts with only the canonical bundle under `docs/skills/memory-palace/`.
 
 The canonical skill is aligned with the current code contract:
 
@@ -642,23 +655,23 @@ The canonical skill is aligned with the current code contract:
 - when `guard_action=NOOP`, stop writing, inspect the suggested target, and only then decide whether to switch to `update_memory`
 - the trigger sample set lives at `<repo-root>/docs/skills/memory-palace/references/trigger-samples.md`
 
-If you want to re-check the local skill smoke or the live MCP path on your own machine, run `python scripts/evaluate_memory_palace_skill.py` and `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`. They generate `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` and `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` locally by default. Both reports are meant to stay local, are ignored by `.gitignore`, and may be absent in the public GitHub repo.
+If you want to re-check skill smoke or the live MCP path, run `python scripts/evaluate_memory_palace_skill.py` and `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`. They generate local reports under `docs/skills/`.
 
-Full guide: [MEMORY_PALACE_SKILLS.md](docs/skills/MEMORY_PALACE_SKILLS.md)
+Full guide: [MEMORY_PALACE_SKILLS_EN.md](docs/skills/MEMORY_PALACE_SKILLS_EN.md)
 
 ---
 
 ## 📊 Benchmark Results
 
-> This section keeps the **user-facing summary tables** from the current public benchmark suite and local release runs. More detailed benchmark logs, one-off re-baseline notes, and machine-specific artifacts stay local by default and are not treated as public guarantees or universal outcomes.
+> This section keeps the **user-facing summary tables** from the current benchmark suite.
 >
-> For methodology, caveats, and reproduction commands, see `docs/EVALUATION.md`. For the same-setup old-vs-current summary used in this release note, see `docs/changelog/release_summary_vs_old_project_2026-03-06.md`.
+> For methodology, caveats, and reproduction commands, see [EVALUATION_EN.md](docs/EVALUATION_EN.md). For the same-setup old-vs-current summary used in this release note, see [release_summary_vs_old_project_2026-03-06_EN.md](docs/changelog/release_summary_vs_old_project_2026-03-06_EN.md).
 >
-> The raw `*_metrics.json` files behind these tables stay local by default and are gitignored, so they may be absent in the public GitHub repo.
+> The numbers below are a release summary, not a guarantee for every hardware or provider setup.
 
 ### Retrieval Quality — A/B/C/D Real Run
 
-Source: `profile_abcd_real_metrics.json` · Sample size = 8 per dataset · 10 distractor documents · Seed = 20260219 · typically generated as a maintainer-side benchmark artifact during local validation
+Source: `profile_abcd_real_metrics.json` · Sample size = 8 per dataset · 10 distractor documents · Seed = 20260219
 
 > 📌 These numbers summarize one current release run. Hardware, provider, and model differences may change outcomes.
 
@@ -686,7 +699,7 @@ Source: `profile_abcd_real_metrics.json` · Sample size = 8 per dataset · 10 di
 
 ### Retrieval Quality — A/B Large-Sample Gate
 
-Source: `profile_ab_metrics.json` · Sample size = 100 · typically generated as a maintainer-side benchmark artifact during local validation
+Source: `profile_ab_metrics.json` · Sample size = 100
 
 | Profile | Dataset | HR@10 | MRR | NDCG@10 | p95 (ms) |
 |---|---|---:|---:|---:|---:|
@@ -701,8 +714,8 @@ Source: `profile_ab_metrics.json` · Sample size = 100 · typically generated as
 >
 > If you want to see the **same-setup old-vs-current comparison** used in this release note, go straight to:
 >
-> - `docs/EVALUATION.md` → `3.5 Old vs Current Version (Same-Setup Summary)`
-> - `docs/changelog/release_summary_vs_old_project_2026-03-06.md`
+> - `docs/EVALUATION_EN.md` → `3.5 Old vs Current Version (Same-Metric Summary)`
+> - `docs/changelog/release_summary_vs_old_project_2026-03-06_EN.md`
 
 <p align="center">
   <img src="docs/images/benchmark_comparison.png" width="900" alt="Old vs Current benchmark comparison" />
@@ -720,11 +733,11 @@ Source: `profile_ab_metrics.json` · Sample size = 100 · typically generated as
 | Gist Quality | ROUGE-L | 0.759 | ≥ 0.40 | ✅ PASS |
 | Phase 6 Gate | Valid | true | — | ✅ PASS |
 
-> **Write Guard**: Evaluated on 6 test cases (4 TP, 0 FP, 0 FN). Source: `write_guard_quality_metrics.json` (typically generated as a maintainer-side benchmark artifact during local validation)
+> **Write Guard**: Evaluated on 6 test cases (4 TP, 0 FP, 0 FN). Source: `write_guard_quality_metrics.json`
 >
-> **Intent Classification**: 6/6 correct classifications across temporal, causal, exploratory, and factual intents using `keyword_scoring_v2`. Source: `intent_accuracy_metrics.json` (typically generated as a maintainer-side benchmark artifact during local validation)
+> **Intent Classification**: 6/6 correct classifications across temporal, causal, exploratory, and factual intents using `keyword_scoring_v2`. Source: `intent_accuracy_metrics.json`
 >
-> **Gist ROUGE-L**: Average across 5 test cases (range: 0.667 – 0.923). Source: `compact_context_gist_quality_metrics.json` (typically generated as a maintainer-side benchmark artifact during local validation)
+> **Gist ROUGE-L**: Average across 5 test cases (range: 0.667 – 0.923). Source: `compact_context_gist_quality_metrics.json`
 >
 > In plain English:
 >
@@ -757,13 +770,14 @@ than part of the public user package.
 > 📌 These images are here to help you quickly understand the main dashboard areas.
 >
 > - They show the **typical post-entry dashboard state**
+> - The current frontend defaults to English; the screenshots below show the Chinese mode after switching from the top-right language button
 > - The top bar now provides a unified auth entry (`Set API key` / `Update API key` / `Clear key`, or `Runtime key active` when injected at runtime)
 > - If auth is not configured yet, the page shell still opens, but protected data requests show an auth hint, empty state, or `401` until credentials are available
 
 <details>
 <summary>📂 Memory — Tree Browser & Editor</summary>
 
-<img src="docs/images/memory-palace-memory-page.png" width="900" alt="Memory Palace — Memory Browser Page" />
+<img src="docs/images/memory-zh.png" width="900" alt="Memory Palace — Memory Browser Page (Chinese mode)" />
 
 Tree-structured memory browser with inline editor and Gist view. Navigate by domain → path hierarchy.
 </details>
@@ -771,7 +785,7 @@ Tree-structured memory browser with inline editor and Gist view. Navigate by dom
 <details>
 <summary>📋 Review — Diff & Rollback</summary>
 
-<img src="docs/images/memory-palace-review-page.png" width="900" alt="Memory Palace — Review Page" />
+<img src="docs/images/review-zh.png" width="900" alt="Memory Palace — Review Page (Chinese mode)" />
 
 Side-by-side diff comparison of snapshots with one-click rollback and integrate actions. The current version also adds more explicit error handling and session-state behavior here.
 </details>
@@ -779,7 +793,7 @@ Side-by-side diff comparison of snapshots with one-click rollback and integrate 
 <details>
 <summary>🔧 Maintenance — Vitality Governance</summary>
 
-<img src="docs/images/memory-palace-maintenance-page.png" width="900" alt="Memory Palace — Maintenance Page" />
+<img src="docs/images/maintenance-zh.png" width="900" alt="Memory Palace — Maintenance Page (Chinese mode)" />
 
 Monitor memory vitality scores, trigger cleanup tasks, and manage decay parameters. The current version also adds domain / path-prefix filters and a more explicit human-confirmation flow.
 </details>
@@ -787,7 +801,7 @@ Monitor memory vitality scores, trigger cleanup tasks, and manage decay paramete
 <details>
 <summary>📊 Observability — Search & Task Monitoring</summary>
 
-<img src="docs/images/memory-palace-observability-page.png" width="900" alt="Memory Palace — Observability Page" />
+<img src="docs/images/observability-zh.png" width="900" alt="Memory Palace — Observability Page (Chinese mode)" />
 
 Real-time search query monitoring, retrieval quality insights, and task queue status. The current version also adds `scope hint`, runtime snapshot details, and richer index-task visibility.
 </details>
@@ -822,14 +836,14 @@ Real-time search query monitoring, retrieval quality insights, and task queue st
 
 | Document | Description |
 |---|---|
-| [Getting Started](docs/GETTING_STARTED.md) | Complete guide from zero to running |
-| [Technical Overview](docs/TECHNICAL_OVERVIEW.md) | Architecture design and module responsibilities |
-| [Deployment Profiles](docs/DEPLOYMENT_PROFILES.md) | A/B/C/D detailed configuration and tuning guide |
-| [MCP Tools](docs/TOOLS.md) | Full semantics and return formats for all 9 tools |
-| [Evaluation](docs/EVALUATION.md) | Retrieval quality, write gates, intent classification metrics |
-| [Skills Guide](docs/skills/MEMORY_PALACE_SKILLS.md) | Multi-client unified integration strategy |
-| [Security & Privacy](docs/SECURITY_AND_PRIVACY.md) | API Key authentication and security policies |
-| [Troubleshooting](docs/TROUBLESHOOTING.md) | Common issues and solutions |
+| [Getting Started](docs/GETTING_STARTED_EN.md) | Complete guide from zero to running |
+| [Technical Overview](docs/TECHNICAL_OVERVIEW_EN.md) | Architecture design and module responsibilities |
+| [Deployment Profiles](docs/DEPLOYMENT_PROFILES_EN.md) | A/B/C/D detailed configuration and tuning guide |
+| [MCP Tools](docs/TOOLS_EN.md) | Full semantics and return formats for all 9 tools |
+| [Evaluation](docs/EVALUATION_EN.md) | Retrieval quality, write gates, intent classification metrics |
+| [Skills Guide](docs/skills/MEMORY_PALACE_SKILLS_EN.md) | Multi-client unified integration strategy |
+| [Security & Privacy](docs/SECURITY_AND_PRIVACY_EN.md) | API Key authentication and security policies |
+| [Troubleshooting](docs/TROUBLESHOOTING_EN.md) | Common issues and solutions |
 
 ---
 
@@ -842,7 +856,7 @@ Real-time search query monitoring, retrieval quality insights, and task queue st
 - Docker one-click deployment forwards auth headers at the server-side proxy, so the browser does not receive the real `MCP_API_KEY`
 - Local bypass requires explicit opt-in: `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` (loopback only)
 
-Details: [SECURITY_AND_PRIVACY.md](docs/SECURITY_AND_PRIVACY.md)
+Details: [SECURITY_AND_PRIVACY_EN.md](docs/SECURITY_AND_PRIVACY_EN.md)
 
 ---
 

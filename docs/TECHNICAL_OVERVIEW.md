@@ -48,10 +48,11 @@ backend/
 
 ### 核心模块说明
 
-- **`main.py`**：FastAPI 应用入口，负责生命周期管理（数据库初始化、legacy 数据库文件兼容恢复）、CORS 配置、路由注册（`review`、`browse`、`maintenance`）和健康检查（含索引状态、write lane 与 index worker 运行时状态报告）。默认 CORS origin 收敛为本地常用列表（`localhost/127.0.0.1` 的 `5173/3000`）；显式配置 wildcard（`*`）时会自动禁用 credentials；legacy sqlite 恢复前会执行 regular-file + quick_check + 核心表存在校验。
+- **`main.py`**：FastAPI 应用入口，负责生命周期管理（数据库初始化、legacy 数据库文件兼容恢复）、CORS 配置、路由注册（`review`、`browse`、`maintenance`）和健康检查（含索引状态、write lane 与 index worker 运行时状态报告）。默认 CORS origin 收敛为本地常用列表（`localhost/127.0.0.1` 的 `5173/3000`）；显式配置 wildcard（`*`）时会自动禁用 credentials；legacy sqlite 恢复前会执行 regular-file + quick_check + 核心表存在校验，并在解析 SQLite URL 时剥离 query / fragment，跳过 `:memory:` / `file::memory:` 这类非文件目标。
 - **`mcp_server.py`**：实现 9 个 MCP 工具，包括 URI 解析（`domain://path` 格式）、快照管理、write guard 决策、会话缓存、异步索引入队等核心逻辑。同时提供系统 URI（`system://boot`、`system://index`、`system://index-lite`、`system://audit`、`system://recent`）资源。`stdio` 直接连工具进程；SSE / streamable HTTP 的远程访问则跟随 `HOST` 配置，并继续受 API Key 与网络侧安全控制约束。
 - **`runtime_state.py`**：管理写入 lane（串行化写操作）、索引 worker（异步队列处理索引重建任务）、vitality 衰减调度、cleanup review 审批流程和 sleep consolidation 调度等运行时状态。
-- **`db/sqlite_client.py`**：SQLite 数据库操作层，包含记忆 CRUD、keyword/semantic/hybrid 三种检索模式、write_guard 逻辑（支持语义匹配 + 关键词匹配 + LLM 决策三级判定）、gist 生成与缓存、vitality 评分与衰减、embedding 获取（支持远程 API 和本地 hash 两种模式）、reranker 集成。
+- **`run_sse.py`**：SSE 传输层，负责 API Key 鉴权和 `/sse`、`/messages` 两条链路的会话管理。当前实现会在客户端断开后清理 session；如果你继续拿旧的 `session_id` 往 `/messages` 发请求，服务端会明确返回 `404/410`，而不是假装 `202 Accepted`。同时它也暴露一个轻量级 `/health` 端点，主要给 Docker / 进程级 readiness 探测使用；真正的 SSE 数据通道仍然是 `/sse`，并继续受鉴权保护。
+- **`db/sqlite_client.py`**：SQLite 数据库操作层，包含记忆 CRUD、keyword/semantic/hybrid 三种检索模式、write_guard 逻辑（支持语义匹配 + 关键词匹配 + LLM 决策三级判定）、gist 生成与缓存、vitality 评分与衰减、embedding 获取（支持远程 API 和本地 hash 两种模式）、reranker 集成。数据库初始化现在还会用基于数据库文件路径的 `.init.lock` 做进程级串行化，避免 `backend` / `sse` 首次并发启动时互相抢库；`:memory:` 这类非文件目标不会生成这个锁。
 
 ---
 
@@ -133,7 +134,7 @@ backend/
 | `POST` | `/maintenance/observability/search` | 观测搜索（含检索统计） |
 | `GET` | `/maintenance/observability/summary` | 观测概览 |
 
-这组接口比较多，但可以简单分成 4 类：
+这组接口比较多，但可以简单分成 5 类：
 
 1. **导入 / 学习任务**：`import/*`、`learn/*`
 2. **孤儿记忆清理**：`orphans*`
@@ -171,7 +172,11 @@ backend/
 frontend/src/
 ├── App.jsx                                    # 路由与页面骨架
 ├── main.jsx                                   # React 入口
+├── i18n.js                                    # react-i18next 初始化、默认语言与持久化
 ├── index.css                                  # 全局样式（TailwindCSS）
+├── locales/
+│   ├── en.js                                  # 英文文案
+│   └── zh-CN.js                               # 中文文案
 ├── features/
 │   ├── memory/MemoryBrowser.jsx               # 树形浏览、编辑、gist 视图
 │   ├── review/ReviewPage.jsx                  # diff、rollback、integrate
@@ -185,6 +190,7 @@ frontend/src/
 │   └── SnapshotList.jsx                       # 快照列表
 ├── lib/
 │   ├── api.js                                 # 统一 API 客户端与运行时鉴权注入
+│   ├── format.js                              # 跟随当前语言的日期/数字格式化
 │   ├── api.test.js                            # API 客户端单元测试
 │   └── api.contract.test.js                   # API 鉴权契约测试
 └── test/                                      # 前端测试目录
@@ -201,9 +207,11 @@ frontend/src/
 
 补充说明：
 
-- 当前版本的应用壳层右上角有统一的鉴权入口：`Set API key` / `Update API key` / `Clear key`
+- 当前版本的前端默认英文；应用壳层右上角同时提供语言切换入口与统一鉴权入口
+- 语言切换支持英文 / 中文一键切换，结果会保存在浏览器 `localStorage` 的 `memory-palace.locale`
+- 常见静态文案、日期/数字格式，以及前端侧的常见错误映射会跟随当前语言切换
 - 如果还没配置鉴权，页面外壳仍会打开，但受保护的数据请求会先显示授权提示、空态或 `401`
-- Docker 一键部署默认不需要手动点 `Set API key`：前端代理会在服务端自动转发同一把 `MCP_API_KEY`
+- 按推荐的一键 Docker 路径启动时，通常不需要再手动点 `Set API key`：前端代理会在服务端自动转发同一把 `MCP_API_KEY`；如果你不是按这条路径启动，或者手动改了 env / 代理配置，页面里仍可能看到这个按钮
 
 ---
 

@@ -13,6 +13,9 @@ docs/skills/memory-palace/
 ├── agents/
 │   └── openai.yaml
 └── variants/
+    ├── antigravity/
+    │   └── global_workflows/
+    │       └── memory-palace.md
     └── gemini/
         └── SKILL.md
 ```
@@ -96,7 +99,8 @@ Gemini 端当前有一个已知边界：
 
 因此当前推荐分两层：
 
-- **当前工作区里优先尝试**：先运行 workspace 安装，再走项目级 `.gemini/skills/...` + `.gemini/settings.json`
+- **默认更稳的推荐**：先跑 `python scripts/install_skill.py --targets gemini --scope user --with-mcp --force`
+- **当前工作区如果还想补项目级入口**：再运行 workspace 安装，补齐项目级 `.gemini/skills/...` + `.gemini/settings.json`
 - **跨仓复用 / 复制到别的工作区**：仍然优先 `user-scope install`
 
 公开口径建议：
@@ -144,7 +148,7 @@ Gemini 端当前有一个已知边界：
 
 - 把 canonical bundle 分发到各 CLI 目录
 - 检查 mirrors 是否漂移
-- 当前工作区镜像包括 `.claude`、`.codex`、`.opencode`、`.cursor`、`.agent`
+- 当前工作区镜像包括 `.claude`、`.codex`、`.opencode`、`.cursor`、`.agent`、`.gemini`
 - 如果 `--check` 报 drift，先跑一次同步，再重新跑 `evaluate_memory_palace_skill.py`
 - 如果只剩 `claude(user)` 绑定失败，优先补当前项目在 `~/.claude.json` 下的 project-scoped `mcpServers.memory-palace`，不要直接去改兄弟仓的项目块
 
@@ -154,7 +158,7 @@ Gemini 端当前有一个已知边界：
 
 - 把 canonical bundle 安装到其他工作区或用户目录
 - 支持 `copy` / `symlink`
-- 让这套 skill 不依赖当前仓库路径也能直接使用
+- 在需要时补齐 `--with-mcp` 的 CLI 配置，但 MCP 仍绑定到**当前 checkout** 的 `scripts/run_memory_palace_mcp_stdio.sh`
 - 对 Gemini，这也是当前更稳妥的推荐安装路径
 - 当目标是 Gemini 时，自动替换为 `variants/gemini/SKILL.md`
 
@@ -208,10 +212,11 @@ search_memory(query="...", include_session=True)
 - `guard_reason`
 - `guard_method`
 - `guard_target_uri`
+- `guard_target_id`
 
 推荐规则：
 
-- `NOOP` → 不继续写，先检查重复
+- `NOOP` → 不继续写；先检查 `guard_target_uri` / `guard_target_id`，并先读建议目标再决定是否需要改动
 - `UPDATE` → 优先改为 `update_memory`
 - `DELETE` → 先确认旧记忆确实该被替换
 
@@ -261,7 +266,7 @@ search_memory(query="...", include_session=True)
 - “给我重写 README”
 - “修一下前端按钮样式”
 - “帮我分析 benchmark 结果”
-- “更新 docs/skills 的说明文字”
+- “更新与 Memory Palace 无关的 docs/skills 说明文字”
 
 ### 样例集的具体作用
 
@@ -320,7 +325,7 @@ gemini -m gemini-3-flash-preview \
 
 注意：这是一条**最近验证里更稳定的经验路径**，不是对所有 Gemini 版本都恒真的官方保证。
 
-## 7. 维护边界
+## 8. 维护边界
 
 后续继续优化时，保持这个顺序：
 

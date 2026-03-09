@@ -65,7 +65,7 @@ For each sample:
 
 - Prompt: `这个 Memory Palace 写入被 guard 拦截了，帮我找真实目标。`
 - Why: explicit guard handling
-- Expected first move: inspect `guard_target_uri` / `guard_target_id`, then `read_memory(...)`
+- Expected first move: inspect `guard_target_uri` / `guard_target_id`, read the suggested target, then decide whether anything should change
 
 ### T09
 
@@ -75,8 +75,8 @@ For each sample:
 
 ### T10
 
-- Prompt: `更新一下这个仓库里的 Memory Palace skill 文档，让它和真实 MCP 工作流一致。`
-- Why: repository-local skill maintenance for Memory Palace
+- Prompt: `解释一下这个仓库里的 Memory Palace skill 为什么要求先读 system://boot，再决定怎么写。`
+- Why: repository-local `memory-palace` skill introspection and workflow explanation
 - Expected first move: open the canonical skill/docs references, not generic docs editing only
 
 ## Should Not Trigger

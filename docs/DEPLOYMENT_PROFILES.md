@@ -11,7 +11,7 @@
 | [1. 三步上手](#1-三步上手) | 最快了解如何开始 |
 | [2. 档位一览](#2-档位一览) | A/B/C/D 四种配置的区别 |
 | [3. 各档位详细配置](#3-各档位详细配置) | 每种档位的 `.env` 参数说明 |
-| [4. 可选 LLM 参数](#4-可选-llm-参数writeguardcompact_context) | 写入守卫与上下文压缩 |
+| [4. 可选 LLM 参数](#4-可选-llm-参数writeguardcompact_contextintent) | 写入守卫、上下文压缩与意图增强 |
 | [5. Docker 一键部署](#5-docker-一键部署推荐) | 推荐的容器化部署方式 |
 | [6. 手动启动](#6-手动启动) | 不用 Docker 的本地启动方式 |
 | [7. 本地推理服务参考](#7-本地推理服务参考) | Ollama / LM Studio / vLLM / SGLang |
@@ -117,8 +117,8 @@ RETRIEVAL_EMBEDDING_BACKEND=router
 # Embedding 配置
 ROUTER_API_BASE=http://127.0.0.1:PORT/v1          # ← 替换 PORT 为实际端口
 ROUTER_API_KEY=replace-with-your-key
-ROUTER_EMBEDDING_MODEL=Qwen3-Embedding-8B
-RETRIEVAL_EMBEDDING_MODEL=Qwen3-Embedding-8B
+ROUTER_EMBEDDING_MODEL=<your-embedding-model-id>
+RETRIEVAL_EMBEDDING_MODEL=<your-embedding-model-id>
 RETRIEVAL_EMBEDDING_API_BASE=http://127.0.0.1:PORT/v1
 RETRIEVAL_EMBEDDING_API_KEY=replace-with-your-key
 RETRIEVAL_EMBEDDING_DIM=4096
@@ -127,7 +127,7 @@ RETRIEVAL_EMBEDDING_DIM=4096
 RETRIEVAL_RERANKER_ENABLED=true
 RETRIEVAL_RERANKER_API_BASE=http://127.0.0.1:PORT/v1
 RETRIEVAL_RERANKER_API_KEY=replace-with-your-key
-RETRIEVAL_RERANKER_MODEL=Qwen3-Reranker-8B
+RETRIEVAL_RERANKER_MODEL=<your-reranker-model-id>
 RETRIEVAL_RERANKER_WEIGHT=0.30                     # 推荐 0.20 ~ 0.40
 ```
 
@@ -140,8 +140,8 @@ RETRIEVAL_RERANKER_ENABLED=true
 RETRIEVAL_RERANKER_API_BASE=http://127.0.0.1:PORT/v1
 RETRIEVAL_RERANKER_API_KEY=replace-with-your-key
 # 下面两项按你的服务实际模型名填写
-RETRIEVAL_EMBEDDING_MODEL=Qwen3-Embedding-8B
-RETRIEVAL_RERANKER_MODEL=Qwen3-Reranker-8B
+RETRIEVAL_EMBEDDING_MODEL=<your-embedding-model-id>
+RETRIEVAL_RERANKER_MODEL=<your-reranker-model-id>
 # 注意：不存在 RETRIEVAL_RERANKER_BACKEND 配置项
 ```
 
@@ -156,6 +156,8 @@ RETRIEVAL_RERANKER_WEIGHT=0.35                     # 远程推荐略高
 ```
 
 > **🔑 C/D 第一调参项**：`RETRIEVAL_RERANKER_WEIGHT`，建议范围 `0.20 ~ 0.40`，以 `0.05` 步长微调。
+>
+> **模型 ID 提醒**：上面的 `<your-embedding-model-id>` / `<your-reranker-model-id>` 就是推荐写法。项目本身不绑定某个固定模型家族；请直接填写你自己的 provider 实际 model id。
 
 如果你采用直连方式，最小验证步骤如下：
 
@@ -174,22 +176,23 @@ curl -fsS http://127.0.0.1:18000/browse/node -H "X-MCP-API-Key: <YOUR_MCP_API_KE
 2. 无论你走 `router` 还是直连，都应在最终配置下通过启动 + 健康检查。
 3. 若占位 endpoint/key 下启动失败，属于预期 fail-closed；请替换成真实可用值后再复验。
 
-### 推荐模型选型
+### 模型 ID 示例
 
-项目档位模板中默认配置的模型：
+这里建议你直接按“用途 -> 真实 model id”去填：
 
-| 用途 | 默认模型 | 维度 | 说明 |
-|---|---|---|---|
-| Embedding | `Qwen3-Embedding-8B` | 4096 | 多语言，支持中英文，精度高 |
-| Reranker | `Qwen3-Reranker-8B` | — | 高精度重排序，支持中英文 |
+| 用途 | 建议写法 | 说明 |
+|---|---|---|
+| Embedding | `<your-embedding-model-id>` | 填你的 provider 实际 embedding model id |
+| Reranker | `<your-reranker-model-id>` | 填你的 provider 实际 reranker model id |
+| 可选 LLM | `<your-chat-model-id>` | 用于 `write_guard` / `compact_context` / `intent` |
 
-你也可以替换为其他 OpenAI-compatible 模型，例如 `bge-m3`、`text-embedding-3-small` 等，只需修改对应的 `*_MODEL` 和 `*_DIM` 参数。
+无论你走 `router` 还是直连 API，项目都只是把这些字符串原样传给你的 OpenAI-compatible 服务；不会强制要求某个固定模型品牌或家族。
 
 ---
 
 ## 4. 可选 LLM 参数（write_guard / compact_context / intent）
 
-这些参数控制两个可选的 LLM 功能：**写入守卫**（质量过滤）和**上下文压缩**（摘要生成）。
+这些参数控制三个可选的 LLM 功能：**写入守卫**（质量过滤）、**上下文压缩**（摘要生成）和**意图增强**（实验性分类增强）。
 
 在 `.env` 中配置：
 
@@ -198,24 +201,26 @@ curl -fsS http://127.0.0.1:18000/browse/node -H "X-MCP-API-Key: <YOUR_MCP_API_KE
 WRITE_GUARD_LLM_ENABLED=false
 WRITE_GUARD_LLM_API_BASE=             # OpenAI-compatible /chat/completions 端点
 WRITE_GUARD_LLM_API_KEY=
-WRITE_GUARD_LLM_MODEL=Qwen3.5-35B-A3B
+WRITE_GUARD_LLM_MODEL=your-chat-model-id
 
 # Compact Context Gist LLM（上下文压缩，生成摘要）
 COMPACT_GIST_LLM_ENABLED=false
 COMPACT_GIST_LLM_API_BASE=
 COMPACT_GIST_LLM_API_KEY=
-COMPACT_GIST_LLM_MODEL=Qwen3.5-35B-A3B
+COMPACT_GIST_LLM_MODEL=your-chat-model-id
 
 # Intent LLM（实验性意图分类增强）
 INTENT_LLM_ENABLED=false
 INTENT_LLM_API_BASE=
 INTENT_LLM_API_KEY=
-INTENT_LLM_MODEL=Qwen3.5-35B-A3B
+INTENT_LLM_MODEL=your-chat-model-id
 ```
 
 > **回退机制**：当 `COMPACT_GIST_LLM_*` 未配置时，`compact_context` 会自动回退使用 `WRITE_GUARD_LLM_*` 的配置。两条链路均使用 OpenAI-compatible chat 接口（`/chat/completions`）。
 >
-> **推荐模型**：Embedding 使用 `Qwen3-Embedding-8B`，Reranker 使用 `Qwen3-Reranker-8B`，可选 LLM（write_guard / compact_context / intent）使用 `Qwen3.5-35B-A3B`。
+> **说明**：这里的 model id 只起占位示例作用。只要你的服务兼容 OpenAI-style `/embeddings`、`/chat/completions` 或 reranker 端点，就可以改成你自己的实际 model id。
+>
+> 如果你的 provider 使用了不同的 model id 写法，请保持同一模型家族，并改成你自己的 provider 实际 model id。
 >
 > **补充说明**：`INTENT_LLM_*` 为实验性能力，关闭或不可用时会直接回退关键词规则，不影响默认检索路径。
 >
@@ -270,7 +275,11 @@ cd <project-root>
 >
 > 如果本次 Docker env 文件里的 `MCP_API_KEY` 为空，`apply_profile.sh/.ps1` 会自动生成一把本地 key，供 Dashboard 代理和 SSE 共用。
 >
+> 当前 compose 还会等 **backend 和 SSE 各自的 `/health`** 都通过，frontend 才算 ready。看到容器刚启动但浏览器还没通时，优先先等几秒，不要急着误判成部署失败。
+>
 > 同一 checkout 下的并发一键部署会被 deployment lock 串行化，避免共享 compose project / env 文件互相覆盖。
+>
+> 如果你对 `profile c/d` 开启 `--allow-runtime-env-injection`，脚本会把这次运行切到显式 API 模式，并额外强制 `RETRIEVAL_EMBEDDING_BACKEND=api`。当 `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` 没显式提供时，它会优先复用当前进程里的 `ROUTER_API_BASE/ROUTER_API_KEY` 作为兜底；如果你还设置了 `INTENT_LLM_*`，这条链路也会一并注入。
 
 ### 部署完成后的访问地址
 
@@ -284,7 +293,7 @@ cd <project-root>
 ### 一键脚本做了什么
 
 1. 调用 profile 脚本从模板生成本次运行使用的 Docker env 文件（默认是 per-run 临时文件；仅当显式设置 `MEMORY_PALACE_DOCKER_ENV_FILE` 时才复用指定路径）
-2. 默认禁用运行时环境注入，避免隐式覆盖模板；仅在显式开关注入时才覆盖运行参数。对 `profile c/d`，注入模式会额外强制 `RETRIEVAL_EMBEDDING_BACKEND=api` 用于本地联调。
+2. 默认禁用运行时环境注入，避免隐式覆盖模板；仅在显式开关注入时才覆盖运行参数。对 `profile c/d`，注入模式会额外强制 `RETRIEVAL_EMBEDDING_BACKEND=api` 用于本地联调；若显式 `RETRIEVAL_*` 未提供，则优先复用 `ROUTER_API_BASE/ROUTER_API_KEY` 作为 embedding / reranker API base+key 的兜底来源，并同步透传可选的 `INTENT_LLM_*`。
 3. 自动检测端口占用，若默认端口被占用则自动递增寻找空闲端口
 4. 检测并注入 Docker 持久化卷：数据卷默认使用 `memory_palace_data`（兼容旧 `nocturne_*` 数据卷），snapshot 卷默认使用 `memory_palace_snapshots`
 5. 对同一 checkout 的并发部署加 deployment lock，避免多次 `docker_one_click` 互相覆盖
@@ -314,17 +323,25 @@ COMPOSE_PROJECT_NAME=<控制台打印出的 compose project> docker compose -f d
 ### 第一步：生成 `.env` 配置
 
 ```bash
-# macOS / Linux（生成 Profile C 配置）
+# macOS / Linux（默认先生成 Profile B 配置；Linux 也使用 `macos` 这个模板值）
 cd <project-root>
-bash scripts/apply_profile.sh macos c
+bash scripts/apply_profile.sh macos b
+
+# 如果你的 embedding / reranker 模型服务已经准备好，再切到 Profile C
+# bash scripts/apply_profile.sh macos c
 
 # Windows PowerShell
-.\scripts\apply_profile.ps1 -Platform windows -Profile c
+.\scripts\apply_profile.ps1 -Platform windows -Profile b
+
+# 如果模型服务已经准备好，再切到 Profile C
+# .\scripts\apply_profile.ps1 -Platform windows -Profile c
 ```
 
 > 脚本执行逻辑：复制 `.env.example` 为 `.env`，然后追加 `deploy/profiles/<platform>/profile-<x>.env` 中的覆盖参数。
 >
 > `apply_profile.sh/.ps1` 当前会在生成结束后统一去重重复 env key，避免不同解析器对“同 key 多次出现”产生不一致行为。
+>
+> 如果你只是第一次手动跑通仓库，先从 Profile B 开始最稳；只有在 embedding / reranker 链路都已经可用时，再切到 Profile C。
 
 ### 第二步：启动后端
 
@@ -413,12 +430,10 @@ Authorization: Bearer <你的 MCP_API_KEY>
 - 非 loopback 请求仍返回 `401`（附带 `reason=insecure_local_override_requires_loopback`）
 
 > **MCP stdio 模式**不经过 HTTP/SSE 鉴权中间层，因此不受此限制。
->
-> 把 `HOST` 改成 `0.0.0.0`（或你的实际监听地址）只会放开监听范围，不会自动放宽鉴权。
 
 ### 前端访问受保护接口
 
-**本地手动启动前后端**时，推荐通过运行时注入 API Key（不建议在构建变量中写死）：
+**本地手动启动前后端**时，如果你只是本地调试，可以通过运行时注入 API Key（不建议在构建变量中写死）：
 
 ```html
 <script>
@@ -428,6 +443,8 @@ Authorization: Bearer <你的 MCP_API_KEY>
   };
 </script>
 ```
+
+> 不要把真实 `MCP_API_KEY` 写进公开页面、共享静态资源或会交付给最终用户的 HTML 里。浏览器里可以直接读取这个全局对象。面向他人的部署更推荐走服务端代理转发，而不是把 key 暴露到前端页面。
 
 > 也兼容旧字段名：`window.__MCP_RUNTIME_CONFIG__`
 
@@ -443,7 +460,7 @@ Authorization: Bearer <你的 MCP_API_KEY>
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
-> 这里的 `HOST=127.0.0.1` 是本机回环调试示例。若要给其他机器访问，请改成 `0.0.0.0`（或你的实际监听地址）。这会让远程客户端可以连到该监听地址，但你仍需要自己补齐 `MCP_API_KEY`、网络隔离、反向代理与 TLS 等保护。
+> 这里的 `HOST=127.0.0.1` 是本机回环调试示例。若要给其他机器访问，请改成 `0.0.0.0`（或你的实际监听地址），并自行补齐 `MCP_API_KEY`、网络隔离、反向代理与 TLS 等保护。
 
 Docker 一键部署时，直接使用：
 
