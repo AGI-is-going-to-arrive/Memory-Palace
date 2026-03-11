@@ -90,8 +90,8 @@ async def run_suite() -> tuple[list[StepResult], str]:
     )
 
     server = StdioServerParameters(
-        command="/bin/zsh",
-        args=["-lc", "source .venv/bin/activate && python mcp_server.py"],
+        command=sys.executable,
+        args=["mcp_server.py"],
         cwd=str(BACKEND_ROOT),
         env=env,
     )

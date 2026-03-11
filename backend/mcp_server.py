@@ -3477,6 +3477,18 @@ async def update_memory(
                 uri=full_uri,
                 **_guard_fields(guard_decision),
             )
+        if old_string is not None and old_string == new_string:
+            return _tool_response(
+                ok=False,
+                message=(
+                    "Error: old_string and new_string are identical. "
+                    "No change would be made."
+                ),
+                updated=False,
+                uri=full_uri,
+                **_guard_fields(guard_decision),
+            )
+
         defer_index = await _should_defer_index_on_write()
         client = get_sqlite_client()
         preview_text: Optional[str] = None
@@ -3487,17 +3499,6 @@ async def update_memory(
             content = None
 
             if old_string is not None:
-                if old_string == new_string:
-                    return _tool_response(
-                        ok=False,
-                        message=(
-                            "Error: old_string and new_string are identical. "
-                            "No change would be made."
-                        ),
-                        updated=False,
-                        uri=full_uri,
-                        **_guard_fields(guard_decision),
-                    )
                 memory = await client.get_memory_by_path(path, domain)
                 if not memory:
                     return _tool_response(
