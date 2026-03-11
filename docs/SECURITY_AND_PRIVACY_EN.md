@@ -64,6 +64,25 @@ Authorization: Bearer <MCP_API_KEY>
 
 > The backend uses `hmac.compare_digest` for constant-time comparison (see the authentication logic in `backend/api/maintenance.py` and `backend/run_sse.py`) to prevent timing attacks.
 
+### SSE `/messages` Burst Rate Limit
+
+`/messages` is not an unlimited ingress path. The current implementation applies an in-process burst limit to **each SSE session**:
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `SSE_MESSAGE_RATE_LIMIT_WINDOW_SECONDS` | `10` | Accounting window in seconds |
+| `SSE_MESSAGE_RATE_LIMIT_MAX_REQUESTS` | `120` | Maximum allowed POSTs for one session inside the window |
+| `SSE_MESSAGE_MAX_BODY_BYTES` | `1048576` | Hard body-size ceiling for one `/messages` request |
+
+When the limit is hit:
+
+- the server returns `429 Too Many Requests`
+- the response includes `Retry-After`
+- the affected session must wait for the window to drain before posting again
+- if the body exceeds `SSE_MESSAGE_MAX_BODY_BYTES`, the server returns `413` before JSON parsing
+
+This limit is mainly there to catch **misconfigured clients or single-session bursts**. It is not a substitute for public-edge protection such as VPN, reverse-proxy rate limiting, or network ACLs.
+
 ### Default Behavior When No Key is Provided
 
 Authentication follows a **fail-closed** strategy, with the specific logic as follows:
@@ -85,6 +104,8 @@ The above authentication logic is covered in the following test files in the cur
 
 - `backend/tests/test_week6_maintenance_auth.py` — Maintenance API five authentication scenarios
 - `backend/tests/test_week6_sse_auth.py` — SSE authentication scenarios
+- `backend/tests/test_week6_sse_auth.py::test_sse_messages_rate_limit_returns_429` — `/messages` rate limit and `Retry-After` behavior
+- `backend/tests/test_week6_sse_auth.py::test_sse_messages_reject_oversized_body_with_413` — `/messages` request-body size ceiling
 - `backend/tests/test_sensitive_api_auth.py` — Review and Browse read/write authentication
 - `backend/tests/test_review_rollback.py` — Review operation authentication test
 

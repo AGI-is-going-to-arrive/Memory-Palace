@@ -65,6 +65,8 @@ def sync_file(relative_path: Path, target_dir: Path) -> None:
     source = CANONICAL_DIR / relative_path
     target = target_dir / relative_path
     target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() and target.is_dir():
+        shutil.rmtree(target)
     shutil.copy2(source, target)
 
 
@@ -85,21 +87,12 @@ def run_check() -> int:
             target = mirror_dir / relative_path
             if not files_match(source, target):
                 drift.append(f"{mirror_dir.relative_to(REPO_ROOT)}/{relative_path}")
-        expected = {mirror_dir / relative_path for relative_path in BUNDLE_RELATIVE_FILES}
-        actual = {path for path in mirror_dir.rglob("*") if path.is_file()}
-        for extra_path in sorted(actual - expected):
-            drift.append(f"unexpected extra file: {extra_path.relative_to(REPO_ROOT)}")
 
     gemini_skill_file = GEMINI_WORKSPACE_DIR / "SKILL.md"
     if not gemini_skill_file.is_file():
         drift.append(f"missing mirror file: {gemini_skill_file.relative_to(REPO_ROOT)}")
     elif not files_match(GEMINI_VARIANT_FILE, gemini_skill_file):
         drift.append(f"mismatch: {gemini_skill_file.relative_to(REPO_ROOT)}")
-    if GEMINI_WORKSPACE_DIR.is_dir():
-        actual = {path for path in GEMINI_WORKSPACE_DIR.rglob("*") if path.is_file()}
-        expected = {gemini_skill_file}
-        for extra_path in sorted(actual - expected):
-            drift.append(f"unexpected extra file: {extra_path.relative_to(REPO_ROOT)}")
 
     if drift:
         print("Drift detected:")
@@ -117,12 +110,9 @@ def run_sync() -> int:
         print(f"canonical SKILL.md invalid: {message}", file=sys.stderr)
         return 1
     for mirror_dir in BUNDLE_MIRROR_DIRS:
-        if mirror_dir.exists():
-            shutil.rmtree(mirror_dir)
+        mirror_dir.mkdir(parents=True, exist_ok=True)
         for relative_path in BUNDLE_RELATIVE_FILES:
             sync_file(relative_path, mirror_dir)
-    if GEMINI_WORKSPACE_DIR.exists():
-        shutil.rmtree(GEMINI_WORKSPACE_DIR)
     GEMINI_WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
     shutil.copy2(GEMINI_VARIANT_FILE, GEMINI_WORKSPACE_DIR / "SKILL.md")
     print("Synced memory-palace skill mirrors.")

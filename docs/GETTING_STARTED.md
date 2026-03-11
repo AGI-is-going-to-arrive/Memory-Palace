@@ -102,6 +102,8 @@ bash scripts/apply_profile.sh macos b
 .\scripts\apply_profile.ps1 -Platform windows -Profile b
 ```
 
+> `deploy/profiles/*/profile-*.env` 是脚本输入模板，不是建议你直接复制使用的最终 `.env`。对用户路径来说，继续用 `apply_profile.sh/.ps1` 生成会更稳，也能自动补齐路径和去重重复 key。
+
 > apply_profile 脚本会将 `.env.example` 复制到 `.env`（或你指定的目标文件），然后追加对应 Profile 的覆盖配置。macOS 平台还会自动检测并填充 `DATABASE_URL`。
 >
 > `apply_profile.sh/.ps1` 当前会在生成后统一去重重复 env key；原生 Windows / native `pwsh` 仍建议在目标环境单独补跑一次。
@@ -353,7 +355,7 @@ COMPOSE_PROJECT_NAME=<控制台打印出的 compose project> docker compose -f d
 
 > 如果你需要验证 Windows 路径，建议直接在目标 Windows 环境里补跑一次启动与 smoke。
 
-### 4.1 备份当前数据库
+### 4.3 备份当前数据库
 
 在做批量测试、迁移验证或大范围配置切换前，建议先做一次 SQLite 一致性备份：
 
@@ -372,7 +374,7 @@ bash scripts/backup_memory.sh --env-file .env --output-dir backups
 
 > 备份文件默认写入 `backups/`。如果你准备分享仓库或打包交付，通常不需要把它一并带上。
 
-### 4.2 哪些文件通常不需要提交
+### 4.4 哪些文件通常不需要提交
 
 当前仓库已经把以下典型本地产物放入 `<repo-root>/.gitignore`：
 
@@ -722,6 +724,7 @@ MCP_API_KEY_ALLOW_INSECURE_LOCAL=true
 | `DATABASE_URL` 报错 | 路径建议使用绝对路径，并且要带 `sqlite+aiosqlite:///` 前缀。示例：`sqlite+aiosqlite:////absolute/path/to/memory_palace.db` |
 | 前端访问 API 返回 `502` 或 `Network Error` | 确认后端已启动且运行在 `8000` 端口。检查 `vite.config.js` 中 proxy 目标与后端端口是否一致 |
 | 受保护接口返回 `401` | 本地手动启动：配置 `MCP_API_KEY` 或设置 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`；Docker：优先确认是否使用 `apply_profile.*` / `docker_one_click.*` 生成的 Docker env 文件 |
+| SSE `/messages` 返回 `429` 或 `413` | `429` 说明同一 SSE 会话短时间内 POST 太多；先检查客户端是否有重复重试或死循环。`413` 说明单次请求体超过 `SSE_MESSAGE_MAX_BODY_BYTES`，需要缩小 payload 或调整后端限制 |
 | Docker 启动端口冲突 | `docker_one_click.sh` 默认会自动寻找空闲端口。也可通过 `--frontend-port` / `--backend-port` 手动指定 |
 
 更多问题排查请参考 [TROUBLESHOOTING.md](TROUBLESHOOTING.md)。

@@ -3,9 +3,10 @@ import sys
 import hmac
 import asyncio
 import uvicorn
+from collections import deque
 from contextlib import asynccontextmanager
 from ipaddress import ip_address
-from typing import Optional
+from typing import Deque, Dict, Optional
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
@@ -48,6 +49,17 @@ _FORWARDED_HEADER_NAMES = {
 }
 _SSE_HTTP_PATHS = {"/sse", "/sse/", "/messages", "/messages/", "/sse/messages", "/sse/messages/"}
 _PUBLIC_HTTP_PATHS = {"/health", "/health/"}
+
+
+def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return max(minimum, default)
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, value)
 
 
 def _get_configured_mcp_api_key() -> str:
@@ -125,6 +137,27 @@ def _is_direct_loopback_scope(scope: Scope) -> bool:
     return _is_loopback_hostname(_extract_host_from_scope(scope))
 
 
+async def _read_request_body_with_limit(
+    request: Request, *, max_bytes: int
+) -> tuple[Optional[bytes], bool]:
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > max_bytes:
+                return None, True
+        except (TypeError, ValueError):
+            pass
+
+    body = bytearray()
+    async for chunk in request.stream():
+        if not chunk:
+            continue
+        body.extend(chunk)
+        if len(body) > max_bytes:
+            return None, True
+    return bytes(body), False
+
+
 def _should_suppress_stream_shutdown_runtime_error(scope: Scope, exc: RuntimeError) -> bool:
     if scope.get("type") != "http":
         return False
@@ -155,6 +188,81 @@ def _should_suppress_closed_resource_error(scope: Scope) -> bool:
 
 
 class MemoryPalaceSseServerTransport(SseServerTransport):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._message_rate_limit_window_seconds = float(
+            _env_int("SSE_MESSAGE_RATE_LIMIT_WINDOW_SECONDS", 10, minimum=1)
+        )
+        self._message_rate_limit_max_requests = _env_int(
+            "SSE_MESSAGE_RATE_LIMIT_MAX_REQUESTS", 120, minimum=10
+        )
+        self._message_rate_limit_max_keys = _env_int(
+            "SSE_MESSAGE_RATE_LIMIT_MAX_KEYS", 1024, minimum=1
+        )
+        self._message_max_body_bytes = _env_int(
+            "SSE_MESSAGE_MAX_BODY_BYTES", 1024 * 1024, minimum=1024
+        )
+        self._message_rate_limit_buckets: Dict[str, Deque[float]] = {}
+        self._message_rate_limit_last_seen: Dict[str, float] = {}
+        self._message_rate_limit_guard = asyncio.Lock()
+
+    @staticmethod
+    def _session_rate_limit_key(scope: Scope, session_id: UUID) -> str:
+        client = scope.get("client")
+        host = ""
+        if isinstance(client, tuple) and client:
+            host = str(client[0] or "").strip().lower()
+        elif client is not None:
+            host = str(getattr(client, "host", "") or "").strip().lower()
+        if not host:
+            host = "unknown"
+        return f"{host}:{session_id.hex}"
+
+    async def _check_message_rate_limit(
+        self, *, scope: Scope, session_id: UUID
+    ) -> Optional[int]:
+        key = self._session_rate_limit_key(scope, session_id)
+        now = asyncio.get_running_loop().time()
+        async with self._message_rate_limit_guard:
+            bucket = self._message_rate_limit_buckets.get(key)
+            if bucket is None:
+                self._evict_oldest_rate_limit_key_if_needed()
+                bucket = deque()
+                self._message_rate_limit_buckets[key] = bucket
+
+            cutoff = now - self._message_rate_limit_window_seconds
+            while bucket and bucket[0] <= cutoff:
+                bucket.popleft()
+
+            if len(bucket) >= self._message_rate_limit_max_requests:
+                retry_after = max(
+                    1,
+                    int((bucket[0] + self._message_rate_limit_window_seconds) - now),
+                )
+                return retry_after
+
+            bucket.append(now)
+            self._message_rate_limit_last_seen[key] = now
+            return None
+
+    async def _clear_message_rate_limit_state(
+        self, *, scope: Scope, session_id: UUID
+    ) -> None:
+        key = self._session_rate_limit_key(scope, session_id)
+        async with self._message_rate_limit_guard:
+            self._message_rate_limit_buckets.pop(key, None)
+            self._message_rate_limit_last_seen.pop(key, None)
+
+    def _evict_oldest_rate_limit_key_if_needed(self) -> None:
+        if len(self._message_rate_limit_buckets) < self._message_rate_limit_max_keys:
+            return
+        oldest_key = min(
+            self._message_rate_limit_buckets.keys(),
+            key=lambda item: self._message_rate_limit_last_seen.get(item, float("-inf")),
+        )
+        self._message_rate_limit_buckets.pop(oldest_key, None)
+        self._message_rate_limit_last_seen.pop(oldest_key, None)
+
     @asynccontextmanager
     async def connect_sse(self, scope: Scope, receive: Receive, send: Send):
         if scope["type"] != "http":
@@ -207,6 +315,9 @@ class MemoryPalaceSseServerTransport(SseServerTransport):
                     )(scope, receive, send)
                 finally:
                     self._read_stream_writers.pop(session_id, None)
+                    await self._clear_message_rate_limit_state(
+                        scope=scope, session_id=session_id
+                    )
                     await read_stream_writer.aclose()
                     await write_stream_reader.aclose()
 
@@ -238,7 +349,26 @@ class MemoryPalaceSseServerTransport(SseServerTransport):
             response = Response("Could not find session", status_code=404)
             return await response(scope, receive, send)
 
-        body = await request.body()
+        retry_after = await self._check_message_rate_limit(
+            scope=scope, session_id=session_id
+        )
+        if retry_after is not None:
+            response = Response(
+                "Too many requests for this session",
+                status_code=429,
+                headers={"Retry-After": str(retry_after)},
+            )
+            return await response(scope, receive, send)
+
+        body, body_too_large = await _read_request_body_with_limit(
+            request, max_bytes=self._message_max_body_bytes
+        )
+        if body_too_large:
+            response = Response(
+                f"Message body too large (max {self._message_max_body_bytes} bytes)",
+                status_code=413,
+            )
+            return await response(scope, receive, send)
 
         try:
             message = types.JSONRPCMessage.model_validate_json(body)

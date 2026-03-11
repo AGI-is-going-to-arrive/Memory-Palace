@@ -274,11 +274,20 @@ class SessionSearchCache:
         self._max_hits_per_session = _env_int(
             "RUNTIME_SESSION_CACHE_MAX_HITS", 200, minimum=20
         )
+        self._max_sessions = _env_int(
+            "RUNTIME_SESSION_CACHE_MAX_SESSIONS", 128, minimum=1
+        )
         self._half_life_seconds = float(
             _env_int("RUNTIME_SESSION_CACHE_HALF_LIFE_SECONDS", 6 * 3600, minimum=60)
         )
         self._hits: Dict[str, Deque[SessionSearchHit]] = {}
+        self._session_last_seen: Dict[str, tuple[float, int]] = {}
+        self._touch_sequence = 0
         self._guard = asyncio.Lock()
+
+    def _mark_session_seen(self, sid: str) -> None:
+        self._touch_sequence += 1
+        self._session_last_seen[sid] = (time.monotonic(), self._touch_sequence)
 
     async def record_hit(
         self,
@@ -306,9 +315,11 @@ class SessionSearchCache:
         async with self._guard:
             queue = self._hits.get(sid)
             if queue is None:
+                self._evict_oldest_session_if_needed()
                 queue = deque(maxlen=self._max_hits_per_session)
                 self._hits[sid] = queue
             queue.append(hit)
+            self._mark_session_seen(sid)
 
     async def search(
         self, *, session_id: Optional[str], query: str, limit: int
@@ -319,6 +330,8 @@ class SessionSearchCache:
             return []
         async with self._guard:
             snapshot = list(self._hits.get(sid, ()))
+            if snapshot:
+                self._mark_session_seen(sid)
         if not snapshot:
             return []
 
@@ -386,9 +399,22 @@ class SessionSearchCache:
             "total_hits": total_hits,
             "max_hits_in_session": max_hits,
             "max_hits_per_session": self._max_hits_per_session,
+            "max_sessions": self._max_sessions,
             "half_life_seconds": self._half_life_seconds,
             "top_sessions": top_sessions,
         }
+
+    def _evict_oldest_session_if_needed(self) -> None:
+        if len(self._hits) < self._max_sessions:
+            return
+        oldest_sid = min(
+            self._hits.keys(),
+            key=lambda sid: self._session_last_seen.get(
+                sid, (float("-inf"), -1)
+            ),
+        )
+        self._hits.pop(oldest_sid, None)
+        self._session_last_seen.pop(oldest_sid, None)
 
 
 class SessionFlushTracker:
@@ -398,8 +424,17 @@ class SessionFlushTracker:
         self._trigger_chars = _env_int("RUNTIME_FLUSH_TRIGGER_CHARS", 6000, minimum=800)
         self._min_events = _env_int("RUNTIME_FLUSH_MIN_EVENTS", 6, minimum=1)
         self._max_events = _env_int("RUNTIME_FLUSH_MAX_EVENTS", 80, minimum=10)
+        self._max_sessions = _env_int(
+            "RUNTIME_FLUSH_MAX_SESSIONS", 128, minimum=1
+        )
         self._events: Dict[str, Deque[str]] = {}
+        self._session_last_seen: Dict[str, tuple[float, int]] = {}
+        self._touch_sequence = 0
         self._guard = asyncio.Lock()
+
+    def _mark_session_seen(self, sid: str) -> None:
+        self._touch_sequence += 1
+        self._session_last_seen[sid] = (time.monotonic(), self._touch_sequence)
 
     async def record_event(self, *, session_id: Optional[str], message: str) -> None:
         text = (message or "").strip()
@@ -409,9 +444,11 @@ class SessionFlushTracker:
         async with self._guard:
             queue = self._events.get(sid)
             if queue is None:
+                self._evict_oldest_session_if_needed()
                 queue = deque(maxlen=self._max_events)
                 self._events[sid] = queue
             queue.append(text[:400])
+            self._mark_session_seen(sid)
 
     async def should_flush(self, *, session_id: Optional[str]) -> bool:
         sid = _normalize_session_id(session_id)
@@ -419,6 +456,7 @@ class SessionFlushTracker:
             queue = self._events.get(sid)
             if not queue:
                 return False
+            self._mark_session_seen(sid)
             total_chars = sum(len(item) for item in queue)
             return len(queue) >= self._min_events and total_chars >= self._trigger_chars
 
@@ -426,6 +464,8 @@ class SessionFlushTracker:
         sid = _normalize_session_id(session_id)
         async with self._guard:
             queue = list(self._events.get(sid, ()))
+            if queue:
+                self._mark_session_seen(sid)
         if not queue:
             return ""
         tail = queue[-max(1, limit) :]
@@ -436,6 +476,7 @@ class SessionFlushTracker:
         sid = _normalize_session_id(session_id)
         async with self._guard:
             self._events.pop(sid, None)
+            self._session_last_seen.pop(sid, None)
 
     async def summary(self) -> Dict[str, Any]:
         """Return pending flush workload stats for SM-Lite observability."""
@@ -469,8 +510,21 @@ class SessionFlushTracker:
             "trigger_chars": self._trigger_chars,
             "min_events": self._min_events,
             "max_events_per_session": self._max_events,
+            "max_sessions": self._max_sessions,
             "top_sessions": top_sessions,
         }
+
+    def _evict_oldest_session_if_needed(self) -> None:
+        if len(self._events) < self._max_sessions:
+            return
+        oldest_sid = min(
+            self._events.keys(),
+            key=lambda sid: self._session_last_seen.get(
+                sid, (float("-inf"), -1)
+            ),
+        )
+        self._events.pop(oldest_sid, None)
+        self._session_last_seen.pop(oldest_sid, None)
 
 
 @dataclass

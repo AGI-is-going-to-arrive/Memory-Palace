@@ -1,9 +1,13 @@
 import importlib
 import json
+from pathlib import Path
 
 import pytest
 
 import main as main_module
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _reload_main_module():
@@ -64,3 +68,12 @@ async def test_health_hides_internal_exception_details(monkeypatch: pytest.Monke
     assert payload["index"]["reason"] == "internal_error"
     assert payload["runtime"]["write_lanes"]["reason"] == "internal_error"
     assert "secret_token_should_not_leak" not in json.dumps(payload)
+
+
+def test_env_example_documents_sse_message_rate_limit_knobs() -> None:
+    env_example = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
+
+    assert "SSE_MESSAGE_RATE_LIMIT_WINDOW_SECONDS=10" in env_example
+    assert "SSE_MESSAGE_RATE_LIMIT_MAX_REQUESTS=120" in env_example
+    assert "SSE_MESSAGE_MAX_BODY_BYTES=1048576" in env_example
+    assert "SSE_MESSAGE_RATE_LIMIT_MAX_KEYS" not in env_example

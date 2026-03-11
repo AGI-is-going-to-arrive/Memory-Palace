@@ -1,6 +1,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 
+vi.mock('./lib/api', () => ({
+  getSetupStatus: vi.fn().mockResolvedValue({
+    ok: true,
+    apply_supported: true,
+    apply_reason: 'local_env_file',
+    target_label: '.env',
+    restart_required: true,
+    restart_targets: ['backend', 'sse'],
+    summary: {
+      dashboard_auth_configured: false,
+      allow_insecure_local: false,
+      embedding_backend: 'hash',
+      embedding_configured: true,
+      reranker_enabled: false,
+      reranker_configured: false,
+      write_guard_enabled: false,
+      write_guard_configured: false,
+      intent_llm_enabled: false,
+      intent_llm_configured: false,
+    },
+  }),
+  saveSetupConfig: vi.fn(),
+  saveStoredMaintenanceAuth: vi.fn(),
+  clearStoredMaintenanceAuth: vi.fn(),
+  getMaintenanceAuthState: vi.fn().mockReturnValue(null),
+  extractApiError: vi.fn(() => 'Request failed'),
+}));
+
 vi.mock('./features/memory/MemoryBrowser', () => ({
   default: () => <div>memory-page</div>,
 }));

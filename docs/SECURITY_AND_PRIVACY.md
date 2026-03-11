@@ -64,6 +64,25 @@ Authorization: Bearer <MCP_API_KEY>
 
 > 后端使用 `hmac.compare_digest` 进行恒等时间比较（参见 `backend/api/maintenance.py` 与 `backend/run_sse.py` 中的鉴权实现），防止时序攻击。
 
+### SSE `/messages` 突发限流
+
+`/messages` 不是无限速入口。当前实现会对**单个 SSE session** 的消息突发做进程内限流：
+
+| 配置项 | 默认值 | 作用 |
+|---|---|---|
+| `SSE_MESSAGE_RATE_LIMIT_WINDOW_SECONDS` | `10` | 统计窗口（秒） |
+| `SSE_MESSAGE_RATE_LIMIT_MAX_REQUESTS` | `120` | 单个 session 在窗口内允许的最大 POST 次数 |
+| `SSE_MESSAGE_MAX_BODY_BYTES` | `1048576` | 单个 `/messages` 请求体的硬上限（字节） |
+
+触发限流时：
+
+- 返回 `429 Too Many Requests`
+- 响应头包含 `Retry-After`
+- 当前 session 的后续请求需要等窗口释放
+- 超过 `SSE_MESSAGE_MAX_BODY_BYTES` 时会在 JSON 解析前直接返回 `413`
+
+这层限流主要用于拦截**误配置客户端或单 session 突发刷写**；它不是公网暴露场景下的完整 DDoS 防护，也不能替代外层的 VPN、反向代理限流或网络访问控制。
+
 ### 无 Key 时的默认行为
 
 鉴权遵循 **fail-closed** 策略，具体逻辑如下：
@@ -85,6 +104,8 @@ Authorization: Bearer <MCP_API_KEY>
 
 - `backend/tests/test_week6_maintenance_auth.py` — 维护 API 五项鉴权场景
 - `backend/tests/test_week6_sse_auth.py` — SSE 鉴权场景
+- `backend/tests/test_week6_sse_auth.py::test_sse_messages_rate_limit_returns_429` — `/messages` 限流与 `Retry-After` 行为
+- `backend/tests/test_week6_sse_auth.py::test_sse_messages_reject_oversized_body_with_413` — `/messages` 请求体大小上限
 - `backend/tests/test_sensitive_api_auth.py` — Review 与 Browse 读写鉴权
 - `backend/tests/test_review_rollback.py` — Review 操作携带鉴权测试
 

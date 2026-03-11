@@ -28,6 +28,8 @@ This document helps you choose the appropriate Memory Palace configuration profi
 2.  **Generate Configuration**: Run the `apply_profile` script to generate the `.env` file.
 3.  **Start Services**: Use Docker one-click deployment **OR** manually start the backend + frontend.
 
+> `deploy/profiles/*/profile-*.env` files are template inputs, not the final `.env` files we recommend you copy, commit, or run directly. The stable user path is still: run `apply_profile.sh/.ps1` first, then fine-tune the generated result for your real environment.
+
 > **💡 Note**: **Profile B remains the default starting profile** because it has zero external dependencies. However, as long as you have model services ready, **Profile C is the strongly recommended profile**. Before upgrading to C, please ensure you fill in the embedding / reranker settings in the `.env` file; if you also want to enable LLM-assisted capabilities, continue filling in the corresponding LLM configurations.
 
 ---
@@ -116,8 +118,8 @@ RETRIEVAL_EMBEDDING_BACKEND=router
 # Embedding Configuration
 ROUTER_API_BASE=http://127.0.0.1:PORT/v1          # ← Replace PORT with actual port
 ROUTER_API_KEY=replace-with-your-key
-ROUTER_EMBEDDING_MODEL=<your-embedding-model-id>
-RETRIEVAL_EMBEDDING_MODEL=<your-embedding-model-id>
+ROUTER_EMBEDDING_MODEL=your-embedding-model-id
+RETRIEVAL_EMBEDDING_MODEL=your-embedding-model-id
 RETRIEVAL_EMBEDDING_API_BASE=http://127.0.0.1:PORT/v1
 RETRIEVAL_EMBEDDING_API_KEY=replace-with-your-key
 RETRIEVAL_EMBEDDING_DIM=4096
@@ -126,7 +128,7 @@ RETRIEVAL_EMBEDDING_DIM=4096
 RETRIEVAL_RERANKER_ENABLED=true
 RETRIEVAL_RERANKER_API_BASE=http://127.0.0.1:PORT/v1
 RETRIEVAL_RERANKER_API_KEY=replace-with-your-key
-RETRIEVAL_RERANKER_MODEL=<your-reranker-model-id>
+RETRIEVAL_RERANKER_MODEL=your-reranker-model-id
 RETRIEVAL_RERANKER_WEIGHT=0.30                     # Recommended 0.20 ~ 0.40
 ```
 
@@ -139,8 +141,8 @@ RETRIEVAL_RERANKER_ENABLED=true
 RETRIEVAL_RERANKER_API_BASE=http://127.0.0.1:PORT/v1
 RETRIEVAL_RERANKER_API_KEY=replace-with-your-key
 # Fill in the following two items according to your actual model names
-RETRIEVAL_EMBEDDING_MODEL=<your-embedding-model-id>
-RETRIEVAL_RERANKER_MODEL=<your-reranker-model-id>
+RETRIEVAL_EMBEDDING_MODEL=your-embedding-model-id
+RETRIEVAL_RERANKER_MODEL=your-reranker-model-id
 # Note: There is no RETRIEVAL_RERANKER_BACKEND configuration item
 ```
 
@@ -148,15 +150,15 @@ RETRIEVAL_RERANKER_MODEL=<your-reranker-model-id>
 
 ```bash
 # Main difference from C: API address points to remote, default reranker weight is higher
-ROUTER_API_BASE=https://<your-router-host>/v1
-RETRIEVAL_EMBEDDING_API_BASE=https://<your-router-host>/v1
-RETRIEVAL_RERANKER_API_BASE=https://<your-router-host>/v1
+ROUTER_API_BASE=https://router.example.com/v1
+RETRIEVAL_EMBEDDING_API_BASE=https://router.example.com/v1
+RETRIEVAL_RERANKER_API_BASE=https://router.example.com/v1
 RETRIEVAL_RERANKER_WEIGHT=0.35                     # Remote recommended slightly higher
 ```
 
 > **🔑 Primary Tuning Parameter for C/D**: `RETRIEVAL_RERANKER_WEIGHT`, suggested range `0.20 ~ 0.40`, fine-tune in `0.05` increments.
 >
-> **Model ID Reminder**: The `<your-embedding-model-id>` / `<your-reranker-model-id>` above are recommended placeholders. The project is not bound to any specific model family; please fill in your own provider's actual model ID.
+> **Model ID Reminder**: The `your-embedding-model-id` / `your-reranker-model-id` values above are shell-safe placeholder examples. The project is not bound to any specific model family; please fill in your own provider's actual model ID.
 
 If you adopt the direct connection method, note one boundary first:
 
@@ -203,9 +205,9 @@ It is recommended that you fill these in based on "Purpose -> Real model ID":
 
 | Purpose | Suggested Writing | Description |
 |---|---|---|
-| Embedding | `<your-embedding-model-id>` | Fill in your provider's actual embedding model ID |
-| Reranker | `<your-reranker-model-id>` | Fill in your provider's actual reranker model ID |
-| Optional LLM | `<your-chat-model-id>` | Used for `write_guard` / `compact_context` / `intent` |
+| Embedding | `your-embedding-model-id` | Fill in your provider's actual embedding model ID |
+| Reranker | `your-reranker-model-id` | Fill in your provider's actual reranker model ID |
+| Optional LLM | `your-chat-model-id` | Used for `write_guard` / `compact_context` / `intent` |
 
 Whether you go through a `router` or a direct API, the project simply passes these strings as-is to your OpenAI-compatible service; it does not enforce any specific model brand or family.
 
@@ -397,6 +399,8 @@ bash scripts/apply_profile.sh macos b
 > Script Logic: Copies `.env.example` to `.env`, then appends the override parameters from `deploy/profiles/<platform>/profile-<x>.env`.
 >
 > `apply_profile.sh/.ps1` currently deduplicates env keys after generation to prevent inconsistent behavior across different parsers for keys that appear multiple times.
+>
+> Treat `deploy/profiles/*/*.env` as **Profile template inputs**, not as final `.env` files to copy by hand. For example, the macOS templates intentionally keep a placeholder `DATABASE_URL` first, then let `apply_profile.*` rewrite it for the current checkout.
 >
 > If you are just running the repository manually for the first time, Profile B is the safest start; switch to Profile C only when the embedding / reranker links are available.
 

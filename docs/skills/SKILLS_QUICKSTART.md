@@ -141,8 +141,6 @@ python scripts/install_skill.py --targets claude --scope user --with-mcp --force
 
 如果你还想让**当前仓库**额外落一个项目级入口，再补一次 workspace 安装。
 
-补完之后，你至少会有：
-
 - `~/.claude/skills/memory-palace/`
 - `~/.claude.json` 里当前仓库的 `mcpServers.memory-palace`
 

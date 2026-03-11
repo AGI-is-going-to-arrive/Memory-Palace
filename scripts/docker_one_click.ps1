@@ -594,6 +594,20 @@ function Wait-DeploymentReady {
     return $false
 }
 
+function Test-ComposeProjectHasAnyContainer {
+    param(
+        [string]$ComposeProjectName,
+        [string]$Service
+    )
+
+    $containers = docker ps -a `
+        --filter "label=com.docker.compose.project=$ComposeProjectName" `
+        --filter "label=com.docker.compose.service=$Service" `
+        --format '{{.Names}}' 2>$null | Select-Object -First 1
+
+    return (-not [string]::IsNullOrWhiteSpace(($containers | Out-String).Trim()))
+}
+
 function Get-ComposePublishedPort {
     param(
         [string]$ComposeProjectName,
@@ -821,6 +835,12 @@ try {
         Invoke-ComposeWithRetry -ComposeArgs $composeUpArgs -ComposeProjectName $composeProjectName -MaxAttempts 3 -EnvFile $envFile
     }
     catch {
+        $hasBackendContainer = Test-ComposeProjectHasAnyContainer -ComposeProjectName $composeProjectName -Service 'backend'
+        $hasSseContainer = Test-ComposeProjectHasAnyContainer -ComposeProjectName $composeProjectName -Service 'sse'
+        $hasFrontendContainer = Test-ComposeProjectHasAnyContainer -ComposeProjectName $composeProjectName -Service 'frontend'
+        if (-not ($hasBackendContainer -or $hasSseContainer -or $hasFrontendContainer)) {
+            throw "[compose-up] docker compose failed before creating any service container; skipping readiness probe. detail=$($_.Exception.Message)"
+        }
         Write-Warning "[compose-up] docker compose returned non-zero; probing backend/frontend/sse readiness..."
         $probeFrontendPort = Get-ComposePublishedPort -ComposeProjectName $composeProjectName -EnvFile $envFile -Service 'frontend' -TargetPort 8080 -FallbackPort ([int]$plannedFrontendPort)
         $probeBackendPort = Get-ComposePublishedPort -ComposeProjectName $composeProjectName -EnvFile $envFile -Service 'backend' -TargetPort 8000 -FallbackPort ([int]$plannedBackendPort)

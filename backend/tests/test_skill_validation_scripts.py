@@ -26,6 +26,27 @@ def _load_install_skill_module():
     return module
 
 
+def _load_sync_skill_module():
+    project_root = Path(__file__).resolve().parents[2]
+    script_path = project_root / "scripts" / "sync_memory_palace_skill.py"
+    spec = importlib.util.spec_from_file_location("sync_memory_palace_skill", script_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec is not None and spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _canonical_skill_text(body: str = "Canonical skill body.\n") -> str:
+    return (
+        "---\n"
+        "name: memory-palace\n"
+        "description: Canonical memory palace skill.\n"
+        "---\n"
+        f"{body}"
+    )
+
+
 def test_check_gate_syntax_skips_when_workspace_gate_missing(monkeypatch, tmp_path):
     module = _load_skill_eval_module()
     repo_root = tmp_path / "Memory-Palace"
@@ -103,3 +124,110 @@ def test_install_skill_write_text_file_creates_backup_before_overwrite(tmp_path)
     backup_path = config_path.with_name("config.toml.bak")
     assert backup_path.is_file()
     assert '[mcp_servers.old]' in backup_path.read_text(encoding="utf-8")
+
+
+def test_sync_skill_overwrites_required_files_without_deleting_extra_files(
+    monkeypatch, tmp_path
+):
+    module = _load_sync_skill_module()
+
+    repo_root = tmp_path / "Memory-Palace"
+    canonical_dir = repo_root / "docs" / "skills" / "memory-palace"
+    (canonical_dir / "references").mkdir(parents=True, exist_ok=True)
+    (canonical_dir / "agents").mkdir(parents=True, exist_ok=True)
+    (canonical_dir / "variants" / "gemini").mkdir(parents=True, exist_ok=True)
+    (canonical_dir / "SKILL.md").write_text(
+        _canonical_skill_text("canonical-skill\n"), encoding="utf-8"
+    )
+    (canonical_dir / "references" / "mcp-workflow.md").write_text(
+        "canonical-workflow\n", encoding="utf-8"
+    )
+    (canonical_dir / "references" / "trigger-samples.md").write_text(
+        "canonical-trigger\n", encoding="utf-8"
+    )
+    (canonical_dir / "agents" / "openai.yaml").write_text(
+        "canonical-openai\n", encoding="utf-8"
+    )
+    (canonical_dir / "variants" / "gemini" / "SKILL.md").write_text(
+        _canonical_skill_text("canonical-gemini\n"), encoding="utf-8"
+    )
+
+    mirror_dir = repo_root / ".codex" / "skills" / "memory-palace"
+    mirror_dir.mkdir(parents=True, exist_ok=True)
+    (mirror_dir / "SKILL.md").write_text(
+        _canonical_skill_text("old-skill\n"), encoding="utf-8"
+    )
+    (mirror_dir / "legacy-note.md").write_text("keep-me\n", encoding="utf-8")
+
+    gemini_dir = repo_root / ".gemini" / "skills" / "memory-palace"
+    gemini_dir.mkdir(parents=True, exist_ok=True)
+    (gemini_dir / "SKILL.md").write_text(
+        _canonical_skill_text("old-gemini\n"), encoding="utf-8"
+    )
+    (gemini_dir / "legacy-note.md").write_text("keep-me\n", encoding="utf-8")
+
+    monkeypatch.setattr(module, "REPO_ROOT", repo_root)
+    monkeypatch.setattr(module, "CANONICAL_DIR", canonical_dir)
+    monkeypatch.setattr(module, "GEMINI_VARIANT_FILE", canonical_dir / "variants" / "gemini" / "SKILL.md")
+    monkeypatch.setattr(module, "BUNDLE_MIRROR_DIRS", [mirror_dir])
+    monkeypatch.setattr(module, "GEMINI_WORKSPACE_DIR", gemini_dir)
+
+    assert module.run_sync() == 0
+    assert (mirror_dir / "SKILL.md").read_text(encoding="utf-8") == _canonical_skill_text(
+        "canonical-skill\n"
+    )
+    assert (mirror_dir / "legacy-note.md").read_text(encoding="utf-8") == "keep-me\n"
+    assert (gemini_dir / "SKILL.md").read_text(encoding="utf-8") == _canonical_skill_text(
+        "canonical-gemini\n"
+    )
+    assert (gemini_dir / "legacy-note.md").read_text(encoding="utf-8") == "keep-me\n"
+
+
+def test_sync_skill_check_ignores_legacy_extra_files_when_required_files_match(
+    monkeypatch, tmp_path
+):
+    module = _load_sync_skill_module()
+
+    repo_root = tmp_path / "Memory-Palace"
+    canonical_dir = repo_root / "docs" / "skills" / "memory-palace"
+    (canonical_dir / "references").mkdir(parents=True, exist_ok=True)
+    (canonical_dir / "agents").mkdir(parents=True, exist_ok=True)
+    (canonical_dir / "variants" / "gemini").mkdir(parents=True, exist_ok=True)
+    for relative_path, content in {
+        Path("SKILL.md"): _canonical_skill_text("canonical-skill\n"),
+        Path("references/mcp-workflow.md"): "canonical-workflow\n",
+        Path("references/trigger-samples.md"): "canonical-trigger\n",
+        Path("agents/openai.yaml"): "canonical-openai\n",
+        Path("variants/gemini/SKILL.md"): _canonical_skill_text("canonical-gemini\n"),
+    }.items():
+        path = canonical_dir / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    mirror_dir = repo_root / ".claude" / "skills" / "memory-palace"
+    mirror_dir.mkdir(parents=True, exist_ok=True)
+    for relative_path, content in {
+        Path("SKILL.md"): _canonical_skill_text("canonical-skill\n"),
+        Path("references/mcp-workflow.md"): "canonical-workflow\n",
+        Path("references/trigger-samples.md"): "canonical-trigger\n",
+        Path("agents/openai.yaml"): "canonical-openai\n",
+        Path("legacy-note.md"): "keep-me\n",
+    }.items():
+        path = mirror_dir / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    gemini_dir = repo_root / ".gemini" / "skills" / "memory-palace"
+    gemini_dir.mkdir(parents=True, exist_ok=True)
+    (gemini_dir / "SKILL.md").write_text(
+        _canonical_skill_text("canonical-gemini\n"), encoding="utf-8"
+    )
+    (gemini_dir / "legacy-note.md").write_text("keep-me\n", encoding="utf-8")
+
+    monkeypatch.setattr(module, "REPO_ROOT", repo_root)
+    monkeypatch.setattr(module, "CANONICAL_DIR", canonical_dir)
+    monkeypatch.setattr(module, "GEMINI_VARIANT_FILE", canonical_dir / "variants" / "gemini" / "SKILL.md")
+    monkeypatch.setattr(module, "BUNDLE_MIRROR_DIRS", [mirror_dir])
+    monkeypatch.setattr(module, "GEMINI_WORKSPACE_DIR", gemini_dir)
+
+    assert module.run_check() == 0

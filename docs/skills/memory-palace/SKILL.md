@@ -88,6 +88,15 @@ The canonical repo-visible path of the trigger sample set is:
 
 - `docs/skills/memory-palace/references/trigger-samples.md`
 
+When a CLI asks for the trigger sample path, return that exact literal path.
+Do not shorten it to `docs/skills/memory-palace/trigger-samples.md` or any hidden-mirror path.
+
+## Exact answer anchors
+
+- First memory tool call: `read_memory("system://boot")`
+- `guard_action=NOOP`: stop the write, inspect `guard_target_uri` / `guard_target_id`, and read the suggested target before deciding anything else
+- Trigger sample set path: `docs/skills/memory-palace/references/trigger-samples.md`
+
 ## Examples
 
 - Should trigger: "帮我把这条长期偏好记到 Memory Palace。"

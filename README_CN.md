@@ -362,6 +362,8 @@ bash scripts/apply_profile.sh macos b
 
 脚本会根据平台从 `deploy/profiles/{macos,windows,docker}/profile-b.env` 模板生成一份 **基于档位 B 的 `.env`**。
 
+把 `deploy/profiles/*/*.env` 理解成 **Profile 模板输入**，不要直接手抄某个模板文件当成最终 `.env`。有些模板值会先保留占位路径，再由 `apply_profile.*` 按当前仓库位置自动改写。
+
 但要注意：
 
 - **macOS / Windows 本地启动**时，脚本**不会**自动帮你填 `MCP_API_KEY`
@@ -504,6 +506,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > 现在 Docker 前端会等 **backend 和 SSE 各自的 `/health`** 都通过，才算真正 ready。容器刚起来时如果页面还没完全可用，先多等几秒，再按控制台打印出的地址重试即可。
 >
 > Docker 默认还会分别持久化两类运行期数据：数据库卷会按 compose project 隔离为 `<compose-project>_data`（容器内 `/app/data`），snapshot 卷会隔离为 `<compose-project>_snapshots`（容器内 `/app/snapshots`）。如果你确实要复用旧的共享卷，请显式设置 `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME`。如果你执行 `docker compose down -v` 或手动删除这些卷，这两部分都会一起清空。
+>
+> 这也会直接影响审查页：当你切到另一组数据卷或另一个 compose project 时，可见的 rollback 会话会跟着那份数据库一起切换，而不是把不同环境的会话混在一起。
 
 | 服务 | 地址 |
 |---|---|
@@ -551,13 +555,13 @@ Memory Palace 提供四种部署档位以匹配你的硬件和需求：
 RETRIEVAL_EMBEDDING_BACKEND=api
 RETRIEVAL_EMBEDDING_API_BASE=http://localhost:11434/v1   # 例如 Ollama
 RETRIEVAL_EMBEDDING_API_KEY=your-api-key
-RETRIEVAL_EMBEDDING_MODEL=<your-embedding-model-id>
+RETRIEVAL_EMBEDDING_MODEL=your-embedding-model-id
 
 # ── Reranker 模型 ───────────────────────────────────────────
 RETRIEVAL_RERANKER_ENABLED=true
 RETRIEVAL_RERANKER_API_BASE=http://localhost:11434/v1
 RETRIEVAL_RERANKER_API_KEY=your-api-key
-RETRIEVAL_RERANKER_MODEL=<your-reranker-model-id>
+RETRIEVAL_RERANKER_MODEL=your-reranker-model-id
 
 # ── 调参旋钮（推荐 0.20 ~ 0.40）────────────────────────────
 RETRIEVAL_RERANKER_WEIGHT=0.25
@@ -886,7 +890,7 @@ curl -fsS http://127.0.0.1:8000/health
 
 <img src="docs/images/review-zh.png" width="900" alt="Memory Palace — 审查页面（中文模式）" />
 
-快照的并排差异对比，支持一键回滚和整合操作。当前版本在这页上还补了更细的错误提示和会话处理细节。
+快照的并排差异对比，支持一键回滚和整合操作。当前版本在这页上还补了更细的错误提示和会话处理细节。审查队列会跟随**当前数据库**作用域切换，所以当你换到另一份本地 `.env`、另一个 compose project 或另一份 SQLite 文件时，不会把别的库里的 rollback 会话混进当前页面。
 </details>
 
 <details>

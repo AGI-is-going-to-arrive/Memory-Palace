@@ -26,6 +26,7 @@ import stat
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from pathlib import Path
+from urllib.parse import unquote
 
 
 # Default snapshot directory (relative to workspace root)
@@ -33,6 +34,43 @@ DEFAULT_SNAPSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "snapshots"
 )
+
+_SQLITE_URL_PREFIXES = ("sqlite+aiosqlite:///", "sqlite:///")
+
+
+def _resolve_current_database_scope() -> Dict[str, str]:
+    """
+    Build a stable scope identifier for the current database target.
+
+    Review snapshots live under a repo-level directory, so switching
+    DATABASE_URL inside the same checkout can otherwise expose unrelated
+    rollback sessions from another SQLite file.
+    """
+    raw_url = str(os.getenv("DATABASE_URL") or "").strip()
+    normalized = raw_url or "database_url:missing"
+    label = normalized
+
+    for prefix in _SQLITE_URL_PREFIXES:
+        if not raw_url.startswith(prefix):
+            continue
+        raw_path = raw_url[len(prefix) :].split("?", 1)[0].split("#", 1)[0]
+        raw_path = unquote(raw_path)
+        if raw_path and raw_path not in {":memory:"} and not raw_path.startswith("file::memory:"):
+            resolved_path = Path(raw_path).expanduser().resolve(strict=False)
+            normalized = f"sqlite:{resolved_path.as_posix()}"
+            label = resolved_path.name or resolved_path.as_posix()
+        else:
+            normalized = f"sqlite:{raw_path or ':memory:'}"
+            label = raw_path or ":memory:"
+        break
+
+    fingerprint = hashlib.sha256(
+        normalized.encode("utf-8", errors="ignore")
+    ).hexdigest()
+    return {
+        "database_fingerprint": fingerprint,
+        "database_label": label,
+    }
 
 
 def _handle_remove_readonly(func, path, exc_info):
@@ -151,16 +189,35 @@ class SnapshotManager:
             with open(manifest_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         
+        scope = _resolve_current_database_scope()
         return {
             "session_id": session_id,
             "created_at": datetime.now().isoformat(),
+            "database_fingerprint": scope["database_fingerprint"],
+            "database_label": scope["database_label"],
             "resources": {}  # resource_id -> metadata
         }
+
+    @staticmethod
+    def _manifest_matches_current_database(manifest: Dict[str, Any]) -> bool:
+        current_scope = _resolve_current_database_scope()
+        manifest_fingerprint = str(manifest.get("database_fingerprint") or "").strip()
+        current_fingerprint = str(current_scope.get("database_fingerprint") or "").strip()
+        if not current_fingerprint:
+            return True
+        if not manifest_fingerprint:
+            # Hide legacy unscoped sessions by default. They are not safe to
+            # expose after switching DATABASE_URL within the same checkout.
+            return False
+        return manifest_fingerprint == current_fingerprint
     
     def _save_manifest(self, session_id: str, manifest: Dict[str, Any]):
         """Save session manifest."""
         self._ensure_dir_exists(self._get_session_dir(session_id))
         manifest_path = self._get_manifest_path(session_id)
+        scope = _resolve_current_database_scope()
+        manifest.setdefault("database_fingerprint", scope["database_fingerprint"])
+        manifest.setdefault("database_label", scope["database_label"])
         
         with open(manifest_path, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, ensure_ascii=False, indent=2)
@@ -272,6 +329,8 @@ class SnapshotManager:
         """
         # First, check manifest for the actual filename (handles legacy snapshots)
         manifest = self._load_manifest(session_id)
+        if not self._manifest_matches_current_database(manifest):
+            return None
         resource_meta = manifest.get("resources", {}).get(resource_id)
         
         if resource_meta and resource_meta.get("file"):
@@ -306,6 +365,8 @@ class SnapshotManager:
             session_dir = self._get_session_dir(session_id)
             if os.path.isdir(session_dir):
                 manifest = self._load_manifest(session_id)
+                if not self._manifest_matches_current_database(manifest):
+                    continue
                 resource_count = len(manifest.get("resources", {}))
                 
                 # Auto-cleanup empty sessions
@@ -331,6 +392,8 @@ class SnapshotManager:
             List of snapshot metadata (resource_id, resource_type, snapshot_time, operation_type)
         """
         manifest = self._load_manifest(session_id)
+        if not self._manifest_matches_current_database(manifest):
+            return []
         snapshots = []
         
         for resource_id, meta in manifest.get("resources", {}).items():

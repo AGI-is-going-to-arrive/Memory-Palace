@@ -37,7 +37,7 @@ backend/
 ├── db/
 │   ├── __init__.py        # Client factory (get_sqlite_client / close_sqlite_client)
 │   ├── sqlite_client.py   # Core database layer (CRUD, retrieval, write_guard, gist, vitality, embedding, rerank)
-│   ├── snapshot.py        # Snapshot manager (records pre-state of write operations by session)
+│   ├── snapshot.py        # Snapshot manager (records pre-state by session and filters Review visibility by current database scope)
 │   ├── migration_runner.py# Automatic database migration executor
 │   └── migrations/        # SQL migration script directory
 ├── models/
@@ -51,7 +51,7 @@ backend/
 
 - **`main.py`**: FastAPI application entry point, responsible for lifecycle management (database initialization, legacy database file compatibility recovery), CORS configuration, route registration (`review`, `browse`, `maintenance`, `setup`), and health checks (including index status, write lane, and index worker runtime status reports). Default CORS origins are converged to a local common list (`localhost/127.0.0.1` on `5173/3000`); explicitly configured wildcards (`*`) will automatically disable credentials; legacy sqlite recovery will execute regular-file + quick_check + core table existence validation before proceeding, and will strip query/fragment when parsing SQLite URLs, skipping non-file targets like `:memory:` / `file::memory:`.
 - **`mcp_server.py`**: Implements 9 MCP tools, including URI parsing (`domain://path` format), snapshot management, write guard decision-making, session caching, and asynchronous index enqueuing logic. It also provides system URI resources (`system://boot`, `system://index`, `system://index-lite`, `system://audit`, `system://recent`). The currently public MCP entry points are `stdio` and SSE: `stdio` connects directly to the tool process; remote access goes through the `/sse + /messages` SSE chain and remains subject to API Key and network-side security controls.
-- **`runtime_state.py`**: Manages the write lane (serialized write operations), index worker (asynchronous queue processing for index rebuilding tasks), vitality decay scheduling, cleanup review approval process, and sleep consolidation scheduling.
+- **`runtime_state.py`**: Manages the write lane (serialized write operations), index worker (asynchronous queue processing for index rebuilding tasks), vitality decay scheduling, cleanup review approval process, and sleep consolidation scheduling. The current session-first retrieval cache and flush tracker both apply in-process bounds with **per-session caps plus a total session limit**, so long-running services do not grow without bound just because many distinct sessions have touched the process.
 - **`run_sse.py`**: SSE transport layer, responsible for API Key authentication and session management for the `/sse` and `/messages` links. The current implementation clears sessions upon client disconnection; if you continue to send requests to `/messages` using an old `session_id`, the server will explicitly return `404/410` instead of pretending `202 Accepted`. It also exposes a lightweight `/health` endpoint primarily for Docker / process-level readiness probes; the actual SSE data channel remains `/sse` and continues to be protected by authentication.
 - **`db/sqlite_client.py`**: SQLite database operation layer, containing memory CRUD, keyword/semantic/hybrid retrieval modes, write_guard logic (supports three-level determination: semantic matching + keyword matching + LLM decision), gist generation and caching, vitality scoring and decay, embedding retrieval (supports remote API and local hash modes), and reranker integration. Database initialization now uses `.init.lock` based on the database file path for process-level serialization, preventing `backend` / `sse` from competing for the database during initial concurrent startup; non-file targets like `:memory:` will not generate this lock.
 
@@ -85,6 +85,12 @@ This is the most "business-like" group of interfaces:
 ### Review and Rollback (`/review`)
 
 Route-level API Key authentication (all endpoints require authentication).
+
+One implementation boundary to keep in mind:
+
+- snapshot files still live under the repo-level `snapshots/` directory;
+- however, session listing, snapshot listing, and snapshot reads are filtered by the **current database scope**, so changing `DATABASE_URL`, switching to another temporary SQLite file, or pointing Docker at another data volume does not mix rollback sessions from a different database into the current Review queue;
+- legacy snapshot sessions that were created before scope metadata existed are hidden by default instead of being exposed under the wrong database context.
 
 | Method | Path | Description |
 |---|---|---|

@@ -28,6 +28,8 @@
 2. **生成配置**：运行 `apply_profile` 脚本生成 `.env` 文件
 3. **启动服务**：使用 Docker 一键部署 **或** 手动启动后端 + 前端
 
+> `deploy/profiles/*/profile-*.env` 是模板输入，不是建议你直接复制提交或直接运行的最终 `.env`。面向用户的稳定路径仍然是先跑 `apply_profile.sh/.ps1`，再按实际环境微调生成结果。
+
 > **💡 建议口径**：**Profile B 仍是默认起步档位**，因为它零外部依赖；但只要你已经准备好模型服务，**Profile C 是强烈推荐档位**。升级到 C 前，请确认你会在 `.env` 的相应位置填写 embedding / reranker；如果还要启用 LLM 辅助能力，再继续填写对应的 LLM 配置。
 
 ---
@@ -117,8 +119,8 @@ RETRIEVAL_EMBEDDING_BACKEND=router
 # Embedding 配置
 ROUTER_API_BASE=http://127.0.0.1:PORT/v1          # ← 替换 PORT 为实际端口
 ROUTER_API_KEY=replace-with-your-key
-ROUTER_EMBEDDING_MODEL=<your-embedding-model-id>
-RETRIEVAL_EMBEDDING_MODEL=<your-embedding-model-id>
+ROUTER_EMBEDDING_MODEL=your-embedding-model-id
+RETRIEVAL_EMBEDDING_MODEL=your-embedding-model-id
 RETRIEVAL_EMBEDDING_API_BASE=http://127.0.0.1:PORT/v1
 RETRIEVAL_EMBEDDING_API_KEY=replace-with-your-key
 RETRIEVAL_EMBEDDING_DIM=4096
@@ -127,7 +129,7 @@ RETRIEVAL_EMBEDDING_DIM=4096
 RETRIEVAL_RERANKER_ENABLED=true
 RETRIEVAL_RERANKER_API_BASE=http://127.0.0.1:PORT/v1
 RETRIEVAL_RERANKER_API_KEY=replace-with-your-key
-RETRIEVAL_RERANKER_MODEL=<your-reranker-model-id>
+RETRIEVAL_RERANKER_MODEL=your-reranker-model-id
 RETRIEVAL_RERANKER_WEIGHT=0.30                     # 推荐 0.20 ~ 0.40
 ```
 
@@ -140,8 +142,8 @@ RETRIEVAL_RERANKER_ENABLED=true
 RETRIEVAL_RERANKER_API_BASE=http://127.0.0.1:PORT/v1
 RETRIEVAL_RERANKER_API_KEY=replace-with-your-key
 # 下面两项按你的服务实际模型名填写
-RETRIEVAL_EMBEDDING_MODEL=<your-embedding-model-id>
-RETRIEVAL_RERANKER_MODEL=<your-reranker-model-id>
+RETRIEVAL_EMBEDDING_MODEL=your-embedding-model-id
+RETRIEVAL_RERANKER_MODEL=your-reranker-model-id
 # 注意：不存在 RETRIEVAL_RERANKER_BACKEND 配置项
 ```
 
@@ -149,15 +151,15 @@ RETRIEVAL_RERANKER_MODEL=<your-reranker-model-id>
 
 ```bash
 # 与 C 的主要区别：API 地址指向远程，且默认 reranker 权重更高
-ROUTER_API_BASE=https://<your-router-host>/v1
-RETRIEVAL_EMBEDDING_API_BASE=https://<your-router-host>/v1
-RETRIEVAL_RERANKER_API_BASE=https://<your-router-host>/v1
+ROUTER_API_BASE=https://router.example.com/v1
+RETRIEVAL_EMBEDDING_API_BASE=https://router.example.com/v1
+RETRIEVAL_RERANKER_API_BASE=https://router.example.com/v1
 RETRIEVAL_RERANKER_WEIGHT=0.35                     # 远程推荐略高
 ```
 
 > **🔑 C/D 第一调参项**：`RETRIEVAL_RERANKER_WEIGHT`，建议范围 `0.20 ~ 0.40`，以 `0.05` 步长微调。
 >
-> **模型 ID 提醒**：上面的 `<your-embedding-model-id>` / `<your-reranker-model-id>` 就是推荐写法。项目本身不绑定某个固定模型家族；请直接填写你自己的 provider 实际 model id。
+> **模型 ID 提醒**：上面的 `your-embedding-model-id` / `your-reranker-model-id` 只是 shell-safe 占位示例。项目本身不绑定某个固定模型家族；请直接填写你自己的 provider 实际 model id。
 
 如果你采用直连方式，先注意一个边界：
 
@@ -199,9 +201,9 @@ curl -fsS http://127.0.0.1:18000/browse/node -H "X-MCP-API-Key: <YOUR_MCP_API_KE
 
 | 用途 | 建议写法 | 说明 |
 |---|---|---|
-| Embedding | `<your-embedding-model-id>` | 填你的 provider 实际 embedding model id |
-| Reranker | `<your-reranker-model-id>` | 填你的 provider 实际 reranker model id |
-| 可选 LLM | `<your-chat-model-id>` | 用于 `write_guard` / `compact_context` / `intent` |
+| Embedding | `your-embedding-model-id` | 填你的 provider 实际 embedding model id |
+| Reranker | `your-reranker-model-id` | 填你的 provider 实际 reranker model id |
+| 可选 LLM | `your-chat-model-id` | 用于 `write_guard` / `compact_context` / `intent` |
 
 无论你走 `router` 还是直连 API，项目都只是把这些字符串原样传给你的 OpenAI-compatible 服务；不会强制要求某个固定模型品牌或家族。
 
@@ -393,6 +395,8 @@ bash scripts/apply_profile.sh macos b
 > 脚本执行逻辑：复制 `.env.example` 为 `.env`，然后追加 `deploy/profiles/<platform>/profile-<x>.env` 中的覆盖参数。
 >
 > `apply_profile.sh/.ps1` 当前会在生成结束后统一去重重复 env key，避免不同解析器对“同 key 多次出现”产生不一致行为。
+>
+> 把 `deploy/profiles/*/*.env` 理解成 **Profile 模板输入**，不要直接手抄某个模板文件当成最终 `.env`。像 macOS 模板里的 `DATABASE_URL` 会先保留占位路径，再由 `apply_profile.*` 按当前仓库位置自动改写。
 >
 > 如果你只是第一次手动跑通仓库，先从 Profile B 开始最稳；只有在 embedding / reranker 链路都已经可用时，再切到 Profile C。
 

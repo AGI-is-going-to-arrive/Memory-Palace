@@ -141,8 +141,6 @@ python scripts/install_skill.py --targets claude --scope user --with-mcp --force
 
 If you also want the **current repository** to get an extra project-level entry, add a workspace install afterwards.
 
-After that, you will at least have:
-
 - `~/.claude/skills/memory-palace/`
 - a `mcpServers.memory-palace` block for the current repo inside `~/.claude.json`
 

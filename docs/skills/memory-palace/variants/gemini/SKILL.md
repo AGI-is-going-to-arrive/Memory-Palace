@@ -20,6 +20,7 @@ Use this skill for Memory Palace memory operations and for questions about this 
 - First memory tool call: `read_memory("system://boot")`
 - If `guard_action` is `NOOP`: stop the write, inspect `guard_target_uri` / `guard_target_id`, read the suggested target, then decide whether to update or leave unchanged
 - Trigger sample set path: `docs/skills/memory-palace/references/trigger-samples.md`
+- When Gemini is asked for that path, return the exact literal above and do not shorten it.
 
 ## Required workflow
 

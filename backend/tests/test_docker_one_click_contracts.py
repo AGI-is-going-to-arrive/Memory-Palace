@@ -30,6 +30,8 @@ def test_runtime_env_injection_covers_intent_llm_and_router_fallbacks() -> None:
 
     assert "wait_for_deployment_ready" in shell_text
     assert "Wait-DeploymentReady" in ps1_text
+    assert "compose_project_has_any_container" in shell_text
+    assert "Test-ComposeProjectHasAnyContainer" in ps1_text
     assert '--filter "label=com.docker.compose.project=${compose_project_name}"' in shell_text
     assert '--filter "label=com.docker.compose.service=${service}"' in shell_text
     assert "--format '{{.Ports}}'" in shell_text
@@ -59,6 +61,14 @@ def test_runtime_env_injection_covers_intent_llm_and_router_fallbacks() -> None:
     assert "Set MEMORY_PALACE_SNAPSHOTS_VOLUME=" in shell_text
     assert "Set MEMORY_PALACE_DATA_VOLUME=$legacyVolume" in ps1_text
     assert "Set MEMORY_PALACE_SNAPSHOTS_VOLUME=$legacyVolume" in ps1_text
+    assert (
+        "[compose-up] docker compose failed before creating any service container; "
+        "skipping readiness probe." in shell_text
+    )
+    assert (
+        "[compose-up] docker compose failed before creating any service container; "
+        "skipping readiness probe." in ps1_text
+    )
 
 
 def test_compose_waits_for_healthy_sse_service() -> None:
@@ -105,3 +115,14 @@ def test_compose_volume_defaults_are_project_scoped() -> None:
         assert expected_data in text
         assert expected_snapshots in text
         assert 'host.docker.internal:host-gateway' in text
+
+
+def test_profile_d_templates_use_shell_safe_router_placeholders() -> None:
+    for relative_path in (
+        "deploy/profiles/macos/profile-d.env",
+        "deploy/profiles/windows/profile-d.env",
+        "deploy/profiles/docker/profile-d.env",
+    ):
+        text = (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
+        assert "https://router.example.com/v1" in text
+        assert "<your-router-host>" not in text
