@@ -212,6 +212,8 @@ memory-palace/
 │   ├── mcp_server.py           # 9 MCP tools + snapshot logic + URI parsing
 │   ├── runtime_state.py        # Write Lane queue, Index Worker, vitality decay scheduler
 │   ├── run_sse.py              # SSE transport layer with API Key auth gating
+│   ├── requirements.txt        # Backend runtime dependencies
+│   ├── requirements-dev.txt    # Backend test dependencies
 │   ├── db/
 │   │   └── sqlite_client.py    # Schema definition, CRUD, retrieval, Write Guard, Gist
 │   ├── api/                    # REST routers: review, browse, maintenance, setup
@@ -330,6 +332,9 @@ source .venv/bin/activate        # Windows PowerShell: .\.venv\Scripts\Activate.
 
 # Install dependencies
 pip install -r requirements.txt
+
+# If you also plan to run backend tests afterwards
+# pip install -r requirements-dev.txt
 
 # Start the API server
 uvicorn main:app --host 127.0.0.1 --port 8000 --reload

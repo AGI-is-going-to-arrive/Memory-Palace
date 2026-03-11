@@ -3,6 +3,8 @@
 本指南帮助你在 5 分钟内跑通 Memory Palace 本地开发环境或 Docker 部署。
 
 > **Memory Palace** 是一个为 AI Agent 设计的长期记忆系统，通过 [MCP（Model Context Protocol）](https://modelcontextprotocol.io/) 协议提供 9 个工具，让 Claude Code、Codex、Gemini CLI、OpenCode 等客户端具备持久化记忆能力；如果你接的是 `Cursor / Windsurf / VSCode-host / Antigravity` 这类 IDE 宿主，请先看 `docs/skills/IDE_HOSTS.md`。
+>
+> **如果你现在卡住的是 CLI 客户端里的 skill + MCP 安装，不要继续按这份排**；那条路径请直接看 `docs/skills/GETTING_STARTED.md`。
 
 ---
 
@@ -31,11 +33,13 @@ memory-palace/
 │   ├── run_sse.py        # MCP SSE 传输层（Starlette + API Key 鉴权）
 │   ├── mcp_wrapper.py    # MCP 包装器
 │   ├── requirements.txt  # Python 依赖清单
+│   ├── requirements-dev.txt # 后端测试依赖
 │   ├── db/               # 数据库 Schema、检索引擎
 │   ├── api/              # HTTP 路由
 │   │   ├── browse.py     # 记忆树浏览（GET /browse/node）
 │   │   ├── review.py     # 审查接口（/review/*）
-│   │   └── maintenance.py# 维护接口（/maintenance/*）
+│   │   ├── maintenance.py# 维护接口（/maintenance/*）
+│   │   └── setup.py      # 首启配置向导接口（/setup/*）
 ├── frontend/             # React + Vite + Tailwind Dashboard
 │   ├── package.json      # 版本 1.0.1
 │   └── vite.config.js    # 开发服务器 port 5173，代理到后端 8000
@@ -84,6 +88,8 @@ cp .env.example .env
 > ```
 > DATABASE_URL=sqlite+aiosqlite:////absolute/path/to/memory_palace/demo.db
 > ```
+>
+> 这条 URL 的斜杠数量是有平台差异的：`macOS / Linux` 这类绝对路径通常是 `sqlite+aiosqlite:////...`，`Windows` 盘符路径通常是 `sqlite+aiosqlite:///C:/...`。如果你是手改 `.env`，不要把这两种写法混在一起。
 
 也可以使用 Profile 脚本快速生成带有默认配置的 `.env`：
 
@@ -162,6 +168,12 @@ source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
+
+> 如果你接下来还要跑后端测试，再补一条：
+>
+> ```bash
+> pip install -r requirements-dev.txt
+> ```
 
 预期输出：
 

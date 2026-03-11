@@ -79,7 +79,7 @@ This document only includes verification results that have been actually execute
 - Frontend `npm run build`: Passed
 - Local API / SSE / frontend build integration check: Passed
 - Docker `profile a / b / c / d` functional smoke tests: Passed
-- `pwsh-in-docker` equivalent path for Windows: Re-run directly and passed
+- `pwsh-in-docker` equivalent path for Windows: Re-verified with the current scripts; supported `amd64` hosts can pass, `arm64` hosts return `SKIP` by design, and native Windows / native `pwsh` should still be re-verified on the target environment
 
 Note:
 

@@ -1,4 +1,5 @@
 import json
+import os
 import runpy
 import sqlite3
 import sys
@@ -12,6 +13,25 @@ import main
 
 def _sqlite_url(path) -> str:
     return f"sqlite+aiosqlite:///{path}"
+
+
+def test_load_project_dotenv_reads_repo_env_without_overriding_existing_values(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "MAIN_BOOTSTRAP_TEST=from-dotenv\nMAIN_KEEP_EXISTING=from-dotenv\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("MAIN_BOOTSTRAP_TEST", raising=False)
+    monkeypatch.setenv("MAIN_KEEP_EXISTING", "already-set")
+
+    loaded = main._load_project_dotenv(tmp_path)
+
+    assert loaded == env_file
+    assert os.getenv("MAIN_BOOTSTRAP_TEST") == "from-dotenv"
+    assert os.getenv("MAIN_KEEP_EXISTING") == "already-set"
 
 
 def test_resolve_cors_uses_restricted_default_origins(monkeypatch: pytest.MonkeyPatch) -> None:

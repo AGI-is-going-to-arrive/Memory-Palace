@@ -221,7 +221,7 @@ Authorization: Bearer <MCP_API_KEY>
    cd frontend && npm ci && npm run test && npm run build
    ```
 
-   > 如需更深一层的验证，再额外运行 `cd backend && python -m pytest tests -q`。
+   > 如需更深一层的验证，再额外运行 `cd backend && .venv/bin/python -m pip install -r requirements-dev.txt && .venv/bin/python -m pytest tests -q`。
 
 ---
 

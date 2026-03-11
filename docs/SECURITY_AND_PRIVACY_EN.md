@@ -221,7 +221,7 @@ Before sharing the project, delivering environments, or official release, please
    cd frontend && npm ci && npm run test && npm run build
    ```
 
-   > For deeper verification, run `cd backend && python -m pytest tests -q` as well.
+   > For deeper verification, run `cd backend && .venv/bin/python -m pip install -r requirements-dev.txt && .venv/bin/python -m pytest tests -q` as well.
 
 ---
 

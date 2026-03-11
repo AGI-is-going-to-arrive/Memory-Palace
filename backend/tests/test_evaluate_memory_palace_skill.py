@@ -18,6 +18,18 @@ def _load_skill_eval_module():
     return module
 
 
+def test_repo_local_stdio_wrapper_prefers_repo_env_before_fallback_db() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    wrapper_text = (
+        project_root / "scripts" / "run_memory_palace_mcp_stdio.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'ENV_FILE="${PROJECT_ROOT}/.env"' in wrapper_text
+    assert 'DEFAULT_DB_PATH="${PROJECT_ROOT}/demo.db"' in wrapper_text
+    assert 'if [[ -z "${DATABASE_URL:-}" && ! -f "${ENV_FILE}" ]]; then' in wrapper_text
+    assert 'export DATABASE_URL="sqlite+aiosqlite:////${DEFAULT_DB_PATH#/}"' in wrapper_text
+
+
 def test_check_gate_syntax_skips_when_post_check_script_is_missing(
     monkeypatch,
     tmp_path: Path,

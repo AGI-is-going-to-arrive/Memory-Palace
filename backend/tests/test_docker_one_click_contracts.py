@@ -44,6 +44,9 @@ def test_runtime_env_injection_covers_intent_llm_and_router_fallbacks() -> None:
     assert 'upsert_env_value_in_file "${env_file}" "MEMORY_PALACE_BACKEND_PORT" "${backend_port}"' in shell_text
     assert "Set-EnvValueInFile -FilePath $envFile -Key 'MEMORY_PALACE_FRONTEND_PORT' -Value \"$FrontendPort\"" in ps1_text
     assert "Set-EnvValueInFile -FilePath $envFile -Key 'MEMORY_PALACE_BACKEND_PORT' -Value \"$BackendPort\"" in ps1_text
+    assert "Get-Command -Name 'Get-NetTCPConnection'" in ps1_text
+    assert "Get-Command -Name 'ss'" in ps1_text
+    assert '& ss -ltnH "( sport = :$Port )"' in ps1_text
 
 
 def test_compose_waits_for_healthy_sse_service() -> None:

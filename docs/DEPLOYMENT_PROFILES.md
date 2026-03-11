@@ -367,6 +367,8 @@ cd <project-root>/backend
 python3 -m venv .venv
 source .venv/bin/activate          # Windows PowerShell: .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+# 如果你还要继续跑 backend 测试
+# pip install -r requirements-dev.txt
 uvicorn main:app --host 127.0.0.1 --port 18000
 ```
 
@@ -525,6 +527,7 @@ curl -fsS -X POST <RETRIEVAL_RERANKER_API_BASE>/rerank \
 ### PowerShell / Windows 验证建议
 
 - `scripts/apply_profile.sh` 与 `scripts/apply_profile.ps1` 都会对重复 env key 做统一去重。
+- 如果你用 Docker 做 `pwsh-in-docker` 等效验证，`docker_one_click.ps1` 当前会优先使用 `Get-NetTCPConnection` 做端口探测；当这个 Windows cmdlet 不可用时，会自动回退到 `ss`。如果目标环境两者都没有，请显式指定固定端口，或直接在目标 Windows 机器上复验。
 - 如果你要交付 Windows 环境，建议直接在目标 Windows 机器上按同一份模板跑一次启动与 smoke。
 - 主文档只保留公开可执行的步骤；目标环境专项验证建议单独记录。
 

@@ -119,7 +119,11 @@ def _build_client(
 
     app = FastAPI()
     app.include_router(maintenance_api.router)
-    return TestClient(app, client=("127.0.0.1", 50000))
+    return TestClient(
+        app,
+        client=("127.0.0.1", 50000),
+        base_url="http://127.0.0.1",
+    )
 
 
 def test_index_job_retry_endpoint_retries_failed_job(monkeypatch) -> None:

@@ -202,10 +202,12 @@
 ```
 memory-palace/
 ├── backend/
-│   ├── main.py                 # FastAPI 入口；注册 Review/Browse/Maintenance 路由
+│   ├── main.py                 # FastAPI 入口；注册 Review/Browse/Maintenance/Setup 路由
 │   ├── mcp_server.py           # 9 个 MCP 工具 + 快照逻辑 + URI 解析
 │   ├── runtime_state.py        # Write Lane 队列、Index Worker、活力衰减调度器
 │   ├── run_sse.py              # SSE 传输层，带 API Key 鉴权网关
+│   ├── requirements.txt        # 后端运行依赖
+│   ├── requirements-dev.txt    # 后端测试依赖
 │   ├── db/
 │   │   └── sqlite_client.py    # Schema 定义、CRUD、检索、Write Guard、Gist
 │   ├── api/                    # REST 路由：review、browse、maintenance、setup
@@ -328,6 +330,9 @@ source .venv/bin/activate        # Windows PowerShell：.\.venv\Scripts\Activate
 
 # 安装依赖
 pip install -r requirements.txt
+
+# 如果你后面还要跑后端测试
+# pip install -r requirements-dev.txt
 
 # 启动 API 服务器
 uvicorn main:app --host 127.0.0.1 --port 8000 --reload

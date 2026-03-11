@@ -366,6 +366,8 @@ cd <project-root>/backend
 python3 -m venv .venv
 source .venv/bin/activate          # Windows PowerShell: .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+# If you also plan to run backend tests afterwards
+# pip install -r requirements-dev.txt
 uvicorn main:app --host 127.0.0.1 --port 18000
 ```
 
@@ -524,6 +526,7 @@ curl -fsS -X POST <RETRIEVAL_RERANKER_API_BASE>/rerank \
 ### PowerShell / Windows Verification Suggestions
 
 *   Both `scripts/apply_profile.sh` and `scripts/apply_profile.ps1` perform unified deduplication of duplicate env keys.
+*   If you use Docker for a `pwsh-in-docker` equivalence check, `docker_one_click.ps1` now tries `Get-NetTCPConnection` first for port probing and automatically falls back to `ss` when that Windows cmdlet is unavailable. If the target environment has neither, specify fixed ports explicitly or re-run on the target Windows host.
 *   If delivering to a Windows environment, it is recommended to run the startup and smoke tests on the target Windows machine using the same template.
 *   The main documentation only keeps steps that are publicly executable; target environment-specific verification suggestions should be recorded separately.
 

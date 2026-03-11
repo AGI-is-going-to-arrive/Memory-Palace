@@ -79,7 +79,7 @@
 - 前端 `npm run build`：通过
 - 本地 API / SSE / frontend build 联调检查：通过
 - Docker `profile a / b / c / d` 功能性 smoke：通过
-- `pwsh-in-docker` 的 Windows 等效链路：直接重跑通过
+- `pwsh-in-docker` 的 Windows 等效链路：已按当前脚本重新复验；在支持的 `amd64` 宿主上可通过，`arm64` 宿主按设计返回 `SKIP`，native Windows / native `pwsh` 仍建议在目标环境单独复验
 
 说明：
 

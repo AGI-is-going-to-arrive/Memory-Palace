@@ -4,10 +4,10 @@ This directory describes the skills / MCP orchestration setup for Memory Palace.
 
 If this is your first time looking here, it is recommended to read in this order:
 
-1. **Get it running first**
-   - `GETTING_STARTED_EN.md`
-2. **Quickly understand how to connect it in the current repository**
+1. **Start with the shortest path**
    - `SKILLS_QUICKSTART_EN.md`
+2. **Use the step-by-step path only when you need setup checks or troubleshooting**
+   - `GETTING_STARTED_EN.md`
 3. **Then read the full design**
    - `MEMORY_PALACE_SKILLS_EN.md`
 4. **If you are integrating an IDE host**
@@ -17,12 +17,14 @@ If this is your first time looking here, it is recommended to read in this order
 
 ## What these files are each for
 
+- If you only want to know “which command should I run now,” start with `SKILLS_QUICKSTART_EN.md`
+- If you are already wiring it and need to check “was the skill discovered” or “is MCP really bound to this checkout,” then read `GETTING_STARTED_EN.md`
 - `GETTING_STARTED_EN.md`
   - For people connecting it for the first time
-  - Mainly answers “what to do first, and how to check whether it is connected correctly”
+  - Mainly answers “how to wire it step by step, and how to verify each step”
 - `SKILLS_QUICKSTART_EN.md`
-  - For people who want to quickly understand the relationship between skill + MCP
-  - Mainly answers “which clients can be used in what way right now, and where the boundaries still are”
+  - For people who want the shortest path first
+  - Mainly answers “what to run first, which clients are wired in what way right now, and which boundaries matter up front”
 - `MEMORY_PALACE_SKILLS_EN.md`
   - For people who want to see the full design
   - Mainly explains the canonical bundle, variants, and workflow boundaries

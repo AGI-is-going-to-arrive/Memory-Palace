@@ -41,18 +41,39 @@ function Test-PortInUse {
         throw "Invalid port: $Port"
     }
 
-    try {
-        $listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop
-        return ($listeners.Count -gt 0)
+    $getNetTcpConnection = Get-Command -Name 'Get-NetTCPConnection' -ErrorAction SilentlyContinue
+    if ($getNetTcpConnection) {
+        try {
+            $listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop
+            return ($listeners.Count -gt 0)
+        }
+        catch {
+            if (-not $script:PortProbeFallbackWarned) {
+                Write-Warning "Port probe fallback engaged: Get-NetTCPConnection failed unexpectedly; trying ss-based probing before fail-closed fallback. detail=$($_.Exception.Message)"
+                $script:PortProbeFallbackWarned = $true
+            }
+        }
     }
-    catch {
+
+    $ssCommand = Get-Command -Name 'ss' -ErrorAction SilentlyContinue
+    if ($ssCommand) {
+        $ssOutput = & ss -ltnH "( sport = :$Port )" 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            return (-not [string]::IsNullOrWhiteSpace(($ssOutput | Out-String).Trim()))
+        }
         if (-not $script:PortProbeFallbackWarned) {
-            Write-Warning "Port probe fallback engaged: Get-NetTCPConnection unavailable; fail-closed probing is enabled. detail=$($_.Exception.Message)"
+            Write-Warning "Port probe fallback engaged: ss probing returned exit code $LASTEXITCODE; fail-closed probing is enabled."
             $script:PortProbeFallbackWarned = $true
         }
-        # Fail-closed to avoid selecting potentially occupied ports when probe is unavailable.
         return $true
     }
+
+    if (-not $script:PortProbeFallbackWarned) {
+        Write-Warning "Port probe fallback engaged: neither Get-NetTCPConnection nor ss is available; fail-closed probing is enabled."
+        $script:PortProbeFallbackWarned = $true
+    }
+    # Fail-closed to avoid selecting potentially occupied ports when probe is unavailable.
+    return $true
 }
 
 function Try-AcquirePathLock {

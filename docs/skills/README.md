@@ -4,10 +4,10 @@
 
 如果你是第一次看这里，建议按这个顺序读：
 
-1. **先跑通**
-   - `GETTING_STARTED.md`
-2. **快速理解当前仓库怎么接**
+1. **先看最短路径**
    - `SKILLS_QUICKSTART.md`
+2. **需要分步骤接通或排障时再看**
+   - `GETTING_STARTED.md`
 3. **再看完整设计**
    - `MEMORY_PALACE_SKILLS.md`
 4. **如果你接的是 IDE 宿主**
@@ -17,12 +17,14 @@
 
 ## 这些文件分别干什么
 
+- 如果你只想先知道“我现在该执行哪条命令”，优先看 `SKILLS_QUICKSTART.md`
+- 如果你已经开始接入，但想按步骤检查“skill 到底有没有被发现、MCP 到底有没有绑到当前仓库”，再看 `GETTING_STARTED.md`
 - `GETTING_STARTED.md`
   - 面向第一次接通的人
-  - 重点回答“先做什么、怎么检查有没有接好”
+  - 重点回答“按步骤怎么接、每一步怎么检查有没有接好”
 - `SKILLS_QUICKSTART.md`
-  - 面向想快速搞懂 skill + MCP 关系的人
-  - 重点回答“哪些客户端现在能怎么用、哪些地方还有边界”
+  - 面向想先走最短路径的人
+  - 重点回答“先执行什么、哪些客户端现在怎么接、哪些边界需要先记住”
 - `MEMORY_PALACE_SKILLS.md`
   - 面向想看完整设计的人
   - 重点讲 canonical bundle、variants 和工作流边界

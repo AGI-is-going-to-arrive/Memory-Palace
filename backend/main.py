@@ -6,9 +6,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import unquote
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+
+
+def _load_project_dotenv(project_root: Optional[Path] = None) -> Optional[Path]:
+    root = project_root or Path(__file__).resolve().parents[1]
+    dotenv_path = root / ".env"
+    if not dotenv_path.exists():
+        return None
+    load_dotenv(dotenv_path, override=False)
+    return dotenv_path
+
+
+_load_project_dotenv()
+
 from api import review_router, browse_router, maintenance_router, setup_router
 from db import get_sqlite_client, close_sqlite_client
 from runtime_state import runtime_state

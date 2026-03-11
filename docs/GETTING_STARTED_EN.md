@@ -3,6 +3,8 @@
 This guide helps you set up the Memory Palace local development environment or Docker deployment in 5 minutes.
 
 > **Memory Palace** is a long-term memory system designed for AI Agents. It provides 9 tools via the [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) protocol, enabling persistent memory capabilities for clients such as Claude Code, Codex, Gemini CLI, and OpenCode. If you are integrating an IDE host such as `Cursor / Windsurf / VSCode-host / Antigravity`, start with `docs/skills/IDE_HOSTS_EN.md`.
+>
+> **If what you are trying to fix right now is the CLI-side skill + MCP installation path, stop following this page** and go directly to `docs/skills/GETTING_STARTED_EN.md`.
 
 ---
 
@@ -31,11 +33,13 @@ memory-palace/
 │   ├── run_sse.py        # MCP SSE transport layer (Starlette + API Key auth)
 │   ├── mcp_wrapper.py    # MCP wrapper
 │   ├── requirements.txt  # Python dependency list
+│   ├── requirements-dev.txt # Backend test dependencies
 │   ├── db/               # Database Schema, search engine
 │   ├── api/              # HTTP routes
 │   │   ├── browse.py     # Memory tree browsing (GET /browse/node)
 │   │   ├── review.py     # Review interfaces (/review/*)
-│   │   └── maintenance.py# Maintenance interfaces (/maintenance/*)
+│   │   ├── maintenance.py# Maintenance interfaces (/maintenance/*)
+│   │   └── setup.py      # First-run setup assistant APIs (/setup/*)
 ├── frontend/             # React + Vite + Tailwind Dashboard
 │   ├── package.json      # Version 1.0.1
 │   └── vite.config.js    # Dev server port 5173, proxies to backend 8000
@@ -84,6 +88,8 @@ cp .env.example .env
 > ```
 > DATABASE_URL=sqlite+aiosqlite:////absolute/path/to/memory_palace/demo.db
 > ```
+>
+> The slash count is platform-specific: absolute paths on `macOS / Linux` are usually `sqlite+aiosqlite:////...`, while `Windows` drive-letter paths are usually `sqlite+aiosqlite:///C:/...`. If you edit `.env` manually, do not mix these two forms.
 
 You can also use the Profile script to quickly generate an `.env` with default configurations:
 
@@ -162,6 +168,12 @@ source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
+
+> If you also plan to run backend tests afterwards, add:
+>
+> ```bash
+> pip install -r requirements-dev.txt
+> ```
 
 Expected output:
 
