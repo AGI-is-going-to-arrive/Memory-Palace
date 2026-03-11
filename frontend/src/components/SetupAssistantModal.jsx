@@ -239,6 +239,10 @@ export default function SetupAssistantModal({
 
   const handleSaveBrowserOnly = React.useCallback(() => {
     const saved = saveStoredMaintenanceAuth(form.dashboard_api_key, authState?.mode ?? 'header');
+    if (saved === false) {
+      setSaveError(t('setup.messages.saveFailed'));
+      return;
+    }
     if (!saved) {
       setSaveError(t('setup.messages.browserOnlyRequiresKey'));
       return;

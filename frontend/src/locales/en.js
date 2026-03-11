@@ -194,7 +194,7 @@ const en = {
       configured: 'Configured',
       missing: 'Missing',
       notEnabled: 'Disabled',
-      dashboardAuth: 'Dashboard auth',
+      dashboardAuth: 'Backend API auth',
       embedding: 'Embedding',
       reranker: 'Reranker',
       writeGuard: 'write_guard',

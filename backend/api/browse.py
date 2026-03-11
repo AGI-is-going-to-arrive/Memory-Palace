@@ -334,6 +334,14 @@ async def update_node(
         raise HTTPException(status_code=404, detail=f"Path not found: {domain}://{path}")
 
     async def _write_task():
+        lane_memory = await client.get_memory_by_path(
+            path, domain=domain, reinforce_access=False
+        )
+        if not lane_memory:
+            raise HTTPException(
+                status_code=404, detail=f"Path not found: {domain}://{path}"
+            )
+
         if body.content is not None:
             try:
                 guard_decision = _normalize_guard_decision(
@@ -341,7 +349,7 @@ async def update_node(
                         content=body.content,
                         domain=domain,
                         path_prefix=path.rsplit("/", 1)[0] if "/" in path else None,
-                        exclude_memory_id=memory.get("id"),
+                        exclude_memory_id=lane_memory.get("id"),
                     )
                 )
             except Exception as exc:
@@ -365,7 +373,7 @@ async def update_node(
                 blocked = False
             elif guard_action == "UPDATE":
                 target_id = guard_decision.get("target_id")
-                current_memory_id = memory.get("id")
+                current_memory_id = lane_memory.get("id")
                 if (
                     not isinstance(target_id, int)
                     or not isinstance(current_memory_id, int)

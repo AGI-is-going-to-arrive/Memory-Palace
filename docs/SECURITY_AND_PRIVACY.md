@@ -138,6 +138,7 @@ Authorization: Bearer <MCP_API_KEY>
 - `apply_profile.*` 在 `docker` 平台下如果发现 `MCP_API_KEY` 为空，会自动生成一把本地 key
 - 前端容器不会把这把 key 写进页面，而是由 Nginx 代理在服务端转发到 `/api/*`、`/sse`、`/messages`
 - 这样浏览器可以直接使用 Dashboard，但不会在页面源码里暴露真实 key
+- 但这条便利路径默认把前端端口本身视为可信入口。谁能直接访问 Docker Dashboard 端口，谁就能使用这些被代理的受保护接口，所以这一层的 `MCP_API_KEY` **并不等于** 终端用户鉴权。若要暴露给受信范围之外的使用者，请先在 `3000` 前面加上你自己的 VPN、反向代理鉴权或网络访问控制。
 
 **前端测试覆盖：**
 

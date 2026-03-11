@@ -122,6 +122,18 @@
   MCP_API_KEY_ALLOW_INSECURE_LOCAL=true
   ```
 
+- **如果你明明改了仓库 `.env`，服务却还在使用旧 key / 错 key**：
+  - 先检查当前终端有没有额外导出过 `MCP_API_KEY` 或 `MCP_API_KEY_ALLOW_INSECURE_LOCAL`
+  - 当前实现里，**进程环境变量优先级高于仓库 `.env`**
+  - 我们在真实本地复测里就遇到过：`run_sse.py` 读取到了外层 shell 里的 `MCP_API_KEY`，结果即使仓库 `.env` 里写的是另一把 key，`/sse` 仍然按外层环境变量鉴权，表现成 `401 invalid_or_missing_api_key`
+
+  ```bash
+  env | rg '^MCP_API_KEY=|^MCP_API_KEY_ALLOW_INSECURE_LOCAL='
+  unset MCP_API_KEY MCP_API_KEY_ALLOW_INSECURE_LOCAL
+  ```
+
+  > 清掉外层环境变量后，请重新启动 `backend` / `run_sse.py` 再复测。
+
 **根据返回的 `reason` 字段判断具体原因（参见 `backend/api/maintenance.py`）：**
 
 | `reason` | 含义 | 处理方式 |

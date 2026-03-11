@@ -38,7 +38,10 @@ def test_maintenance_auth_allows_when_explicit_insecure_local_override_is_enable
     monkeypatch.delenv("MCP_API_KEY", raising=False)
     monkeypatch.setenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", override_value)
     with _build_client(monkeypatch, client=("127.0.0.1", 50000)) as client:
-        response = client.post("/maintenance/vitality/decay")
+        response = client.post(
+            "/maintenance/vitality/decay",
+            headers={"Host": "127.0.0.1"},
+        )
     assert response.status_code == 200
     assert response.json().get("ok") is True
 
@@ -48,6 +51,22 @@ def test_maintenance_auth_rejects_insecure_local_override_for_non_loopback_clien
     monkeypatch.setenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", "true")
     with _build_client(monkeypatch, client=("203.0.113.10", 50000)) as client:
         response = client.post("/maintenance/vitality/decay")
+    assert response.status_code == 401
+    detail = response.json().get("detail") or {}
+    assert detail.get("error") == "maintenance_auth_failed"
+    assert detail.get("reason") == "insecure_local_override_requires_loopback"
+
+
+def test_maintenance_auth_rejects_insecure_local_override_when_host_is_not_loopback(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.setenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", "true")
+    with _build_client(monkeypatch, client=("127.0.0.1", 50000)) as client:
+        response = client.post(
+            "/maintenance/vitality/decay",
+            headers={"Host": "memory-palace.example"},
+        )
     assert response.status_code == 401
     detail = response.json().get("detail") or {}
     assert detail.get("error") == "maintenance_auth_failed"

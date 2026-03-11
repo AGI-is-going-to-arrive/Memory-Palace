@@ -64,6 +64,31 @@ class _FakeBrowseClient:
         }
 
 
+class _FakeBrowseClientWithLaneHeadRefresh(_FakeBrowseClient):
+    async def write_guard(self, **_: Any) -> Dict[str, Any]:
+        self.guard_calls_in_lane.append(self.in_lane)
+        return {
+            "action": "UPDATE",
+            "target_id": 19,
+            "reason": "head_refreshed_in_lane",
+            "method": "keyword",
+        }
+
+    async def get_memory_by_path(
+        self, path: str, domain: str = "core", reinforce_access: bool = True
+    ) -> Optional[Dict[str, Any]]:
+        _ = path
+        _ = domain
+        _ = reinforce_access
+        memory_id = 19 if self.in_lane else 7
+        return {
+            "id": memory_id,
+            "content": "origin",
+            "priority": 1,
+            "disclosure": None,
+        }
+
+
 @pytest.mark.asyncio
 async def test_browse_write_endpoints_run_through_write_lane(
     monkeypatch: pytest.MonkeyPatch,
@@ -114,3 +139,34 @@ async def test_browse_write_endpoints_run_through_write_lane(
         {"session_id": "dashboard", "operation": "browse.update_node"},
         {"session_id": "dashboard", "operation": "browse.delete_node"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_browse_update_node_uses_lane_fresh_head_for_write_guard_matching(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeBrowseClientWithLaneHeadRefresh()
+
+    async def _run_write(*, session_id: Optional[str], operation: str, task):
+        _ = session_id
+        _ = operation
+        fake_client.in_lane = True
+        try:
+            return await task()
+        finally:
+            fake_client.in_lane = False
+
+    monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(browse_api.runtime_state.write_lanes, "run_write", _run_write)
+    monkeypatch.setattr(browse_api, "ENABLE_WRITE_LANE_QUEUE", True)
+
+    update_payload = await browse_api.update_node(
+        path="agent/new_note",
+        domain="core",
+        body=browse_api.NodeUpdate(content="update payload"),
+    )
+
+    assert update_payload["success"] is True
+    assert update_payload["updated"] is True
+    assert fake_client.update_called is True
+    assert fake_client.guard_calls_in_lane == [True]

@@ -445,6 +445,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > If `MCP_API_KEY` is empty in the Docker env file, the profile helper generates a local key automatically. The frontend proxy uses that key on the server side, so on the recommended one-click path, **protected requests usually already work**. The page may still keep showing `Set API key`, because the browser itself does not know the proxy-held key. Treat that as expected unless protected data also starts failing with `401` or empty states.
 >
+> Treat that Docker frontend port as a trusted operator/admin surface. Anyone who can directly reach `http://<host>:3000` can use the Dashboard and its proxied protected routes, so do not expose this port to untrusted networks as if `MCP_API_KEY` were end-user auth. Add your own VPN, reverse-proxy auth, or network ACL in front of it.
+>
 > The Docker frontend now waits for both the backend and the SSE service to pass their own `/health` checks before it is treated as ready. If containers are already up but the page still looks unavailable, wait a few more seconds and re-check the printed URLs.
 >
 > Docker also persists two runtime data paths by default: `memory_palace_data` stores the database (`/app/data` in the container), and `memory_palace_snapshots` stores Review snapshots (`/app/snapshots` in the container). If you run `docker compose down -v` or delete those volumes manually, both are cleared together.
@@ -800,7 +802,7 @@ than part of the public user package.
 > 📌 These images are here to help you quickly understand the main dashboard areas.
 >
 > - They show the **typical post-entry dashboard state**
-> - The current frontend defaults to English; the screenshots below show the Chinese mode after switching from the top-right language button
+> - The current frontend defaults to English; the screenshots below show the default English mode
 > - The top bar now provides a unified auth/setup entry (`Set API key` / `Update API key` / `Clear key`; when runtime auth is injected, the page shows `Runtime key active` plus a `Setup` button)
 > - If auth is not configured yet, the page shell still opens, but protected data requests show an auth hint, empty state, or `401` until credentials are available
 
@@ -815,7 +817,7 @@ Use the assistant to save the Dashboard key in the browser and, on a local non-D
 <details>
 <summary>📂 Memory — Tree Browser & Editor</summary>
 
-<img src="docs/images/memory-zh.png" width="900" alt="Memory Palace — Memory Browser Page (Chinese mode)" />
+<img src="docs/images/memory-palace-memory-page.png" width="900" alt="Memory Palace — Memory Browser Page (English mode)" />
 
 Tree-structured memory browser with inline editor and Gist view. Navigate by domain → path hierarchy.
 </details>
@@ -823,7 +825,7 @@ Tree-structured memory browser with inline editor and Gist view. Navigate by dom
 <details>
 <summary>📋 Review — Diff & Rollback</summary>
 
-<img src="docs/images/review-zh.png" width="900" alt="Memory Palace — Review Page (Chinese mode)" />
+<img src="docs/images/memory-palace-review-page.png" width="900" alt="Memory Palace — Review Page (English mode)" />
 
 Side-by-side diff comparison of snapshots with one-click rollback and integrate actions. The current version also adds more explicit error handling and session-state behavior here.
 </details>
@@ -831,7 +833,7 @@ Side-by-side diff comparison of snapshots with one-click rollback and integrate 
 <details>
 <summary>🔧 Maintenance — Vitality Governance</summary>
 
-<img src="docs/images/maintenance-zh.png" width="900" alt="Memory Palace — Maintenance Page (Chinese mode)" />
+<img src="docs/images/memory-palace-maintenance-page.png" width="900" alt="Memory Palace — Maintenance Page (English mode)" />
 
 Monitor memory vitality scores, trigger cleanup tasks, and manage decay parameters. The current version also adds domain / path-prefix filters and a more explicit human-confirmation flow.
 </details>
@@ -839,7 +841,7 @@ Monitor memory vitality scores, trigger cleanup tasks, and manage decay paramete
 <details>
 <summary>📊 Observability — Search & Task Monitoring</summary>
 
-<img src="docs/images/observability-zh.png" width="900" alt="Memory Palace — Observability Page (Chinese mode)" />
+<img src="docs/images/memory-palace-observability-page.png" width="900" alt="Memory Palace — Observability Page (English mode)" />
 
 Real-time search query monitoring, retrieval quality insights, and task queue status. The current version also adds `scope hint`, runtime snapshot details, and richer index-task visibility.
 </details>

@@ -24,23 +24,23 @@ This is not a "hard-coded Chinese translation," but rather an integration into a
 
 ## 3. Current Interface Screenshots
 
-The following images show the current frontend interface after switching to Chinese:
+The following images show the current frontend interface in English mode:
 
 ### Memory
 
-<img src="../images/memory-zh.png" width="900" alt="Memory Palace Memory Page (Chinese mode)" />
+<img src="../images/memory-palace-memory-page.png" width="900" alt="Memory Palace Memory Page (English mode)" />
 
 ### Review
 
-<img src="../images/review-zh.png" width="900" alt="Memory Palace Review Page (Chinese mode)" />
+<img src="../images/memory-palace-review-page.png" width="900" alt="Memory Palace Review Page (English mode)" />
 
 ### Maintenance
 
-<img src="../images/maintenance-zh.png" width="900" alt="Memory Palace Maintenance Page (Chinese mode)" />
+<img src="../images/memory-palace-maintenance-page.png" width="900" alt="Memory Palace Maintenance Page (English mode)" />
 
 ### Observability
 
-<img src="../images/observability-zh.png" width="900" alt="Memory Palace Observability Page (Chinese mode)" />
+<img src="../images/memory-palace-observability-page.png" width="900" alt="Memory Palace Observability Page (English mode)" />
 
 ---
 

@@ -122,6 +122,18 @@ If the first-run setup assistant opens before you can touch the page body, you d
   MCP_API_KEY_ALLOW_INSECURE_LOCAL=true
   ```
 
+- **If you already changed the repo `.env` but the service still uses an old / wrong key**:
+  - First check whether your current shell already exported `MCP_API_KEY` or `MCP_API_KEY_ALLOW_INSECURE_LOCAL`.
+  - In the current implementation, **process environment variables take precedence over the repo `.env`**.
+  - In a real local retest, we reproduced `run_sse.py` picking up `MCP_API_KEY` from the outer shell; even though the repo `.env` contained a different key, `/sse` still authenticated against the exported one and returned `401 invalid_or_missing_api_key`.
+
+  ```bash
+  env | rg '^MCP_API_KEY=|^MCP_API_KEY_ALLOW_INSECURE_LOCAL='
+  unset MCP_API_KEY MCP_API_KEY_ALLOW_INSECURE_LOCAL
+  ```
+
+  > After clearing the outer environment variables, restart `backend` / `run_sse.py` and test again.
+
 **Determine the specific cause based on the `reason` field returned (see `backend/api/maintenance.py`):**
 
 | `reason` | Meaning | Handling |

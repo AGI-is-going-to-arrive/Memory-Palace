@@ -44,7 +44,7 @@ def test_sse_auth_allows_when_explicit_insecure_local_override_is_enabled(
     monkeypatch.delenv("MCP_API_KEY", raising=False)
     monkeypatch.setenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", override_value)
     with _build_client(client=("127.0.0.1", 50000)) as client:
-        response = client.get("/ping")
+        response = client.get("/ping", headers={"Host": "127.0.0.1"})
     assert response.status_code == 200
     assert response.json().get("ok") is True
 
@@ -66,6 +66,20 @@ def test_sse_auth_rejects_insecure_local_override_when_forwarded_headers_present
     headers = {"X-Forwarded-For": "198.51.100.8"}
     with _build_client(client=("127.0.0.1", 50000)) as client:
         response = client.get("/ping", headers=headers)
+    assert response.status_code == 401
+    payload = response.json()
+    assert payload.get("error") == "mcp_sse_auth_failed"
+    assert payload.get("reason") == "insecure_local_override_requires_loopback"
+
+
+def test_sse_auth_rejects_insecure_local_override_when_host_is_not_loopback(monkeypatch) -> None:
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.setenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", "true")
+    with _build_client(client=("127.0.0.1", 50000)) as client:
+        response = client.get(
+            "/ping",
+            headers={"Host": "memory-palace.example"},
+        )
     assert response.status_code == 401
     payload = response.json()
     assert payload.get("error") == "mcp_sse_auth_failed"
@@ -402,3 +416,114 @@ def test_sse_main_runs_mcp_startup_before_uvicorn(monkeypatch) -> None:
     assert call_order[2][0] == "uvicorn"
     assert call_order[2][1] == "127.0.0.1"
     assert call_order[2][2] == 8010
+
+
+def test_sse_malformed_message_returns_400_without_internal_error_event(tmp_path) -> None:
+    backend_dir = Path(__file__).resolve().parents[1]
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    env = dict(**os.environ)
+    env["MCP_API_KEY"] = "week6-sse-secret"
+    env["DATABASE_URL"] = f"sqlite+aiosqlite:///{tmp_path / 'malformed_message.db'}"
+    env["HOST"] = "127.0.0.1"
+    env["PORT"] = str(port)
+    server = subprocess.Popen(
+        [
+            sys.executable,
+            "run_sse.py",
+        ],
+        cwd=str(backend_dir),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    sse_socket = None
+    try:
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            if server.poll() is not None:
+                pytest.fail("uvicorn exited before the malformed-message test could connect")
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                    break
+            except OSError:
+                time.sleep(0.1)
+        else:
+            pytest.fail("timed out waiting for malformed-message test server to start")
+
+        session_id = None
+        request = (
+            "GET /sse HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{port}\r\n"
+            "Accept: text/event-stream\r\n"
+            "X-MCP-API-Key: week6-sse-secret\r\n"
+            "Connection: keep-alive\r\n"
+            "\r\n"
+        ).encode("utf-8")
+        sse_socket = socket.create_connection(("127.0.0.1", port), timeout=5)
+        sse_socket.sendall(request)
+        sse_socket.settimeout(5)
+
+        received = ""
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            chunk = sse_socket.recv(4096).decode("utf-8", errors="ignore")
+            if not chunk:
+                break
+            received += chunk
+            if "session_id=" in received:
+                session_id = received.split("session_id=", 1)[1].splitlines()[0].strip()
+                break
+        assert session_id
+
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        try:
+            connection.request(
+                "POST",
+                f"/messages/?session_id={session_id}",
+                body='{"bad":',
+                headers={
+                    "Content-Type": "application/json",
+                    "X-MCP-API-Key": "week6-sse-secret",
+                },
+            )
+            response = connection.getresponse()
+            payload = response.read().decode("utf-8", errors="ignore")
+        finally:
+            connection.close()
+
+        assert response.status == 400
+        assert "Could not parse message" in payload
+
+        sse_socket.settimeout(1)
+        trailing = ""
+        try:
+            while True:
+                chunk = sse_socket.recv(4096).decode("utf-8", errors="ignore")
+                if not chunk:
+                    break
+                trailing += chunk
+        except socket.timeout:
+            pass
+
+        assert "Internal Server Error" not in trailing
+        time.sleep(0.2)
+    finally:
+        if sse_socket is not None:
+            try:
+                sse_socket.close()
+            except OSError:
+                pass
+        server.terminate()
+        try:
+            output, _ = server.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            server.kill()
+            output, _ = server.communicate(timeout=5)
+
+    assert "Received exception from stream" not in output
+    assert "Traceback" not in output

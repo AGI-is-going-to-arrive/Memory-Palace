@@ -158,22 +158,39 @@ RETRIEVAL_RERANKER_WEIGHT=0.35                     # Remote recommended slightly
 >
 > **Model ID Reminder**: The `<your-embedding-model-id>` / `<your-reranker-model-id>` above are recommended placeholders. The project is not bound to any specific model family; please fill in your own provider's actual model ID.
 
-If you adopt the direct connection method, the minimum verification steps are as follows:
+If you adopt the direct connection method, note one boundary first:
+
+- `docker_one_click.sh/.ps1` does **not** directly read your manually edited repository `.env` as the final Docker configuration.
+- On each run, it first generates a Docker env file from `deploy/profiles/docker/profile-*.env`, and only then decides whether to inject runtime overrides based on the script arguments.
+- So if you only write your final direct-API settings into the repository-root `.env` and then run `bash scripts/docker_one_click.sh --profile c`, the actual startup still uses the profile template path, not necessarily the final values you just wrote.
+
+The minimum verification path should therefore be split into two cases:
 
 ```bash
-# 1) Start the corresponding profile based on your final configuration
-bash scripts/docker_one_click.sh --profile c
+# Option A: local debugging via the one-click script (explicit injection)
+# Use this when your current shell already has the embedding / reranker / LLM API base, key, and model values prepared.
+bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
+```
 
-# 2) Verify basic interfaces
+```bash
+# Option B: verify the final Docker env file you actually plan to deploy
+# In this case, explicitly point compose to that file instead of assuming the one-click script will read the repository .env
+MEMORY_PALACE_DOCKER_ENV_FILE=/absolute/path/to/your-docker.env docker compose up -d --build
+```
+
+Then verify the basic interfaces:
+
+```bash
 curl -fsS http://127.0.0.1:18000/health
 curl -fsS http://127.0.0.1:18000/browse/node -H "X-MCP-API-Key: <YOUR_MCP_API_KEY>"
 ```
 
 Decision Criteria:
 
-1.  Please only compare and accept results from the **same final deployment configuration**. Do not mix results from different links.
-2.  Whether you follow the `router` or direct connection path, you should pass the startup + health check under the final configuration.
-3.  If startup fails under placeholder endpoints/keys, it is an expected fail-closed; please replace them with real, available values and re-verify.
+1.  Please only compare and accept results from the **same final deployment configuration**. Do not mix results from different paths.
+2.  For `docker_one_click`, `--allow-runtime-env-injection` is a **local debugging path**, not a promise that the script is consuming the repository `.env` as the final Docker config.
+3.  If you want to validate the exact direct-API Docker configuration you plan to deploy, start from that final Docker env file and then run the startup + health checks against that same file.
+4.  If startup fails under placeholder endpoints/keys, it is an expected fail-closed; please replace them with real, available values and re-verify.
 
 ### Model ID Examples
 
@@ -452,6 +469,7 @@ When using **Docker one-click deployment**, you don't need to write the key into
 *   The frontend container automatically includes the same `MCP_API_KEY` for `/api/*`, `/sse`, and `/messages` at the proxy layer.
 *   This key is saved in the Docker env file used for this run by default.
 *   The browser only sees the proxied results and does not directly receive the real key.
+*   Treat that frontend port as a trusted admin/operator surface. If you expose `3000` beyond a trusted network, add your own VPN, reverse-proxy auth, or network ACL in front of it.
 
 ### SSE Startup Example
 

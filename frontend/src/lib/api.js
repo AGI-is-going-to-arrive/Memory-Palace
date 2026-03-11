@@ -66,19 +66,28 @@ export const saveStoredMaintenanceAuth = (key, mode = 'header') => {
     maintenanceApiKeyMode: mode,
   });
   if (!normalized) return null;
-  window.localStorage.setItem(
-    DASHBOARD_AUTH_STORAGE_KEY,
-    JSON.stringify({
-      maintenanceApiKey: normalized.key,
-      maintenanceApiKeyMode: normalized.mode,
-    })
-  );
+  try {
+    window.localStorage.setItem(
+      DASHBOARD_AUTH_STORAGE_KEY,
+      JSON.stringify({
+        maintenanceApiKey: normalized.key,
+        maintenanceApiKeyMode: normalized.mode,
+      })
+    );
+  } catch (_error) {
+    return false;
+  }
   return getMaintenanceAuthState();
 };
 
 export const clearStoredMaintenanceAuth = () => {
   if (typeof window === 'undefined') return;
-  window.localStorage.removeItem(DASHBOARD_AUTH_STORAGE_KEY);
+  try {
+    window.localStorage.removeItem(DASHBOARD_AUTH_STORAGE_KEY);
+    return true;
+  } catch (_error) {
+    return false;
+  }
 };
 
 const readRuntimeMaintenanceAuth = () => {

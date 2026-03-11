@@ -121,6 +121,34 @@ describe('App routing', () => {
     expect(await screen.findByRole('button', { name: i18n.t('app.auth.updateApiKey') })).toBeInTheDocument();
   });
 
+  it('shows an error instead of crashing when browser storage rejects the API key write', async () => {
+    const user = userEvent.setup();
+    const originalSetItem = window.localStorage.setItem;
+    window.history.pushState({}, '', '/memory');
+
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: i18n.t('app.auth.setApiKey') }));
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    await user.type(
+      within(dialog).getByPlaceholderText(i18n.t('setup.dashboard.apiKeyPlaceholder')),
+      'stored-key'
+    );
+    window.localStorage.setItem = vi.fn((key, value) => {
+      if (key === 'memory-palace.dashboardAuth') {
+        throw new Error('quota');
+      }
+      return originalSetItem.call(window.localStorage, key, value);
+    });
+
+    await user.click(screen.getByRole('button', { name: i18n.t('setup.actions.saveBrowserOnly') }));
+    window.localStorage.setItem = originalSetItem;
+
+    expect((await screen.findAllByText(i18n.t('setup.messages.saveFailed'))).length).toBeGreaterThan(0);
+    expect(screen.getByRole('dialog', { name: i18n.t('setup.title') })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: i18n.t('app.auth.setApiKey') })).toBeInTheDocument();
+  });
+
   it('remounts routes after stored auth changes without depending on raw key text', async () => {
     const user = userEvent.setup();
     window.history.pushState({}, '', '/memory');

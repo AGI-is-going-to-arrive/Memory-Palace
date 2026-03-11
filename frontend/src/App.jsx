@@ -200,6 +200,37 @@ function App() {
   const [authRevision, setAuthRevision] = React.useState(0);
   const [setupOpen, setSetupOpen] = React.useState(false);
 
+  const readDismissedState = React.useCallback(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      return window.localStorage.getItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
+    } catch (_error) {
+      return null;
+    }
+  }, []);
+
+  const clearDismissedState = React.useCallback(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.removeItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
+    } catch (_error) {
+      // Storage can be unavailable in private / restricted browser contexts.
+    }
+  }, []);
+
+  const persistDismissedState = React.useCallback((value) => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (value) {
+        window.localStorage.setItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY, '1');
+      } else {
+        window.localStorage.removeItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
+      }
+    } catch (_error) {
+      // Storage can be unavailable in private / restricted browser contexts.
+    }
+  }, []);
+
   React.useEffect(() => {
     document.title = t('app.documentTitle');
   }, [i18n.resolvedLanguage, t]);
@@ -208,24 +239,20 @@ function App() {
     if (typeof window === 'undefined') return;
     if (authState?.source === 'runtime') return;
     if (authState?.source === 'stored') return;
-    const dismissed = window.localStorage.getItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
+    const dismissed = readDismissedState();
     if (dismissed === '1') return;
     setSetupOpen(true);
-  }, [authState?.source]);
+  }, [authState?.source, readDismissedState]);
 
   const handleOpenSetup = React.useCallback(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
-    }
+    clearDismissedState();
     setSetupOpen(true);
-  }, []);
+  }, [clearDismissedState]);
 
   const handleCloseSetup = React.useCallback(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY, '1');
-    }
+    persistDismissedState(true);
     setSetupOpen(false);
-  }, []);
+  }, [persistDismissedState]);
 
   const handleAuthUpdated = React.useCallback((nextAuth) => {
     setAuthState(nextAuth ?? getMaintenanceAuthState());
@@ -234,12 +261,10 @@ function App() {
 
   const handleClearApiKey = React.useCallback(() => {
     clearStoredMaintenanceAuth();
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
-    }
+    persistDismissedState(false);
     setAuthState(getMaintenanceAuthState());
     setAuthRevision((value) => value + 1);
-  }, []);
+  }, [persistDismissedState]);
 
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>

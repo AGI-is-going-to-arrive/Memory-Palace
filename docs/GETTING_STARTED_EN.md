@@ -216,7 +216,7 @@ If you wish to view the Dashboard buttons, fields, and typical operation flows p
 </p>
 
 <p align="center">
-  <img src="images/memory-zh.png" width="900" alt="Memory Palace Interface Example" />
+  <img src="images/memory-palace-memory-page.png" width="900" alt="Memory Palace interface example (English mode)" />
 </p>
 
 ---
@@ -237,7 +237,9 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 .\scripts\docker_one_click.ps1 -Profile c -AllowRuntimeEnvInjection
 ```
 
-> If you enable this kind of local joint debugging injection under `profile c/d`, the script will switch this run to an explicit API mode and additionally force `RETRIEVAL_EMBEDDING_BACKEND=api`. When `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` are not explicitly provided, it will prioritize reusing `ROUTER_API_BASE/ROUTER_API_KEY` from the current process as a fallback; if you also set `INTENT_LLM_*`, this chain will also be injected. This mode is more suitable for local troubleshooting and is not equivalent to verifying the final release `router` template. The current gate-aligned local-debug command is `--runtime-env-mode none --allow-runtime-env-injection --runtime-env-file <your local .env>`; release verification must go back to `--runtime-env-mode none` without injection.
+> If you enable this kind of local joint debugging injection under `profile c/d`, the script will switch this run to an explicit API mode and additionally force `RETRIEVAL_EMBEDDING_BACKEND=api`. When `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` are not explicitly provided, it will prioritize reusing `ROUTER_API_BASE/ROUTER_API_KEY` from the current process as a fallback; if you also set `INTENT_LLM_*`, this chain will also be injected. This mode is more suitable for local troubleshooting and is not equivalent to verifying the final release `router` template.
+>
+> Note that `--runtime-env-mode` / `--runtime-env-file` are **not** arguments of `docker_one_click.sh/.ps1`. If you pass them directly to the one-click script, the command fails with `Unknown argument`. For public-repo `profile c/d` local debugging, keep using the explicit injection switches shown above. If you also need a stricter release-style verification, switch back to the actual `.env` / router configuration you plan to deploy and re-run that validation path separately.
 
 > `docker_one_click.sh/.ps1` defaults to generating an independent temporary Docker env file for **each run**, passed to `docker compose` via `MEMORY_PALACE_DOCKER_ENV_FILE`; it only reuses a specific file if that environment variable is explicitly set, rather than sharing a fixed `.env.docker`.
 >
@@ -441,6 +443,8 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 > The command above deliberately binds to `127.0.0.1`, which is more suitable for local machine debugging. If you truly need to allow access from other machines, change `HOST` to `0.0.0.0` (or your actual listening address). This will allow remote clients to connect to the listening address, but API Key, reverse proxy, firewall, and transport layer security will still need to be completed by you.
 >
 > If you use Docker one-click deployment, SSE will be started by an independent container and exposed at `http://127.0.0.1:3000/sse` via the frontend proxy.
+>
+> Treat that Docker frontend port as a trusted admin surface, not as public end-user auth. Anyone who can directly reach `3000` can use the Dashboard and its proxied protected routes, so add your own VPN, reverse-proxy auth, or network ACL before exposing it outside a trusted network.
 >
 > The `HOST=127.0.0.1 PORT=8010` example above is for **local loopback**. Only if you indeed want to open it to remote clients should you change it to `HOST=0.0.0.0` (or the target binding address) and complete the network-side security controls yourself.
 >

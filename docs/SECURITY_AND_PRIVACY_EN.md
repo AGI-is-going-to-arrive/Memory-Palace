@@ -138,6 +138,7 @@ The current release adds a Dashboard first-run setup assistant, but it is not a 
 - `apply_profile.*` will automatically generate a local key if `MCP_API_KEY` is found to be empty under the `docker` platform.
 - The frontend container will not write this key into the page; instead, Nginx proxy will forward the `X-MCP-API-Key` at the server side to `/api/*`, `/sse`, `/messages`.
 - This way the browser can use the Dashboard directly without exposing the real key in the page source.
+- This convenience path assumes the frontend port itself is trusted. Anyone who can directly reach the Docker Dashboard port can also use those proxied protected routes, so `MCP_API_KEY` is **not** acting as end-user auth at that layer. Put your own VPN, reverse-proxy auth, or network ACL in front of `3000` before exposing it beyond a trusted environment.
 
 **Frontend Test Coverage:**
 

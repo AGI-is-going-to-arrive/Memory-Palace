@@ -133,9 +133,11 @@ find_free_port() {
 wait_for_deployment_ready() {
   local attempts="${1:-30}"
   local sleep_seconds="${2:-2}"
-  local backend_url="http://127.0.0.1:${backend_port}/health"
-  local frontend_url="http://127.0.0.1:${frontend_port}/"
-  local sse_url="http://127.0.0.1:${frontend_port}/sse"
+  local probe_frontend_port="${3:-${frontend_port}}"
+  local probe_backend_port="${4:-${backend_port}}"
+  local backend_url="http://127.0.0.1:${probe_backend_port}/health"
+  local frontend_url="http://127.0.0.1:${probe_frontend_port}/"
+  local sse_url="http://127.0.0.1:${probe_frontend_port}/sse"
   local sse_status=""
   local attempt=0
 
@@ -151,6 +153,63 @@ wait_for_deployment_ready() {
   done
 
   return 1
+}
+
+resolve_published_port_from_compose() {
+  local service="$1"
+  local target_port="$2"
+  local fallback_port="$3"
+  local container_name=""
+  local port_output=""
+  local ports_output=""
+  local ports_regex=""
+
+  ports_output="$(
+    docker ps \
+      --filter "label=com.docker.compose.project=${compose_project_name}" \
+      --filter "label=com.docker.compose.service=${service}" \
+      --format '{{.Ports}}' \
+      | head -n 1
+  )"
+  ports_output="${ports_output//$'\r'/}"
+  ports_regex=":([0-9]+)->${target_port}/tcp"
+  if [[ "${ports_output}" =~ ${ports_regex} ]]; then
+    echo "${BASH_REMATCH[1]}"
+    return 0
+  fi
+
+  container_name="$(
+    docker ps \
+      --filter "label=com.docker.compose.project=${compose_project_name}" \
+      --filter "label=com.docker.compose.service=${service}" \
+      --format '{{.Names}}' \
+      | head -n 1
+  )"
+  if [[ -n "${container_name}" ]]; then
+    port_output="$(docker port "${container_name}" "${target_port}" 2>/dev/null | head -n 1 || true)"
+    port_output="${port_output//$'\r'/}"
+    if [[ "${port_output}" =~ :([0-9]+)$ ]]; then
+      echo "${BASH_REMATCH[1]}"
+      return 0
+    fi
+  fi
+
+  if ! port_output="$(
+    COMPOSE_PROJECT_NAME="${compose_project_name}" \
+      "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml port "${service}" "${target_port}" 2>/dev/null \
+      | head -n 1
+  )"; then
+    echo "${fallback_port}"
+    return 0
+  fi
+
+  port_output="${port_output//$'\r'/}"
+  if [[ "${port_output}" =~ :([0-9]+)$ ]]; then
+    echo "${BASH_REMATCH[1]}"
+    return 0
+  fi
+
+  echo "${fallback_port}"
 }
 
 cleanup_runtime_state() {
@@ -561,7 +620,9 @@ if [[ ${no_build} -eq 1 ]]; then
     NOCTURNE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
     "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml up -d --wait --wait-timeout 120 --force-recreate --remove-orphans; then
     echo "[compose-up] docker compose returned non-zero; probing backend/frontend/sse readiness..." >&2
-    if ! wait_for_deployment_ready 30 2; then
+    probe_frontend_port="$(resolve_published_port_from_compose frontend 8080 "${frontend_port}")"
+    probe_backend_port="$(resolve_published_port_from_compose backend 8000 "${backend_port}")"
+    if ! wait_for_deployment_ready 30 2 "${probe_frontend_port}" "${probe_backend_port}"; then
       exit 1
     fi
     echo "[compose-up] services became ready after compose reported failure; continuing." >&2
@@ -578,17 +639,22 @@ else
     NOCTURNE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
     "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml up -d --build --wait --wait-timeout 120 --force-recreate --remove-orphans; then
     echo "[compose-up] docker compose returned non-zero; probing backend/frontend/sse readiness..." >&2
-    if ! wait_for_deployment_ready 30 2; then
+    probe_frontend_port="$(resolve_published_port_from_compose frontend 8080 "${frontend_port}")"
+    probe_backend_port="$(resolve_published_port_from_compose backend 8000 "${backend_port}")"
+    if ! wait_for_deployment_ready 30 2 "${probe_frontend_port}" "${probe_backend_port}"; then
       exit 1
     fi
     echo "[compose-up] services became ready after compose reported failure; continuing." >&2
   fi
 fi
 
+reported_frontend_port="$(resolve_published_port_from_compose frontend 8080 "${frontend_port}")"
+reported_backend_port="$(resolve_published_port_from_compose backend 8000 "${backend_port}")"
+
 echo ""
 echo "Memory Palace is starting with docker profile ${profile}."
-echo "Frontend: http://localhost:${frontend_port}"
-echo "Backend API: http://localhost:${backend_port}"
-echo "SSE Endpoint: http://localhost:${frontend_port}/sse"
-echo "Health: http://localhost:${backend_port}/health"
+echo "Frontend: http://localhost:${reported_frontend_port}"
+echo "Backend API: http://localhost:${reported_backend_port}"
+echo "SSE Endpoint: http://localhost:${reported_frontend_port}/sse"
+echo "Health: http://localhost:${reported_backend_port}/health"
 echo "Compose project: ${compose_project_name}"

@@ -11,6 +11,7 @@ import time
 import uuid
 from collections import Counter, deque
 from datetime import datetime, timezone
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional, Tuple, cast
 
@@ -62,6 +63,33 @@ def _is_loopback_request(request: Request) -> bool:
     return True
 
 
+def _is_loopback_hostname(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    hostname = str(value).strip().lower()
+    if not hostname:
+        return False
+    if hostname.startswith("[") and hostname.endswith("]"):
+        hostname = hostname[1:-1]
+    if ":" in hostname and hostname.count(":") == 1 and hostname.rsplit(":", 1)[1].isdigit():
+        hostname = hostname.rsplit(":", 1)[0]
+    if hostname in _LOOPBACK_CLIENT_HOSTS:
+        return True
+    try:
+        return ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_direct_loopback_request(request: Request) -> bool:
+    if not _is_loopback_request(request):
+        return False
+
+    host_header = request.headers.get("host")
+    request_host = getattr(request.url, "hostname", None)
+    return _is_loopback_hostname(host_header) and _is_loopback_hostname(request_host)
+
+
 def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
     if not authorization or not isinstance(authorization, str):
         return None
@@ -82,7 +110,7 @@ async def require_maintenance_api_key(
 ) -> None:
     configured = _get_configured_mcp_api_key()
     if not configured:
-        if _allow_insecure_local_without_api_key() and _is_loopback_request(request):
+        if _allow_insecure_local_without_api_key() and _is_direct_loopback_request(request):
             return
         reason = (
             "insecure_local_override_requires_loopback"

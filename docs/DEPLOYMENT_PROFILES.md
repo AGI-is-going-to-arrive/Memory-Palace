@@ -159,13 +159,29 @@ RETRIEVAL_RERANKER_WEIGHT=0.35                     # 远程推荐略高
 >
 > **模型 ID 提醒**：上面的 `<your-embedding-model-id>` / `<your-reranker-model-id>` 就是推荐写法。项目本身不绑定某个固定模型家族；请直接填写你自己的 provider 实际 model id。
 
-如果你采用直连方式，最小验证步骤如下：
+如果你采用直连方式，先注意一个边界：
+
+- `docker_one_click.sh/.ps1` **不会直接读取你手改的仓库 `.env` 作为 Docker 最终配置**
+- 它每次都会先基于 `deploy/profiles/docker/profile-*.env` 生成一份 Docker env，再按脚本参数决定是否注入运行时覆盖
+- 所以如果你只是把最终直连配置写进仓库根的 `.env`，然后直接执行 `bash scripts/docker_one_click.sh --profile c`，实际启动的仍然是档位模板，不一定是你刚写进去的那套最终值
+
+最小验证建议分成两种：
 
 ```bash
-# 1) 按你的最终配置启动对应档位
-bash scripts/docker_one_click.sh --profile c
+# 方式 A：本地联调用一键脚本（显式注入）
+# 适合你已经在当前 shell 里准备好了 embedding / reranker / LLM 的 API 地址、key、model
+bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
+```
 
-# 2) 复验基础接口
+```bash
+# 方式 B：验证你自己准备好的“最终 Docker env 文件”
+# 这时请直接显式指定 MEMORY_PALACE_DOCKER_ENV_FILE，而不是指望一键脚本去读仓库 .env
+MEMORY_PALACE_DOCKER_ENV_FILE=/absolute/path/to/your-docker.env docker compose up -d --build
+```
+
+然后再复验基础接口：
+
+```bash
 curl -fsS http://127.0.0.1:18000/health
 curl -fsS http://127.0.0.1:18000/browse/node -H "X-MCP-API-Key: <YOUR_MCP_API_KEY>"
 ```
@@ -173,8 +189,9 @@ curl -fsS http://127.0.0.1:18000/browse/node -H "X-MCP-API-Key: <YOUR_MCP_API_KE
 结果判定口径：
 
 1. 请只拿**同一套最终部署配置**做对比和验收，不要混用不同链路的结果。
-2. 无论你走 `router` 还是直连，都应在最终配置下通过启动 + 健康检查。
-3. 若占位 endpoint/key 下启动失败，属于预期 fail-closed；请替换成真实可用值后再复验。
+2. 对 `docker_one_click` 来说，`--allow-runtime-env-injection` 属于**本地联调路径**，不是“读取仓库 `.env` 作为最终 Docker 配置”的意思。
+3. 如果你要验收真正准备上线的直连 Docker 配置，请直接拿那份最终 Docker env 文件做启动 + 健康检查。
+4. 若占位 endpoint/key 下启动失败，属于预期 fail-closed；请替换成真实可用值后再复验。
 
 ### 模型 ID 示例
 
@@ -453,6 +470,7 @@ Authorization: Bearer <你的 MCP_API_KEY>
 - 前端容器会在代理层自动给 `/api/*`、`/sse`、`/messages` 带上同一把 `MCP_API_KEY`
 - 这把 key 默认保存在本次运行使用的 Docker env 文件里
 - 浏览器只看到代理后的结果，不会直接拿到真实 key
+- 也请把这个前端端口视为可信管理入口。如果你要把 `3000` 暴露到受信网络之外，请先在前面加上自己的 VPN、反向代理鉴权或网络访问控制。
 
 ### SSE 启动示例
 

@@ -35,6 +35,8 @@ import {
     getOrphanMemoryDetail,
     deleteOrphanMemory,
     extractApiErrorCode,
+    saveStoredMaintenanceAuth,
+    clearStoredMaintenanceAuth,
     triggerIndexRebuild,
     triggerMemoryReindex,
     triggerSleepConsolidation,
@@ -334,5 +336,27 @@ describe('api contract regression', () => {
       signal: 'sig',
       params: { path: 'agent/index', domain: 'core' },
     });
+  });
+
+  it('returns false instead of throwing when saving browser auth hits storage failure', () => {
+    const originalSetItem = window.localStorage.setItem;
+    window.localStorage.setItem = vi.fn(() => {
+      throw new Error('quota');
+    });
+
+    expect(saveStoredMaintenanceAuth('stored-key')).toBe(false);
+
+    window.localStorage.setItem = originalSetItem;
+  });
+
+  it('returns false instead of throwing when clearing browser auth hits storage failure', () => {
+    const originalRemoveItem = window.localStorage.removeItem;
+    window.localStorage.removeItem = vi.fn(() => {
+      throw new Error('quota');
+    });
+
+    expect(clearStoredMaintenanceAuth()).toBe(false);
+
+    window.localStorage.removeItem = originalRemoveItem;
   });
 });

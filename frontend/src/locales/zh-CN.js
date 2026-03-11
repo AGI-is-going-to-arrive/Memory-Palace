@@ -194,7 +194,7 @@ const zhCN = {
       configured: '已配置',
       missing: '缺失',
       notEnabled: '未开启',
-      dashboardAuth: 'Dashboard 鉴权',
+      dashboardAuth: '后端 API 鉴权',
       embedding: 'Embedding',
       reranker: 'Reranker',
       writeGuard: 'write_guard',

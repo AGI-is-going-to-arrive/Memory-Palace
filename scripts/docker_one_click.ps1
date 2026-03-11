@@ -556,6 +556,81 @@ function Wait-DeploymentReady {
     return $false
 }
 
+function Get-ComposePublishedPort {
+    param(
+        [string]$ComposeProjectName,
+        [string]$EnvFile,
+        [string]$Service,
+        [int]$TargetPort,
+        [int]$FallbackPort
+    )
+
+    $previousComposeProjectName = $env:COMPOSE_PROJECT_NAME
+    try {
+        $portsOutput = docker ps `
+            --filter "label=com.docker.compose.project=$ComposeProjectName" `
+            --filter "label=com.docker.compose.service=$Service" `
+            --format '{{.Ports}}' 2>$null | Select-Object -First 1
+        if ($LASTEXITCODE -eq 0 -and $portsOutput) {
+            $portsLine = $portsOutput.ToString().Trim()
+            if ($portsLine -match ":(\d+)->$TargetPort/tcp") {
+                return [int]$Matches[1]
+            }
+        }
+
+        $containerName = docker ps `
+            --filter "label=com.docker.compose.project=$ComposeProjectName" `
+            --filter "label=com.docker.compose.service=$Service" `
+            --format '{{.Names}}' 2>$null | Select-Object -First 1
+        if ($LASTEXITCODE -eq 0 -and $containerName) {
+            $mappedPort = docker port $containerName $TargetPort 2>$null | Select-Object -First 1
+            if ($LASTEXITCODE -eq 0 -and $mappedPort) {
+                $line = $mappedPort.ToString().Trim()
+                if ($line -match ':(\d+)\s*$') {
+                    return [int]$Matches[1]
+                }
+            }
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($ComposeProjectName)) {
+            $env:COMPOSE_PROJECT_NAME = $ComposeProjectName
+        }
+
+        $portArgs = @()
+        if (-not [string]::IsNullOrWhiteSpace($EnvFile)) {
+            $portArgs += @('--env-file', $EnvFile)
+        }
+        $portArgs += @('-f', 'docker-compose.yml', 'port', $Service, "$TargetPort")
+
+        if ($script:UseComposePlugin) {
+            $output = & docker compose @portArgs 2>$null
+        }
+        else {
+            $output = & docker-compose @portArgs 2>$null
+        }
+
+        if ($LASTEXITCODE -eq 0 -and $output) {
+            $line = ($output | Select-Object -First 1).ToString().Trim()
+            if ($line -match ':(\d+)\s*$') {
+                return [int]$Matches[1]
+            }
+        }
+    }
+    catch {
+        # Fall back to the planned port when compose cannot report a binding.
+    }
+    finally {
+        if ([string]::IsNullOrWhiteSpace($previousComposeProjectName)) {
+            Remove-Item Env:COMPOSE_PROJECT_NAME -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:COMPOSE_PROJECT_NAME = $previousComposeProjectName
+        }
+    }
+
+    return $FallbackPort
+}
+
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptDir
 $profileLower = $Profile.ToLower()
@@ -694,11 +769,16 @@ try {
     }
     catch {
         Write-Warning "[compose-up] docker compose returned non-zero; probing backend/frontend/sse readiness..."
-        if (-not (Wait-DeploymentReady -FrontendPort $FrontendPort -BackendPort $BackendPort)) {
+        $probeFrontendPort = Get-ComposePublishedPort -ComposeProjectName $composeProjectName -EnvFile $envFile -Service 'frontend' -TargetPort 8080 -FallbackPort $FrontendPort
+        $probeBackendPort = Get-ComposePublishedPort -ComposeProjectName $composeProjectName -EnvFile $envFile -Service 'backend' -TargetPort 8000 -FallbackPort $BackendPort
+        if (-not (Wait-DeploymentReady -FrontendPort $probeFrontendPort -BackendPort $probeBackendPort)) {
             throw
         }
         Write-Warning "[compose-up] services became ready after compose reported failure; continuing."
     }
+
+    $reportedFrontendPort = Get-ComposePublishedPort -ComposeProjectName $composeProjectName -EnvFile $envFile -Service 'frontend' -TargetPort 8080 -FallbackPort $FrontendPort
+    $reportedBackendPort = Get-ComposePublishedPort -ComposeProjectName $composeProjectName -EnvFile $envFile -Service 'backend' -TargetPort 8000 -FallbackPort $BackendPort
 }
 finally {
     Release-PathLock -LockDir $script:DeploymentLockDir
@@ -718,8 +798,8 @@ finally {
 
 Write-Host ""
 Write-Host "Memory Palace is starting with docker profile $profileLower."
-Write-Host "Frontend: http://localhost:$FrontendPort"
-Write-Host "Backend API: http://localhost:$BackendPort"
-Write-Host "SSE Endpoint: http://localhost:$FrontendPort/sse"
-Write-Host "Health: http://localhost:$BackendPort/health"
+Write-Host "Frontend: http://localhost:$reportedFrontendPort"
+Write-Host "Backend API: http://localhost:$reportedBackendPort"
+Write-Host "SSE Endpoint: http://localhost:$reportedFrontendPort/sse"
+Write-Host "Health: http://localhost:$reportedBackendPort/health"
 Write-Host "Compose project: $composeProjectName"

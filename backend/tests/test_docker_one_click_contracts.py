@@ -30,6 +30,16 @@ def test_runtime_env_injection_covers_intent_llm_and_router_fallbacks() -> None:
 
     assert "wait_for_deployment_ready" in shell_text
     assert "Wait-DeploymentReady" in ps1_text
+    assert '--filter "label=com.docker.compose.project=${compose_project_name}"' in shell_text
+    assert '--filter "label=com.docker.compose.service=${service}"' in shell_text
+    assert "--format '{{.Ports}}'" in shell_text
+    assert 'docker port "${container_name}" "${target_port}"' in shell_text
+    assert '--filter "label=com.docker.compose.project=$ComposeProjectName"' in ps1_text
+    assert '--filter "label=com.docker.compose.service=$Service"' in ps1_text
+    assert "--format '{{.Ports}}'" in ps1_text
+    assert "docker port $containerName $TargetPort" in ps1_text
+    assert 'docker-compose.yml port "${service}" "${target_port}"' in shell_text
+    assert "$portArgs += @('-f', 'docker-compose.yml', 'port', $Service, \"$TargetPort\")" in ps1_text
     assert 'upsert_env_value_in_file "${env_file}" "MEMORY_PALACE_FRONTEND_PORT" "${frontend_port}"' in shell_text
     assert 'upsert_env_value_in_file "${env_file}" "MEMORY_PALACE_BACKEND_PORT" "${backend_port}"' in shell_text
     assert "Set-EnvValueInFile -FilePath $envFile -Key 'MEMORY_PALACE_FRONTEND_PORT' -Value \"$FrontendPort\"" in ps1_text

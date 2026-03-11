@@ -4,6 +4,7 @@ import hmac
 import asyncio
 import uvicorn
 from contextlib import asynccontextmanager
+from ipaddress import ip_address
 from typing import Optional
 from urllib.parse import quote
 from uuid import UUID, uuid4
@@ -87,6 +88,41 @@ def _is_loopback_scope(scope: Scope) -> bool:
         if isinstance(header_value, str) and header_value.strip():
             return False
     return True
+
+
+def _is_loopback_hostname(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    hostname = str(value).strip().lower()
+    if not hostname:
+        return False
+    if hostname.startswith("[") and hostname.endswith("]"):
+        hostname = hostname[1:-1]
+    if ":" in hostname and hostname.count(":") == 1 and hostname.rsplit(":", 1)[1].isdigit():
+        hostname = hostname.rsplit(":", 1)[0]
+    if hostname in _LOOPBACK_CLIENT_HOSTS:
+        return True
+    try:
+        return ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
+def _extract_host_from_scope(scope: Scope) -> Optional[str]:
+    headers = Headers(scope=scope)
+    host_header = headers.get("host")
+    if isinstance(host_header, str) and host_header.strip():
+        return host_header
+    server = scope.get("server")
+    if isinstance(server, tuple) and server:
+        return str(server[0] or "").strip()
+    return None
+
+
+def _is_direct_loopback_scope(scope: Scope) -> bool:
+    if not _is_loopback_scope(scope):
+        return False
+    return _is_loopback_hostname(_extract_host_from_scope(scope))
 
 
 def _should_suppress_stream_shutdown_runtime_error(scope: Scope, exc: RuntimeError) -> bool:
@@ -209,10 +245,6 @@ class MemoryPalaceSseServerTransport(SseServerTransport):
         except ValidationError as err:
             response = Response("Could not parse message", status_code=400)
             await response(scope, receive, send)
-            try:
-                await writer.send(err)
-            except ClosedResourceError:
-                self._read_stream_writers.pop(session_id, None)
             return
 
         metadata = ServerMessageMetadata(request_context=request)
@@ -242,7 +274,7 @@ def apply_mcp_api_key_middleware(app: ASGIApp) -> ASGIApp:
         configured = _get_configured_mcp_api_key()
         headers = Headers(scope=scope)
         if not configured:
-            if _allow_insecure_local_without_api_key() and _is_loopback_scope(scope):
+            if _allow_insecure_local_without_api_key() and _is_direct_loopback_scope(scope):
                 await app(scope, receive, send)
                 return
             reason = (

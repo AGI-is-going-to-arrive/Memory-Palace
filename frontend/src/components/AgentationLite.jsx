@@ -159,8 +159,11 @@ export default function AgentationLite() {
   }[status];
 
   return (
-    <div data-agentation-lite="toolbar" className="fixed bottom-5 right-5 z-50 w-80 space-y-2">
-      <div className="rounded-xl border border-stone-700/80 bg-stone-900/95 p-3 shadow-[0_14px_36px_rgba(0,0,0,0.45)] backdrop-blur">
+    <div
+      data-agentation-lite="toolbar"
+      className="pointer-events-none fixed bottom-5 right-5 z-30 w-80 space-y-2"
+    >
+      <div className="pointer-events-auto rounded-xl border border-stone-700/80 bg-stone-900/95 p-3 shadow-[0_14px_36px_rgba(0,0,0,0.45)] backdrop-blur">
         <div className="mb-2 flex items-center justify-between">
           <div className="font-display text-sm text-amber-50">Agentation</div>
           <span
@@ -210,7 +213,7 @@ export default function AgentationLite() {
       </div>
 
       {composerOpen && (
-        <div className="rounded-xl border border-stone-700/80 bg-stone-900/95 p-3 shadow-[0_14px_36px_rgba(0,0,0,0.45)] backdrop-blur">
+        <div className="pointer-events-auto rounded-xl border border-stone-700/80 bg-stone-900/95 p-3 shadow-[0_14px_36px_rgba(0,0,0,0.45)] backdrop-blur">
           <div className="mb-2 text-[11px] uppercase tracking-[0.14em] text-amber-400">New Annotation</div>
           <div className="mb-2 text-xs text-stone-400">
             Target: <code className="text-amber-200">{target?.elementPath || 'Capture an element first'}</code>
