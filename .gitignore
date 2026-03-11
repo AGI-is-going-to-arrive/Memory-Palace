@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+.env.docker
 
 # Local tooling metadata
 .claude/

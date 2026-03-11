@@ -185,6 +185,11 @@ curl -fsS http://127.0.0.1:18000/health
 curl -fsS http://127.0.0.1:18000/browse/node -H "X-MCP-API-Key: <YOUR_MCP_API_KEY>"
 ```
 
+Here, `<YOUR_MCP_API_KEY>` means:
+
+- local manual startup: the `MCP_API_KEY` in your repository `.env`
+- Docker / GHCR startup: the `MCP_API_KEY` in the Docker env file for that run (for example `.env.docker`)
+
 Decision Criteria:
 
 1.  Please only compare and accept results from the **same final deployment configuration**. Do not mix results from different paths.
@@ -273,6 +278,15 @@ docker compose -f docker-compose.ghcr.yml pull
 docker compose -f docker-compose.ghcr.yml up -d
 ```
 
+```powershell
+cd <project-root>
+Copy-Item .env.example .env.docker
+.\scripts\apply_profile.ps1 -Platform docker -Profile b -Target .env.docker
+
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
 This path is for **running the service quickly**:
 
 - It avoids local image build.
@@ -280,9 +294,10 @@ This path is for **running the service quickly**:
 - It covers `Dashboard / API / SSE`.
 - It does **not** automatically install local `skills / MCP / IDE host` entries.
 - If you want the current repo's repo-local skill + MCP installation path, continue with `docs/skills/GETTING_STARTED_EN.md`.
-- If you only want MCP without repo-local install automation, configure an SSE-capable client manually against `http://localhost:3000/sse`.
+- If you only want MCP without repo-local install automation, configure an SSE-capable client manually against `http://localhost:3000/sse`. For this GHCR path, `<YOUR_MCP_API_KEY>` normally means the `MCP_API_KEY` written into the `.env.docker` file you just generated.
 - Unlike `docker_one_click.sh/.ps1`, this path does **not** auto-adjust ports. Set `MEMORY_PALACE_FRONTEND_PORT` / `MEMORY_PALACE_BACKEND_PORT` explicitly if the defaults are occupied.
-- If a containerized C / D setup still needs to reach a **model service running on your host machine**, do not use `127.0.0.1` as the host-side address from inside the container. From the container's point of view, `127.0.0.1` loops back to the container itself, not your host. Prefer `host.docker.internal` (or your actual reachable host address).
+- If a containerized C / D setup still needs to reach a **model service running on your host machine**, do not use `127.0.0.1` as the host-side address from inside the container. From the container's point of view, `127.0.0.1` loops back to the container itself, not your host. Prefer `host.docker.internal` (or your actual reachable host address). The compose files now add `host.docker.internal:host-gateway`, so this also works on modern Linux Docker.
+- Do **not** assume the repo-local stdio wrapper shares container data automatically. `scripts/run_memory_palace_mcp_stdio.sh` needs a local repository `.env` and the local `backend/.venv`; if `.env` is missing while `.env.docker` exists, it refuses to fall back to `demo.db`. In a Docker-only setup, prefer `/sse` instead of the repo-local stdio wrapper.
 
 The rest of this section describes the **local build / maintainer path** using `docker_one_click.sh/.ps1`.
 
@@ -466,6 +481,11 @@ X-MCP-API-Key: <YOUR_MCP_API_KEY>
 Authorization: Bearer <YOUR_MCP_API_KEY>
 ```
 
+`<YOUR_MCP_API_KEY>` always means the actual `MCP_API_KEY` value from the env file used by that runtime:
+
+- local manual startup -> repository `.env`
+- Docker / GHCR startup -> the Docker env file for that run (for example `.env.docker`)
+
 ### Local Debugging Override
 
 Setting `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` allows skipping authentication during local debugging:
@@ -505,7 +525,9 @@ When using **Docker one-click deployment**, you don't need to write the key into
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
-> `HOST=127.0.0.1` here is a local loopback debugging example. To allow other machines to access it, change it to `0.0.0.0` (or your actual listening address) and supplement with your own `MCP_API_KEY`, network isolation, reverse proxy, and TLS protection.
+> `python run_sse.py` defaults to loopback (`HOST=127.0.0.1`, `PORT=8000`), so `HOST=127.0.0.1` here is the normal local debugging shape. To allow other machines to access it, change it to `0.0.0.0` (or your actual listening address) and supplement with your own `MCP_API_KEY`, network isolation, reverse proxy, and TLS protection.
+>
+> In Docker / Compose, the SSE container explicitly sets `HOST=0.0.0.0` so the service can be reached through the container network and the frontend proxy.
 
 For Docker one-click deployment, access directly at:
 

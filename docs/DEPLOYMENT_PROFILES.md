@@ -274,6 +274,15 @@ docker compose -f docker-compose.ghcr.yml pull
 docker compose -f docker-compose.ghcr.yml up -d
 ```
 
+```powershell
+cd <project-root>
+Copy-Item .env.example .env.docker
+.\scripts\apply_profile.ps1 -Platform docker -Profile b -Target .env.docker
+
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
 这条路径的定位是**先把服务跑起来**：
 
 - 它绕开本地镜像 build。
@@ -281,9 +290,10 @@ docker compose -f docker-compose.ghcr.yml up -d
 - 它覆盖的是 `Dashboard / API / SSE`。
 - 它**不会**自动给你安装本机上的 `skills / MCP / IDE host` 配置。
 - 如果你还想用当前仓库现成的 repo-local skill + MCP 安装链路，请继续看 `docs/skills/GETTING_STARTED.md`。
-- 如果你只想让某个客户端连 MCP，不走 repo-local 安装链路，也可以手工把支持远程 SSE 的客户端指到 `http://localhost:3000/sse`。
+- 如果你只想让某个客户端连 MCP，不走 repo-local 安装链路，也可以手工把支持远程 SSE 的客户端指到 `http://localhost:3000/sse`。这里的 `<YOUR_MCP_API_KEY>` 默认就填刚生成的 `.env.docker` 里的 `MCP_API_KEY`。
+- `scripts/run_memory_palace_mcp_stdio.sh` 不是这条 Docker 路径的客户端入口：它依赖本地 `bash` 和 `backend/.venv`，只会复用本地 `.env` / `DATABASE_URL`，不会复用容器里的 `/app/data`。如果仓库里只有 `.env.docker` 而没有本地 `.env`，它会明确拒绝回退到 `demo.db`，并提示改走 Docker 暴露的 `/sse`。
 - 和 `docker_one_click.sh/.ps1` 不同，这条路径**不会自动换端口**。如果 `3000` / `18000` 已被占用，请显式设置 `MEMORY_PALACE_FRONTEND_PORT` / `MEMORY_PALACE_BACKEND_PORT`。
-- 如果容器里的 C / D 档位还要访问**你宿主机上的本地模型服务**，不要把容器侧地址写成 `127.0.0.1`。对容器来说，这个地址只会回到容器自己，不会指向你的宿主机。优先使用 `host.docker.internal`（或你的实际可达宿主机地址）。
+- 如果容器里的 C / D 档位还要访问**你宿主机上的本地模型服务**，不要把容器侧地址写成 `127.0.0.1`。对容器来说，这个地址只会回到容器自己，不会指向你的宿主机。优先使用 `host.docker.internal`（或你的实际可达宿主机地址）。当前 compose 已显式补 `host.docker.internal:host-gateway`，Linux Docker 现在也能沿这条路径访问宿主机服务。
 
 本节下面剩余内容描述的是 **本地构建 / 维护者路径**，也就是 `docker_one_click.sh/.ps1`。
 
@@ -506,13 +516,15 @@ Authorization: Bearer <你的 MCP_API_KEY>
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
-> 这里的 `HOST=127.0.0.1` 是本机回环调试示例。若要给其他机器访问，请改成 `0.0.0.0`（或你的实际监听地址），并自行补齐 `MCP_API_KEY`、网络隔离、反向代理与 TLS 等保护。
+> 这里的 `HOST=127.0.0.1` 是本机回环调试示例；即使你直接运行 `python run_sse.py`，本地默认也仍是 `127.0.0.1`。若要给其他机器访问，请改成 `0.0.0.0`（或你的实际监听地址），并自行补齐 `MCP_API_KEY`、网络隔离、反向代理与 TLS 等保护。Docker / Compose 场景则是由 compose 内部显式把 SSE 的 `HOST` 设成 `0.0.0.0`。
 
 Docker 一键部署时，直接使用：
 
 ```bash
 http://localhost:3000/sse
 ```
+
+> 如果你按上面的 GHCR compose 示例生成了 `.env.docker`，这里的 `<YOUR_MCP_API_KEY>` 默认就读 `.env.docker` 里的 `MCP_API_KEY`；若你走的是 `docker_one_click.*`，则读取本次运行使用的 Docker env 文件中的同名值。
 
 ---
 

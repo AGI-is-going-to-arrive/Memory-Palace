@@ -43,7 +43,7 @@ docs/skills/memory-palace/
 对 IDE hosts 来说，`Memory Palace` 这套 “skill” 应该这样插入：
 
 - **主入口**：仓库根的 `AGENTS.md`
-- **执行入口**：本地 MCP 配置，指向当前仓库的 `scripts/run_memory_palace_mcp_stdio.sh`
+- **执行入口**：本地 MCP 配置，使用 `bash` 调当前仓库的 `scripts/run_memory_palace_mcp_stdio.sh`，并确保本地 `backend/.venv` 已经装好依赖
 - **可选兼容层**：某些宿主需要额外 workflow / wrapper
 
 也就是说：
@@ -111,6 +111,8 @@ python scripts/render_ide_host_config.py --host antigravity
 ```text
 scripts/run_memory_palace_mcp_stdio.sh
 ```
+
+也就是说，默认输出的是 `bash + run_memory_palace_mcp_stdio.sh` 这条本地 stdio 入口；前提仍然是当前 checkout 下的 `backend/.venv` 已经可用。
 
 如果某个宿主存在 `stdin/stdout` / CRLF 兼容问题，再切到 wrapper 版本：
 

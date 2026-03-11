@@ -339,26 +339,51 @@ describe('api contract regression', () => {
   });
 
   it('returns false instead of throwing when saving browser auth hits storage failure', () => {
-    const originalSetItem = Storage.prototype.setItem;
-    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
-      if (key === 'memory-palace.dashboardAuth') {
-        throw new Error('quota');
-      }
-      return originalSetItem.call(this, key, value);
+    const originalStorage = window.localStorage;
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      writable: true,
+      value: {
+        getItem: originalStorage.getItem.bind(originalStorage),
+        setItem: (key, value) => {
+          if (key === 'memory-palace.dashboardAuth') {
+            throw new Error('quota');
+          }
+          return originalStorage.setItem(key, value);
+        },
+        removeItem: originalStorage.removeItem.bind(originalStorage),
+        clear: originalStorage.clear.bind(originalStorage),
+      },
     });
 
     expect(saveStoredMaintenanceAuth('stored-key')).toBe(false);
-
-    setItemSpy.mockRestore();
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      writable: true,
+      value: originalStorage,
+    });
   });
 
   it('returns false instead of throwing when clearing browser auth hits storage failure', () => {
-    const removeItemSpy = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
-      throw new Error('quota');
+    const originalStorage = window.localStorage;
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      writable: true,
+      value: {
+        getItem: originalStorage.getItem.bind(originalStorage),
+        setItem: originalStorage.setItem.bind(originalStorage),
+        removeItem: () => {
+          throw new Error('quota');
+        },
+        clear: originalStorage.clear.bind(originalStorage),
+      },
     });
 
     expect(clearStoredMaintenanceAuth()).toBe(false);
-
-    removeItemSpy.mockRestore();
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      writable: true,
+      value: originalStorage,
+    });
   });
 });

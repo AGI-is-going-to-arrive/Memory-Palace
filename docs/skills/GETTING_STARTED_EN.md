@@ -144,8 +144,12 @@ Its role is simple:
 
 - Uses the project's own `backend/.venv`.
 - Prioritizes reusing the `DATABASE_URL` in the current repository's `.env`.
+- Falls back to the repo-local `demo.db` only when there is no repo `.env` at all.
+- Refuses that fallback when `.env.docker` exists without `.env`, because the repo-local stdio wrapper does **not** reuse Docker's `/app/data` database path.
 
 This ensures that the database you see in the Dashboard / HTTP API is the same one the MCP client actually reads and writes to by default.
+
+If you only have the Docker / GHCR service side running, prefer the exposed `/sse` endpoint instead of this repo-local stdio wrapper.
 
 Note:
 
@@ -188,6 +192,7 @@ These user-scope MCP configurations essentially call the same wrapper, so the de
 
 - Read the current repository `.env` first.
 - Decide the actual `DATABASE_URL`.
+- Require the repository's own `backend/.venv` on the local machine.
 
 If you want to switch to another database, prioritize changing the repository's own `.env` rather than manually writing different database paths in different clients.
 

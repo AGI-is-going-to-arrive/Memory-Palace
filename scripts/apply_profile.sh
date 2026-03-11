@@ -35,7 +35,7 @@ set_env_value() {
   local key="$2"
   local value="$3"
   local tmp_file
-  tmp_file="$(mktemp "${file_path##*/}.XXXXXX")"
+  tmp_file="$(mktemp "${TMPDIR:-/tmp}/${file_path##*/}.XXXXXX")"
   awk -v key="${key}" -v value="${value}" '
     BEGIN { replaced = 0 }
     $0 ~ ("^" key "=") {

@@ -69,8 +69,10 @@ def test_compose_waits_for_healthy_sse_service() -> None:
 
     assert "healthcheck:" in backend_block
     assert "http://127.0.0.1:8000/health" in backend_block
+    assert 'host.docker.internal:host-gateway' in backend_block
     assert "healthcheck:" in sse_block
     assert "http://127.0.0.1:8000/health" in sse_block
+    assert 'host.docker.internal:host-gateway' in sse_block
     assert "sse:\n        condition: service_healthy" in frontend_block
 
 
@@ -102,3 +104,4 @@ def test_compose_volume_defaults_are_project_scoped() -> None:
     for text in (compose_text, ghcr_compose_text):
         assert expected_data in text
         assert expected_snapshots in text
+        assert 'host.docker.internal:host-gateway' in text

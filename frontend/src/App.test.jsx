@@ -123,7 +123,7 @@ describe('App routing', () => {
 
   it('shows an error instead of crashing when browser storage rejects the API key write', async () => {
     const user = userEvent.setup();
-    const originalSetItem = Storage.prototype.setItem;
+    const originalStorage = window.localStorage;
     window.history.pushState({}, '', '/memory');
 
     render(<App />);
@@ -134,15 +134,28 @@ describe('App routing', () => {
       within(dialog).getByPlaceholderText(i18n.t('setup.dashboard.apiKeyPlaceholder')),
       'stored-key'
     );
-    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
-      if (key === 'memory-palace.dashboardAuth') {
-        throw new Error('quota');
-      }
-      return originalSetItem.call(this, key, value);
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      writable: true,
+      value: {
+        getItem: originalStorage.getItem.bind(originalStorage),
+        setItem: (key, value) => {
+          if (key === 'memory-palace.dashboardAuth') {
+            throw new Error('quota');
+          }
+          return originalStorage.setItem(key, value);
+        },
+        removeItem: originalStorage.removeItem.bind(originalStorage),
+        clear: originalStorage.clear.bind(originalStorage),
+      },
     });
 
     await user.click(screen.getByRole('button', { name: i18n.t('setup.actions.saveBrowserOnly') }));
-    setItemSpy.mockRestore();
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      writable: true,
+      value: originalStorage,
+    });
 
     expect((await screen.findAllByText(i18n.t('setup.messages.saveFailed'))).length).toBeGreaterThan(0);
     expect(screen.getByRole('dialog', { name: i18n.t('setup.title') })).toBeInTheDocument();
@@ -233,6 +246,23 @@ describe('App routing', () => {
 
     expect(await screen.findByRole('dialog', { name: '配置 Memory Palace' })).toBeInTheDocument();
     expect(within(screen.getByRole('dialog', { name: '配置 Memory Palace' })).getByText('首启配置')).toBeInTheDocument();
+  });
+
+  it('keeps typed setup values when switching language inside the setup assistant', async () => {
+    const user = userEvent.setup();
+    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    window.history.pushState({}, '', '/memory');
+
+    render(<App />);
+
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    const apiKeyInput = within(dialog).getByPlaceholderText(i18n.t('setup.dashboard.apiKeyPlaceholder'));
+
+    await user.type(apiKeyInput, 'typed-key-123');
+    await user.click(within(dialog).getByTestId('setup-language-toggle'));
+
+    const translatedDialog = await screen.findByRole('dialog', { name: '配置 Memory Palace' });
+    expect(within(translatedDialog).getByDisplayValue('typed-key-123')).toBeInTheDocument();
   });
 
   it('does not embed the raw api key in the routes key', () => {

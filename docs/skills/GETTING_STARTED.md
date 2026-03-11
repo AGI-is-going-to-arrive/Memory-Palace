@@ -4,7 +4,9 @@
 >
 > 如果你当前只是通过 GHCR / Docker 把 `Dashboard / API / SSE` 跑起来，但还没打算接本机客户端，这份不是第一入口。那种情况下，服务已经能用；只有当你还要让 `Claude / Codex / Gemini / OpenCode / IDE host` 真正接到当前仓库时，才继续按这里做。
 >
-> **先补一个边界说明**：当前仓库里的 repo-local MCP wrapper 是 `scripts/run_memory_palace_mcp_stdio.sh`，安装脚本生成的本地 MCP 启动命令也统一走 `bash` / `/bin/zsh`。如果你是原生 Windows 环境，请先准备 **Git Bash** 或 **WSL**；不要把下面这些 shell 示例理解成“PowerShell 直接可用”。
+> **先补一个边界说明**：当前仓库里的 repo-local MCP wrapper 是 `scripts/run_memory_palace_mcp_stdio.sh`，安装脚本生成的本地 MCP 启动命令也统一走 `bash` / `/bin/zsh`，并且默认依赖本地 `backend/.venv`。如果你是原生 Windows 环境，请先准备 **Git Bash** 或 **WSL**；不要把下面这些 shell 示例理解成“PowerShell 直接可用”。
+>
+> **再补一条很容易踩坑的边界**：这个 wrapper 只服务于“当前 checkout + 本地 `.env` + 本地 `backend/.venv`”这条 repo-local 路径，不会复用 Docker 容器里的 `/app/data`。如果仓库里只有 `.env.docker` 而没有本地 `.env`，它会明确拒绝回退到 `demo.db`，并提示你改走 Docker 暴露的 `/sse`。
 >
 > **再补一条范围说明**：这份主要写给 `Claude Code / Gemini CLI / Codex / OpenCode` 这类 CLI 客户端。`Cursor / Windsurf / VSCode-host / Antigravity` 这类 IDE 宿主，请直接看 `IDE_HOSTS.md`。
 
@@ -144,6 +146,7 @@ scripts/run_memory_palace_mcp_stdio.sh
 
 - 用项目自己的 `backend/.venv`
 - 优先复用当前仓库 `.env` 里的 `DATABASE_URL`
+- 如果仓库里只有 `.env.docker` 而没有本地 `.env`，就停止并提示改走 Docker `/sse`
 
 这样你在 Dashboard / HTTP API 里看到的库，和 MCP 客户端实际读写的库，默认就是同一份。
 
@@ -188,6 +191,7 @@ python scripts/install_skill.py \
 
 - 先读当前仓库 `.env`
 - 再决定实际 `DATABASE_URL`
+- 没有本地 `.env` 且仓库里只有 `.env.docker` 时，不会偷偷改用 `demo.db`
 
 如果你想换到另一份数据库，优先改这个仓库自己的 `.env`，不要手工在不同客户端里各写一套不同的数据库路径。
 

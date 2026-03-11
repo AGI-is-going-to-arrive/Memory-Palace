@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import mcp_server as mcp_server_module
+import run_sse
 
 
 def _reload_mcp_server():
@@ -34,6 +35,27 @@ def test_loopback_host_keeps_dns_rebinding_protection(monkeypatch) -> None:
     assert module.mcp.settings.transport_security is not None
     assert module.mcp.settings.transport_security.enable_dns_rebinding_protection is True
     assert "127.0.0.1:*" in module.mcp.settings.transport_security.allowed_hosts
+
+
+def test_run_sse_main_binds_loopback_by_default(monkeypatch) -> None:
+    calls: list[tuple[str, int]] = []
+
+    async def _noop_startup() -> None:
+        return None
+
+    monkeypatch.delenv("HOST", raising=False)
+    monkeypatch.delenv("PORT", raising=False)
+    monkeypatch.setattr(run_sse, "mcp_startup", _noop_startup)
+    monkeypatch.setattr(run_sse, "create_sse_app", lambda: "app")
+    monkeypatch.setattr(
+        run_sse.uvicorn,
+        "run",
+        lambda app, host, port: calls.append((host, port)),
+    )
+
+    run_sse.main()
+
+    assert calls == [("127.0.0.1", 8000)]
 
 
 def test_sse_transport_security_rejects_invalid_host_without_traceback(tmp_path) -> None:

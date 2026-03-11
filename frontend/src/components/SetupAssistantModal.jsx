@@ -185,7 +185,7 @@ export default function SetupAssistantModal({
     return () => {
       cancelled = true;
     };
-  }, [authState, open, t]);
+  }, [authState, open]);
 
   const updateField = React.useCallback((key, value) => {
     setForm((current) => ({ ...current, [key]: value }));

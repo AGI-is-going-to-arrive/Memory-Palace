@@ -187,7 +187,7 @@ INFO:     Uvicorn running on http://127.0.0.1:8000
 >
 > The `uvicorn main:app --host 127.0.0.1 ...` command above is the recommended **local development** form.
 >
-> If you instead run `python main.py`, the current default is `0.0.0.0:8000`. That is more suitable for LAN / remote direct access, but it also means the service listens on external interfaces. Before using that path, make sure your `MCP_API_KEY`, firewall rules, reverse proxy, or equivalent network-side protections are already in place.
+> If you instead run `python main.py`, the current default is still loopback: `127.0.0.1:8000`. If you actually want LAN / remote direct access, bind it explicitly with `uvicorn main:app --host 0.0.0.0 --port 8000` (or your own listening address) and only do that after your `MCP_API_KEY`, firewall rules, reverse proxy, and equivalent network-side protections are already in place.
 
 ### Step 3: Start Frontend
 
@@ -248,6 +248,15 @@ docker compose -f docker-compose.ghcr.yml pull
 docker compose -f docker-compose.ghcr.yml up -d
 ```
 
+```powershell
+cd <project-root>
+Copy-Item .env.example .env.docker
+.\scripts\apply_profile.ps1 -Platform docker -Profile b -Target .env.docker
+
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
 Default access addresses:
 
 | Service | Address |
@@ -262,9 +271,10 @@ What this path does and does not do:
 - It solves **Dashboard / API / SSE startup** only.
 - It does **not** automatically configure local `skills / MCP / IDE host` entries on your machine.
 - If you want the current repo's repo-local skill + MCP install path, keep this checkout and continue with `docs/skills/GETTING_STARTED_EN.md`.
-- If you do not want the repo-local install path, any client that supports remote SSE MCP can still be configured manually to connect to `http://localhost:3000/sse` with the matching auth header / API key.
+- If you do not want the repo-local install path, any client that supports remote SSE MCP can still be configured manually to connect to `http://localhost:3000/sse` with the matching auth header / API key. For this GHCR path, `<YOUR_MCP_API_KEY>` normally means the `MCP_API_KEY` written into the `.env.docker` you just generated.
 - Unlike `docker_one_click.sh/.ps1`, this GHCR compose path does **not** auto-adjust ports. If `3000` / `18000` are occupied, set `MEMORY_PALACE_FRONTEND_PORT` / `MEMORY_PALACE_BACKEND_PORT` explicitly before `docker compose up`.
-- If the container still needs to reach a **model service running on your host machine**, do not write `127.0.0.1` as the host-side address from inside the container. For the container, `127.0.0.1` points back to the container itself, not your host. Prefer `host.docker.internal` (or your actual reachable host address).
+- If the container still needs to reach a **model service running on your host machine**, do not write `127.0.0.1` as the host-side address from inside the container. For the container, `127.0.0.1` points back to the container itself, not your host. Prefer `host.docker.internal` (or your actual reachable host address). The compose files now add `host.docker.internal:host-gateway`, so this path also works on modern Linux Docker.
+- Do **not** assume the repo-local stdio wrapper reuses container data automatically. `scripts/run_memory_palace_mcp_stdio.sh` needs a local repository `.env` and the local `backend/.venv`; if `.env` is missing while `.env.docker` exists, it refuses to fall back to `demo.db`. In a Docker-only setup, prefer the exposed `/sse` endpoint instead of the repo-local stdio wrapper.
 
 Stop services:
 
@@ -478,7 +488,7 @@ python mcp_server.py
 >
 > The `python mcp_server.py` here assumes you are still using the **`backend/.venv` created and populated with dependencies in Step 2**. If you switch to a new terminal or are configuring local MCP in a client, prioritize using the project's own `.venv` interpreter. Otherwise, errors like `ModuleNotFoundError: No module named 'sqlalchemy'` will occur before the MCP process truly starts.
 >
-> If you are accessing MCP in a client configuration, it is highly recommended to use `scripts/run_memory_palace_mcp_stdio.sh` directly. Think of it as the safer default entry: it reuses the current repository `.env` / `DATABASE_URL` first, and only falls back to the repo's default SQLite path when those are missing. That makes client configs less brittle across terminals and machines.
+> If you are accessing MCP in a client configuration, it is highly recommended to use `scripts/run_memory_palace_mcp_stdio.sh` directly for a **local checkout**. It uses the project's own `backend/.venv`, reads the current repository `.env` / `DATABASE_URL` first, and only falls back to the repo's default SQLite path when neither `DATABASE_URL` nor `.env` is present. If `.env` is missing but `.env.docker` exists, it now refuses that fallback on purpose because the repo-local stdio wrapper does **not** reuse the container's `/app/data` database path. In a Docker-only setup, prefer the exposed `/sse` endpoint instead.
 
 ### 6.2 SSE Mode
 
@@ -487,13 +497,15 @@ cd backend
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
-> The `run_sse.py` process itself uses uvicorn's default `0.0.0.0:8000` listener (customizable via `HOST` and `PORT`), and the SSE endpoint path is `/sse`. But for FastMCP, the effective `HOST` still defaults to `127.0.0.1`, so if you really want remote clients to connect, set `HOST=0.0.0.0` (or your actual bind address) explicitly instead of assuming that "uvicorn is listening" already means "remote clients can connect". SSE mode is still protected by `MCP_API_KEY`.
+> `python run_sse.py` defaults to loopback as well: `HOST=127.0.0.1`, `PORT=8000`, and the SSE endpoint path is `/sse`. SSE mode is still protected by `MCP_API_KEY`.
 >
 > The same SSE process also provides a lightweight `/health` endpoint, mainly for Docker / scripts to perform readiness checks; the truly open streaming entry point for MCP clients remains `/sse`.
 >
 > The command above deliberately binds to `127.0.0.1`, which is more suitable for local machine debugging. If you truly need to allow access from other machines, change `HOST` to `0.0.0.0` (or your actual listening address). This will allow remote clients to connect to the listening address, but API Key, reverse proxy, firewall, and transport layer security will still need to be completed by you.
 >
-> If you use Docker one-click deployment, SSE will be started by an independent container and exposed at `http://127.0.0.1:3000/sse` via the frontend proxy.
+> If you use Docker one-click deployment or the GHCR compose path, SSE is started by an independent container that explicitly sets `HOST=0.0.0.0` inside the container and is exposed at `http://127.0.0.1:3000/sse` via the frontend proxy.
+>
+> For containerized Profile C / D setups, the compose files also add `host.docker.internal:host-gateway`, so `host.docker.internal` is the preferred way to reach a model service running on your host machine, including modern Linux Docker.
 >
 > Treat that Docker frontend port as a trusted admin surface, not as public end-user auth. Anyone who can directly reach `3000` can use the Dashboard and its proxied protected routes, so add your own VPN, reverse-proxy auth, or network ACL before exposing it outside a trusted network.
 >
@@ -572,6 +584,8 @@ In other words:
 - the **publicly supported direct path today is Claude Code and Gemini CLI first**
 - for `Codex` / `OpenCode`, this repository should not yet describe `/sse` as a fully validated copy-paste path
 
+For the Docker / GHCR paths in Section 4, read `<YOUR_MCP_API_KEY>` from the `MCP_API_KEY` value in the `.env.docker` file you just generated.
+
 ### 6.3.2 Claude Code manual `/sse` connection
 
 ```bash
@@ -594,6 +608,7 @@ Notes:
 - Claude Code officially supports `stdio`, `sse`, and `http`
 - if Memory Palace later exposes a clearer HTTP / streamable HTTP MCP entry, prefer `http`
 - for the current public repository, the remote entry users can connect to directly is `/sse`
+- for the GHCR / Docker path above, `<YOUR_MCP_API_KEY>` normally comes from `.env.docker`, not from a repo-local stdio wrapper
 
 ### 6.3.3 Gemini CLI manual `/sse` connection
 
@@ -626,6 +641,8 @@ If you prefer editing `settings.json` directly, the minimal public skeleton we c
   }
 }
 ```
+
+For the GHCR / Docker path above, `<YOUR_MCP_API_KEY>` normally comes from the `MCP_API_KEY` in `.env.docker`.
 
 ### 6.3.4 Why there is no direct `/sse` copy-paste block for `Codex / OpenCode` here
 

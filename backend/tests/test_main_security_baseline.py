@@ -182,7 +182,7 @@ async def test_health_hides_internal_exception_details(
     assert "boom-secret-detail" not in serialized
 
 
-def test_main_script_binds_all_interfaces_by_default(
+def test_main_script_binds_loopback_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, int]] = []
@@ -194,4 +194,4 @@ def test_main_script_binds_all_interfaces_by_default(
 
     runpy.run_module("main", run_name="__main__")
 
-    assert calls == [("0.0.0.0", 8000)]
+    assert calls == [("127.0.0.1", 8000)]

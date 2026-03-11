@@ -31,6 +31,17 @@ docker compose -f docker-compose.ghcr.yml pull
 docker compose -f docker-compose.ghcr.yml up -d
 ```
 
+```powershell
+git clone https://github.com/AGI-is-going-to-arrive/Memory-Palace.git
+cd Memory-Palace
+
+Copy-Item .env.example .env.docker
+.\scripts\apply_profile.ps1 -Platform docker -Profile b -Target .env.docker
+
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
 > This uses **Profile B** by default.
 
 ---
@@ -86,6 +97,8 @@ In other words:
 
 - Docker starts the service side
 - client integration is still host-side configuration
+- if you later connect a client manually to `http://localhost:3000/sse`, `<YOUR_MCP_API_KEY>` normally means the `MCP_API_KEY` in the `.env.docker` file you just generated
+- if you only have Docker running, prefer `/sse`; do **not** assume `scripts/run_memory_palace_mcp_stdio.sh` will reuse container data, because that wrapper needs a local `.env` plus `backend/.venv` and refuses the `demo.db` fallback when `.env.docker` exists without `.env`
 
 If you also want to wire clients into this repository, continue with:
 
@@ -103,6 +116,12 @@ If `3000` or `18000` is already occupied on your machine, set them explicitly be
 ```bash
 export MEMORY_PALACE_FRONTEND_PORT=3300
 export MEMORY_PALACE_BACKEND_PORT=18080
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
+```powershell
+$env:MEMORY_PALACE_FRONTEND_PORT = "3300"
+$env:MEMORY_PALACE_BACKEND_PORT = "18080"
 docker compose -f docker-compose.ghcr.yml up -d
 ```
 
@@ -125,6 +144,8 @@ host.docker.internal
 ```
 
 or your actual reachable host address.
+
+The compose files now add `host.docker.internal:host-gateway`, so this path also works on modern Linux Docker instead of only Docker Desktop.
 
 ---
 

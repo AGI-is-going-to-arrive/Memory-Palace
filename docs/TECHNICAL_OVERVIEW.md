@@ -237,7 +237,7 @@ frontend/src/
 >
 > 说人话就是：前端把鉴权做成了“运行时再决定”，所以你可以在页面顶部直接补 key，也可以由部署脚本在页面加载前注入。
 >
-> `run_memory_palace_mcp_stdio.sh` 这层 wrapper 的额外价值不是“修复本来就会读错库的 mcp_server.py”，而是给 CLI/本地配置一个更稳的默认入口：优先复用仓库 `.env` / `DATABASE_URL`，如果这些都没配，再回退到仓库里的默认 SQLite 路径。
+> `run_memory_palace_mcp_stdio.sh` 这层 wrapper 的额外价值不是“修复本来就会读错库的 mcp_server.py”，而是给 CLI/本地配置一个更稳的默认入口：优先复用仓库 `.env` / `DATABASE_URL`；只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才回退到仓库里的默认 SQLite 路径。如果只存在 `.env.docker`，wrapper 会明确拒绝回退到 `demo.db`，避免把本地 stdio 和 Docker 容器数据混在一起。
 
 > Docker 一键部署走的是第三种方式：不把 key 注入页面，而是在前端代理层自动转发。
 

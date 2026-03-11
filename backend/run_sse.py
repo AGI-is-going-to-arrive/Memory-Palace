@@ -369,7 +369,7 @@ def main():
     app = create_sse_app()
     
     port = int(os.getenv("PORT", 8000))
-    host = os.getenv("HOST", "0.0.0.0")
+    host = os.getenv("HOST", "127.0.0.1")
     
     print(f"Starting SSE Server on http://{host}:{port}")
     print(f"SSE Endpoint: http://{host}:{port}/sse")

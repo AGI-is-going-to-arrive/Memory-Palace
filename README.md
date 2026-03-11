@@ -271,6 +271,17 @@ docker compose -f docker-compose.ghcr.yml pull
 docker compose -f docker-compose.ghcr.yml up -d
 ```
 
+```powershell
+git clone https://github.com/AGI-is-going-to-arrive/Memory-Palace.git
+cd Memory-Palace
+
+Copy-Item .env.example .env.docker
+.\scripts\apply_profile.ps1 -Platform docker -Profile b -Target .env.docker
+
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
 Default access addresses:
 
 | Service | URL |
@@ -285,7 +296,9 @@ Important boundaries:
 - This path solves **Dashboard / API / SSE service startup** only.
 - It does **not** automatically configure `Claude / Codex / Gemini / OpenCode / Cursor / Antigravity` on your machine.
 - If you also want repo-local skill + MCP automation, keep the same checkout and continue with [docs/skills/GETTING_STARTED_EN.md](docs/skills/GETTING_STARTED_EN.md).
-- If you do **not** want the repo-local install path, any MCP client that supports remote SSE can still be configured manually to connect to `http://localhost:3000/sse` with the matching API key / auth header.
+- If you do **not** want the repo-local install path, any MCP client that supports remote SSE can still be configured manually to connect to `http://localhost:3000/sse` with the matching API key / auth header. For this GHCR path, that key normally means the `MCP_API_KEY` written into the freshly generated `.env.docker`.
+- If a Dockerized C / D setup still needs to reach a model service on your host machine, use `host.docker.internal`. The compose files now add `host.docker.internal:host-gateway`, so this path also works on modern Linux Docker instead of only Docker Desktop.
+- Do **not** assume the repo-local stdio wrapper shares container data automatically. `scripts/run_memory_palace_mcp_stdio.sh` needs a local repository `.env` and the local `backend/.venv`; if `.env` is missing while `.env.docker` exists, it refuses to fall back to `demo.db`. In a Docker-only setup, prefer the exposed `/sse` endpoint instead of the repo-local stdio wrapper.
 - Unlike `docker_one_click.sh/.ps1`, the GHCR compose path does **not** auto-adjust ports. If `3000` / `18000` are already occupied, set `MEMORY_PALACE_FRONTEND_PORT` / `MEMORY_PALACE_BACKEND_PORT` yourself before `docker compose up`.
 
 Stop services:
@@ -388,7 +401,7 @@ INFO:     Uvicorn running on http://127.0.0.1:8000
 
 > The `uvicorn main:app --host 127.0.0.1 ...` command above is the recommended **local development** form.
 >
-> If you instead run `python main.py`, the current default is `0.0.0.0:8000`. That is more suitable for LAN / remote direct access, but it also means the service listens on external interfaces. Before using that path, make sure your `MCP_API_KEY`, firewall rules, reverse proxy, or equivalent network-side protections are already in place.
+> If you instead run `python main.py`, the current default is still loopback: `127.0.0.1:8000`. If you actually want LAN / remote direct access, bind it explicitly with `uvicorn main:app --host 0.0.0.0 --port 8000` (or your own listening address) and only do that after your `MCP_API_KEY`, firewall rules, reverse proxy, and equivalent network protections are already in place.
 
 #### Step 4: Start the Frontend
 
@@ -457,9 +470,9 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 >
 > The plain `python mcp_server.py` form assumes you are still using the same `backend/.venv` where you ran `pip install -r requirements.txt`. If you launch MCP from a new terminal or a client config, it is safer to point to the project venv directly. Otherwise the process can fail before startup with errors like `ModuleNotFoundError: No module named 'sqlalchemy'`.
 >
-> If you are wiring MCP into a client config, prefer `scripts/run_memory_palace_mcp_stdio.sh`. Think of it as the safer default entry: it reuses the repository `.env` / `DATABASE_URL` first, and only falls back to the repo's default SQLite path when those are missing. That makes client configs less brittle across terminals and machines.
+> If you are wiring MCP into a client config, prefer `scripts/run_memory_palace_mcp_stdio.sh` for a **local checkout**: it uses the repository `backend/.venv`, reads the repository `.env` first, and only falls back to the repo's default SQLite path when neither `DATABASE_URL` nor `.env` is present. If `.env` is missing but `.env.docker` exists, it now refuses that fallback on purpose because the repo-local stdio wrapper does **not** reuse the container's `/app/data` database path. In a Docker-only setup, connect the client to `/sse` instead of assuming the wrapper will pick up container data.
 >
-> This `HOST=127.0.0.1` example is intentionally loopback-only. If you really need remote access, switch `HOST` to `0.0.0.0` (or your bind address). That opens the listener for remote clients, but it does **not** remove the normal safety requirements — you still need your own API key, firewall, reverse proxy, and transport security controls.
+> `python run_sse.py` also defaults to loopback (`127.0.0.1:8000`) unless you override `HOST` and `PORT`. This `HOST=127.0.0.1` example is intentionally loopback-only. If you really need remote access, switch `HOST` to `0.0.0.0` (or your bind address). That opens the listener for remote clients, but it does **not** remove the normal safety requirements — you still need your own API key, firewall, reverse proxy, and transport security controls.
 
 See [Multi-Client Integration](#-multi-client-integration) for detailed client configuration.
 

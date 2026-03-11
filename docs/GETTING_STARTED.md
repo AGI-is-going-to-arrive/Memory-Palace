@@ -187,7 +187,7 @@ INFO:     Uvicorn running on http://127.0.0.1:8000
 >
 > 上面这条 `uvicorn main:app --host 127.0.0.1 ...` 是推荐的**本机开发**写法。
 >
-> 如果你改为直接运行 `python main.py`，当前默认会绑定 `0.0.0.0:8000`。这更适合局域网 / 远程直连，但也意味着服务会监听到外部网卡。在用这条路径前，请先确认 `MCP_API_KEY`、防火墙、反向代理或其他网络侧保护已经配好。
+> 如果你改为直接运行 `python main.py`，当前默认也是绑定 `127.0.0.1:8000`，不会自动放开到 `0.0.0.0`。只有在你明确需要远程访问时，才手动改成 `0.0.0.0`（或你的实际绑定地址），并补齐 `MCP_API_KEY`、防火墙、反向代理或其他网络侧保护。
 
 ### Step 3：启动前端
 
@@ -248,6 +248,15 @@ docker compose -f docker-compose.ghcr.yml pull
 docker compose -f docker-compose.ghcr.yml up -d
 ```
 
+```powershell
+cd <project-root>
+Copy-Item .env.example .env.docker
+.\scripts\apply_profile.ps1 -Platform docker -Profile b -Target .env.docker
+
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
 默认访问地址：
 
 | 服务 | 地址 |
@@ -262,9 +271,10 @@ docker compose -f docker-compose.ghcr.yml up -d
 - 它解决的是 **Dashboard / API / SSE 服务启动**。
 - 它**不会**自动帮你把本机上的 `skills / MCP / IDE host` 配置一起接好。
 - 如果你还想用当前仓库现成的 repo-local skill + MCP 安装链路，保留这个 checkout，再继续看 `docs/skills/GETTING_STARTED.md`。
-- 如果你不走 repo-local 安装链路，也可以手工把支持远程 SSE 的 MCP 客户端指到 `http://localhost:3000/sse`，并配置同一把 API key / 鉴权头。
+- 如果你不走 repo-local 安装链路，也可以手工把支持远程 SSE 的 MCP 客户端指到 `http://localhost:3000/sse`，并配置同一把 API key / 鉴权头。这里的 `<YOUR_MCP_API_KEY>` 默认就填刚生成的 `.env.docker` 里的 `MCP_API_KEY`。
+- `scripts/run_memory_palace_mcp_stdio.sh` 不是 Docker 客户端入口。它依赖本地 `bash` 和 `backend/.venv`，只会复用本地 `.env` / `DATABASE_URL`；如果仓库里只有 `.env.docker` 而没有本地 `.env`，它会明确拒绝回退到 `demo.db`，并提示改走 Docker 暴露的 `/sse`。
 - 和 `docker_one_click.sh/.ps1` 不同，这条 GHCR compose 路径**不会自动换端口**。如果 `3000` / `18000` 已被占用，请在启动前显式设置 `MEMORY_PALACE_FRONTEND_PORT` / `MEMORY_PALACE_BACKEND_PORT`。
-- 如果容器还要访问**你宿主机上的本地模型服务**，不要把容器侧地址写成 `127.0.0.1`。对容器来说，`127.0.0.1` 指向的是容器自己，不是你的宿主机。优先使用 `host.docker.internal`（或你的实际可达地址）。
+- 如果容器还要访问**你宿主机上的本地模型服务**，不要把容器侧地址写成 `127.0.0.1`。对容器来说，`127.0.0.1` 指向的是容器自己，不是你的宿主机。优先使用 `host.docker.internal`（或你的实际可达地址）。当前 compose 已显式补 `host.docker.internal:host-gateway`，Linux Docker 也能沿这条路径访问宿主机服务。
 
 停止服务：
 
@@ -478,7 +488,7 @@ python mcp_server.py
 >
 > 这里的 `python mcp_server.py` 默认你还在使用 **Step 2 里创建并装好依赖的 `backend/.venv`**。如果你换了一个新终端，或者是在客户端里单独配置本地 MCP，优先直接用项目自己的 `.venv` 解释器。否则会在 MCP 进程真正启动前就报 `ModuleNotFoundError: No module named 'sqlalchemy'` 这类错误。
 >
-> 如果你是在客户端配置里接入 MCP，更推荐直接用 `scripts/run_memory_palace_mcp_stdio.sh`。把它理解成“更稳的默认入口”更准确：它会优先复用当前仓库的 `.env` / `DATABASE_URL`，只有这些都没配时才回退到仓库默认 SQLite 路径，所以在不同终端或不同客户端里更不容易配歪。
+> 如果你是在客户端配置里接入 MCP，更推荐直接用 `scripts/run_memory_palace_mcp_stdio.sh`。但要把边界理解准确：它依赖本地 `bash` 和 `backend/.venv`，优先复用当前仓库的 `.env` / `DATABASE_URL`；只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才会回退到仓库默认 SQLite 路径。若仓库里只有 `.env.docker`，它会明确拒绝回退到 `demo.db`，并提示你改走 Docker 暴露的 `/sse`。
 
 ### 6.2 SSE 模式
 
@@ -487,13 +497,13 @@ cd backend
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
-> `run_sse.py` 这个进程本身会用 `uvicorn` 默认监听 `0.0.0.0:8000`（可通过 `HOST` 和 `PORT` 自定义），SSE 端点路径为 `/sse`。但对 FastMCP 来说，`HOST` 默认仍是 `127.0.0.1`，所以如果你真要给远程客户端接入，请显式设置 `HOST=0.0.0.0`（或你的实际绑定地址），不要把“uvicorn 在监听”误当成“远程客户端天然可用”。SSE 模式仍受 `MCP_API_KEY` 鉴权保护。
+> `run_sse.py` 本地默认就是监听 `127.0.0.1:8000`（可通过 `HOST` 和 `PORT` 自定义），SSE 端点路径为 `/sse`。也就是说，直接运行 `python run_sse.py` 并不会自动绑定到 `0.0.0.0`。只有在你真要给远程客户端接入时，才显式设置 `HOST=0.0.0.0`（或你的实际绑定地址）。SSE 模式仍受 `MCP_API_KEY` 鉴权保护。
 >
 > 同一个 SSE 进程还会提供一个轻量级 `/health` 端点，主要给 Docker / 脚本做就绪检查；真正对 MCP 客户端开放的流式入口仍然是 `/sse`。
 >
 > 上面这条命令故意绑定到 `127.0.0.1`，更适合本机调试。如果你真的需要让其他机器访问，再把 `HOST` 改成 `0.0.0.0`（或你的实际监听地址）。这会让远程客户端可以连上监听地址，但 API Key、反向代理、防火墙和传输层安全仍然要你自己补齐。
 >
-> 如果你使用 Docker 一键部署，SSE 会由独立容器启动，并通过前端代理暴露在 `http://127.0.0.1:3000/sse`。
+> 如果你使用 Docker / Compose，SSE 会由独立容器启动；compose 内部已显式把它的 `HOST` 设为 `0.0.0.0`，再通过前端代理暴露在 `http://127.0.0.1:3000/sse`。
 >
 > 也请把这个 Docker 前端端口当成可信管理入口，而不是“带终端用户鉴权的公网入口”。只要有人能直接访问 `3000`，他就能使用 Dashboard 以及被代理的受保护接口；如果要暴露到受信网络之外，请先加你自己的 VPN、反向代理鉴权或网络访问控制。
 >
@@ -583,6 +593,8 @@ claude mcp add \
   http://127.0.0.1:3000/sse
 ```
 
+> 如果你刚按上面的 GHCR / Docker 路径生成了 `.env.docker`，这里的 `<YOUR_MCP_API_KEY>` 默认就填那个文件里的 `MCP_API_KEY`。
+
 检查：
 
 ```bash
@@ -605,6 +617,8 @@ gemini mcp add \
   memory-palace \
   http://127.0.0.1:3000/sse
 ```
+
+> 如果你刚按上面的 GHCR / Docker 路径生成了 `.env.docker`，这里的 `<YOUR_MCP_API_KEY>` 默认就填那个文件里的 `MCP_API_KEY`。
 
 检查：
 

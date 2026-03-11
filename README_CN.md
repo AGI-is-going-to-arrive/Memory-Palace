@@ -268,6 +268,17 @@ docker compose -f docker-compose.ghcr.yml pull
 docker compose -f docker-compose.ghcr.yml up -d
 ```
 
+```powershell
+git clone https://github.com/AGI-is-going-to-arrive/Memory-Palace.git
+cd Memory-Palace
+
+Copy-Item .env.example .env.docker
+.\scripts\apply_profile.ps1 -Platform docker -Profile b -Target .env.docker
+
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
 默认访问地址：
 
 | 服务 | 地址 |
@@ -282,8 +293,10 @@ docker compose -f docker-compose.ghcr.yml up -d
 - 这条路径解决的是 **Dashboard / API / SSE 服务启动**。
 - 它**不会**自动把 `Claude / Codex / Gemini / OpenCode / Cursor / Antigravity` 这些客户端在你机器上的 skill / MCP 配置一起改好。
 - 如果你还想用当前仓库现成的 repo-local skill + MCP 自动化安装链路，保留这个 checkout，再继续看 [docs/skills/GETTING_STARTED.md](docs/skills/GETTING_STARTED.md)。
-- 如果你不走 repo-local 安装链路，也可以手工把支持远程 SSE 的 MCP 客户端指到 `http://localhost:3000/sse`，并配置同一把 API key / 鉴权头。
+- 如果你不走 repo-local 安装链路，也可以手工把支持远程 SSE 的 MCP 客户端指到 `http://localhost:3000/sse`，并配置同一把 API key / 鉴权头。这里的 `<YOUR_MCP_API_KEY>` 默认就读刚生成的 `.env.docker` 里的 `MCP_API_KEY`。
+- `scripts/run_memory_palace_mcp_stdio.sh` 不是 Docker 客户端入口。它依赖本地 `bash` 和 `backend/.venv`，只会复用本地 `.env` / `DATABASE_URL`；如果仓库里只有 `.env.docker` 而没有本地 `.env`，它会明确拒绝回退到 `demo.db`，并提示改走 Docker 暴露的 `/sse`。
 - 和 `docker_one_click.sh/.ps1` 不同，GHCR compose 路径**不会自动换端口**。如果 `3000` / `18000` 已被占用，请在启动前自己设置 `MEMORY_PALACE_FRONTEND_PORT` / `MEMORY_PALACE_BACKEND_PORT`。
+- 如果容器需要访问你宿主机上的本地模型服务，优先使用 `host.docker.internal`。当前 compose 已显式补 `host.docker.internal:host-gateway`，Linux Docker 也可以沿这条路径访问宿主机服务。
 
 停止服务：
 
@@ -386,7 +399,7 @@ INFO:     Uvicorn running on http://127.0.0.1:8000
 
 > 上面这条 `uvicorn main:app --host 127.0.0.1 ...` 是推荐的**本机开发**写法。
 >
-> 如果你改为直接运行 `python main.py`，当前默认会绑定 `0.0.0.0:8000`。这更适合局域网 / 远程直连，但也意味着服务会监听到外部网卡。在用这条路径前，请先确认 `MCP_API_KEY`、防火墙、反向代理或其他网络侧保护已经配好。
+> 如果你改为直接运行 `python main.py`，当前默认也是绑定 `127.0.0.1:8000`，不会自动放开到 `0.0.0.0`。只有在你明确需要远程访问时，才手动改成 `0.0.0.0`（或你的实际绑定地址），并补齐 `MCP_API_KEY`、防火墙、反向代理或其他网络侧保护。
 
 #### 第 4 步：启动前端
 
@@ -455,9 +468,9 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 >
 > 上面这条 `python mcp_server.py` 默认你还在使用刚才安装依赖的那个 `backend/.venv`。如果你换了一个新终端，或者是在 Claude Code / Codex / OpenCode 这类客户端里配置本地 MCP，优先直接指向项目自己的 `.venv`。否则很容易因为解释器不对，在启动前就报 `ModuleNotFoundError: No module named 'sqlalchemy'`。
 >
-> 如果你要把 MCP 接到客户端配置里，更推荐直接用 `scripts/run_memory_palace_mcp_stdio.sh`。把它理解成“更稳的默认入口”更准确：它会优先复用当前仓库的 `.env` / `DATABASE_URL`，只有这些都没配时才回退到仓库默认 SQLite 路径，所以在不同终端或不同客户端里更不容易配歪。
+> 如果你要把 MCP 接到客户端配置里，更推荐直接用 `scripts/run_memory_palace_mcp_stdio.sh`。但要把边界理解准确：它依赖本地 `bash` 和 `backend/.venv`，优先复用当前仓库的 `.env` / `DATABASE_URL`；只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才会回退到仓库默认 SQLite 路径。若仓库里只有 `.env.docker`，它会明确拒绝回退到 `demo.db`，并提示你改走 Docker 暴露的 `/sse`。
 >
-> 上面这个 `HOST=127.0.0.1` 是**只给本机访问**的写法。真要给远程客户端访问，请改成 `HOST=0.0.0.0`（或你的实际绑定地址）。这一步只是把监听范围放开，**不等于**跳过安全控制；API Key、防火墙、反向代理和传输安全仍然要自己补齐。
+> 上面这个 `HOST=127.0.0.1` 是**只给本机访问**的写法；即使你直接运行 `python run_sse.py`，默认也仍是回环地址。真要给远程客户端访问，请改成 `HOST=0.0.0.0`（或你的实际绑定地址）。这一步只是把监听范围放开，**不等于**跳过安全控制；API Key、防火墙、反向代理和传输安全仍然要自己补齐。
 
 详细的客户端配置请参阅 [多客户端集成](#-多客户端集成)。
 
