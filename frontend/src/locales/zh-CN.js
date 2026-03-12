@@ -265,6 +265,9 @@ const zhCN = {
     priorityPlaceholder: '优先级',
     disclosurePlaceholder: '披露条件',
     storeMemory: '写入记忆',
+    refreshNode: '刷新当前视图',
+    browseScope: '浏览范围',
+    projectNotesRoot: '打开项目记忆目录',
     childFilters: '子节点筛选',
     searchPlaceholder: '搜索路径 / 摘要',
     maxPriorityPlaceholder: '最高优先级（可选）',
@@ -285,6 +288,12 @@ const zhCN = {
     noChildMatches: '当前筛选条件下没有匹配的子记忆。',
     showingChildren: '当前显示 {{shown}} / {{total}} 条子记忆。',
     loadMoreChildren: '再加载 {{count}} 条',
+    domainLabels: {
+      core: '核心',
+      notes: '笔记',
+      writer: '写作',
+      game: '游戏',
+    },
     gistView: '摘要',
     originalView: '原文',
     feedback: {

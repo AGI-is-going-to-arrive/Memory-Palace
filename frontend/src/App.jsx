@@ -20,6 +20,8 @@ import {
 } from './lib/api';
 import { CHINESE_LOCALE, DEFAULT_LOCALE } from './i18n';
 
+const DEFAULT_MEMORY_ROUTE = '/memory?domain=notes&path=projects';
+
 function NavItem({ to, icon: Icon, label }) {
   return (
     <NavLink
@@ -158,7 +160,7 @@ function Layout({ authState, authRevision, onOpenSetup, onClearApiKey }) {
             animate={{ opacity: 1, y: 0 }}
             className="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto rounded-full border border-white/30 bg-white/20 p-1.5 backdrop-blur-xl shadow-[0_8px_32px_rgba(179,133,79,0.05)] scrollbar-hide"
           >
-            <NavItem to="/memory" icon={Database} label={t('app.nav.memory')} />
+            <NavItem to={DEFAULT_MEMORY_ROUTE} icon={Database} label={t('app.nav.memory')} />
             <NavItem to="/review" icon={ShieldCheck} label={t('app.nav.review')} />
             <NavItem to="/maintenance" icon={Feather} label={t('app.nav.maintenance')} />
             <NavItem to="/observability" icon={Eye} label={t('app.nav.observability')} />
@@ -179,12 +181,12 @@ function Layout({ authState, authRevision, onOpenSetup, onClearApiKey }) {
       <div className="relative z-10 flex-1 min-h-0 overflow-hidden px-6 pb-6 pt-2">
         <div className="h-full w-full max-w-7xl mx-auto">
             <Routes key={routesKey}>
-              <Route path="/" element={<Navigate to="/memory" replace />} />
+              <Route path="/" element={<Navigate to={DEFAULT_MEMORY_ROUTE} replace />} />
               <Route path="/review" element={<ReviewPage />} />
               <Route path="/memory" element={<MemoryBrowser />} />
               <Route path="/maintenance" element={<MaintenancePage />} />
               <Route path="/observability" element={<ObservabilityPage />} />
-              <Route path="*" element={<Navigate to="/memory" replace />} />
+              <Route path="*" element={<Navigate to={DEFAULT_MEMORY_ROUTE} replace />} />
             </Routes>
         </div>
       </div>

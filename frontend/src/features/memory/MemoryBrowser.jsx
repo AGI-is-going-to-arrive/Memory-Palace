@@ -13,6 +13,7 @@ import {
   Folder,
   Home,
   Plus,
+  RefreshCw,
   Save,
   Search,
   Sparkles,
@@ -37,6 +38,7 @@ const isAbortError = (error) =>
         error.name === 'CanceledError')
   );
 const CHILD_PAGE_SIZE = 50;
+const BROWSABLE_DOMAINS = ['core', 'notes', 'writer', 'game'];
 
 function CrumbBar({ items, onNavigate }) {
   const { t } = useTranslation();
@@ -102,8 +104,11 @@ export default function MemoryBrowser() {
   const { t } = useTranslation();
   const defaultConversation = t('memory.defaultConversation');
   const [searchParams, setSearchParams] = useSearchParams();
-  const domain = searchParams.get('domain') || 'core';
-  const path = searchParams.get('path') || '';
+  const hasDomainParam = searchParams.has('domain');
+  const hasPathParam = searchParams.has('path');
+  const shouldUseProjectNotesDefault = !hasDomainParam && !hasPathParam;
+  const domain = shouldUseProjectNotesDefault ? 'notes' : (searchParams.get('domain') || 'core');
+  const path = shouldUseProjectNotesDefault ? 'projects' : (searchParams.get('path') || '');
 
   const [loading, setLoading] = useState(true);
   const [errorState, setErrorState] = useState(null);
@@ -132,6 +137,14 @@ export default function MemoryBrowser() {
   const nodeAbortControllerRef = useRef(null);
 
   const isRoot = !path;
+  useEffect(() => {
+    if (!shouldUseProjectNotesDefault) return;
+    const params = new URLSearchParams();
+    params.set('domain', 'notes');
+    params.set('path', 'projects');
+    setSearchParams(params, { replace: true });
+  }, [setSearchParams, shouldUseProjectNotesDefault]);
+
   const error = useMemo(() => {
     if (!errorState) return null;
     return extractApiError(errorState.error, t(errorState.fallbackKey));
@@ -185,6 +198,11 @@ export default function MemoryBrowser() {
       || editPriority !== (data.node.priority ?? 0)
     );
   }, [data.node, editContent, editDisclosure, editPriority, editing, isRoot]);
+  const canAutoRefresh = !hasUnsavedNodeEdit && !editing && !creating && !saving && !deleting;
+  const domainOptions = useMemo(() => {
+    if (BROWSABLE_DOMAINS.includes(domain)) return BROWSABLE_DOMAINS;
+    return [domain, ...BROWSABLE_DOMAINS];
+  }, [domain]);
 
   useEffect(() => {
     if (!hasUnsavedNodeEdit) return undefined;
@@ -197,6 +215,22 @@ export default function MemoryBrowser() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [hasUnsavedNodeEdit]);
+
+  useEffect(() => {
+    if (!canAutoRefresh) return undefined;
+
+    const handleRefreshSignal = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      void refreshNode();
+    };
+
+    window.addEventListener('focus', handleRefreshSignal);
+    document.addEventListener('visibilitychange', handleRefreshSignal);
+    return () => {
+      window.removeEventListener('focus', handleRefreshSignal);
+      document.removeEventListener('visibilitychange', handleRefreshSignal);
+    };
+  }, [canAutoRefresh, refreshNode]);
 
   const navigateTo = (nextPath, nextDomain = domain, { force = false } = {}) => {
     const sameTarget = nextDomain === domain && nextPath === path;
@@ -213,6 +247,14 @@ export default function MemoryBrowser() {
     if (nextPath) params.set('path', nextPath);
     setSearchParams(params);
     return true;
+  };
+
+  const onRefreshNode = async () => {
+    if (hasUnsavedNodeEdit && !window.confirm(t('memory.prompts.discardNodeChanges'))) {
+      return;
+    }
+    setFeedback(null);
+    await refreshNode();
   };
 
   const visibleChildren = useMemo(() => {
@@ -371,10 +413,49 @@ export default function MemoryBrowser() {
               {isRoot ? t('memory.rootTitle') : (data.node?.name || path.split('/').pop())}
             </h1>
           </div>
-          <div className="flex items-center gap-3">
-             <div className="inline-flex items-center gap-2 rounded-full border border-white/40 bg-white/20 px-4 py-1.5 text-xs font-medium text-[color:var(--palace-muted)] backdrop-blur-md shadow-sm">
-              <Sparkles size={13} className="text-[color:var(--palace-accent)]" />
-              {domain}://{path || 'root'}
+          <div className="flex flex-col items-end gap-3">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  void onRefreshNode();
+                }}
+                className="palace-btn-ghost bg-white/50"
+              >
+                <RefreshCw size={14} className={clsx(loading && 'animate-spin')} />
+                {t('memory.refreshNode')}
+              </button>
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/40 bg-white/20 px-4 py-1.5 text-xs font-medium text-[color:var(--palace-muted)] backdrop-blur-md shadow-sm">
+                <Sparkles size={13} className="text-[color:var(--palace-accent)]" />
+                {domain}://{path || 'root'}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[color:var(--palace-muted)]">
+                {t('memory.browseScope')}
+              </span>
+              {domainOptions.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => navigateTo('', option)}
+                  className={clsx(
+                    'rounded-full border px-3 py-1 text-xs font-semibold transition',
+                    option === domain
+                      ? 'border-[color:var(--palace-accent)]/30 bg-[color:var(--palace-accent)]/12 text-[color:var(--palace-accent-2)]'
+                      : 'border-white/40 bg-white/30 text-[color:var(--palace-muted)] hover:bg-white/55 hover:text-[color:var(--palace-ink)]'
+                  )}
+                >
+                  {t(`memory.domainLabels.${option}`)}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => navigateTo('projects', 'notes')}
+                className="rounded-full border border-white/40 bg-white/30 px-3 py-1 text-xs font-semibold text-[color:var(--palace-muted)] transition hover:bg-white/55 hover:text-[color:var(--palace-ink)]"
+              >
+                {t('memory.projectNotesRoot')}
+              </button>
             </div>
           </div>
         </div>

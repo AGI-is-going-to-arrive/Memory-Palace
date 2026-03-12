@@ -265,6 +265,9 @@ const en = {
     priorityPlaceholder: 'Priority',
     disclosurePlaceholder: 'Disclosure',
     storeMemory: 'Store Memory',
+    refreshNode: 'Refresh View',
+    browseScope: 'Browse scope',
+    projectNotesRoot: 'Open project notes',
     childFilters: 'Child Filters',
     searchPlaceholder: 'Search path / snippet',
     maxPriorityPlaceholder: 'Max priority (optional)',
@@ -285,6 +288,12 @@ const en = {
     noChildMatches: 'No child memory matches current filter.',
     showingChildren: 'Showing {{shown}} of {{total}} child memories.',
     loadMoreChildren: 'Load {{count}} more',
+    domainLabels: {
+      core: 'Core',
+      notes: 'Notes',
+      writer: 'Writer',
+      game: 'Game',
+    },
     gistView: 'Gist',
     originalView: 'Original',
     feedback: {

@@ -279,4 +279,42 @@ describe('MemoryBrowser', () => {
 
     expect(await screen.findByText('memory-55')).toBeInTheDocument();
   });
+
+  it('offers visible domain switching and a quick jump to project notes', async () => {
+    const user = userEvent.setup();
+    api.getMemoryNode.mockResolvedValue(ROOT_PAYLOAD);
+
+    renderMemoryBrowser('/memory?domain=core');
+
+    await screen.findByText(i18n.t('memory.rootNodeTitle'));
+
+    await user.click(screen.getByRole('button', { name: i18n.t('memory.domainLabels.notes') }));
+    await waitFor(() => {
+      expect(api.getMemoryNode).toHaveBeenLastCalledWith(
+        { domain: 'notes', path: '' },
+        expect.any(Object)
+      );
+    });
+
+    await user.click(screen.getByRole('button', { name: i18n.t('memory.projectNotesRoot') }));
+    await waitFor(() => {
+      expect(api.getMemoryNode).toHaveBeenLastCalledWith(
+        { domain: 'notes', path: 'projects' },
+        expect.any(Object)
+      );
+    });
+  });
+
+  it('defaults bare /memory to the project notes scope', async () => {
+    api.getMemoryNode.mockResolvedValue(ROOT_PAYLOAD);
+
+    renderMemoryBrowser('/memory');
+
+    await waitFor(() => {
+      expect(api.getMemoryNode).toHaveBeenLastCalledWith(
+        { domain: 'notes', path: 'projects' },
+        expect.any(Object)
+      );
+    });
+  });
 });
